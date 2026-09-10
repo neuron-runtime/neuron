@@ -74,7 +74,5 @@ Thumbs.db
 opencode.json
 AGENTS.md
 .gitignore
-# Local development todo list (kept locally, not tracked in git)
-TODO.md
 # Neuron runtime registration key
 **/.neuron/register.json
