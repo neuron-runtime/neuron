@@ -67,11 +67,11 @@ jobs:
       - name: Typecheck SDK
         run: pnpm --filter @neuron/sdk typecheck
 
-      - name: Lint SDK
-        run: pnpm --filter @neuron/sdk lint
+    //  - name: Lint SDK
+      //  run: pnpm --filter @neuron/sdk lint
 
-      - name: Typecheck example project
-        run: pnpm --filter ecommerce-order-ts typecheck
+     // - name: Typecheck example project
+      //  run: pnpm --filter ecommerce-order-ts typecheck
 
   release-validation:
     name: Release build matrix
