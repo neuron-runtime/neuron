@@ -10,12 +10,6 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Fixes
 
-- [ ] **Long-running execution streams.** `application/connection` uses an `http.Client`
-  ```
-  with a fixed 60s timeout, so an SSE stream for an execution longer than a minute is
-  cut with `context deadline exceeded while reading body`. implement websocket connection and 
-  make the client subscribe to a room and also send structure json data with payload and actions.
-  ```
 - [ ] **API authentication.** N.O.R.E.'s API is unauthenticated and bound to a local socket
   ```
   by default. Define a token-based model before any loopback exposure.
@@ -38,6 +32,11 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Improvements
 
+- [ ] **Real-time Websocket Connection** `application/connection` uses an `http.Client`
+  ```
+  implement websocket connection 
+  with room subscribtions and structure json data.
+  ```
 - [ ] **Execution-history retention policies.** Implement `storage.executionHistory:
   ```
   none | memory | local`; execution semantics must not depend on persistence.
