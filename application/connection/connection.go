@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/coder/websocket"
 )
 
 type Connection interface {
 	Do(ctx context.Context, method, path string, body any, out any) error
 	Stream(ctx context.Context, method, path string, body any, emit func([]byte) error) error
+	OpenWebSocket(ctx context.Context, requestPath string) (*WebSocketStream, error)
 	Health(ctx context.Context) error
 	Close() error
 }
@@ -23,6 +25,7 @@ type Connection interface {
 type Transport interface {
 	Do(ctx context.Context, method, path string, body any, out any) error
 	Stream(ctx context.Context, method, path string, body any, emit func([]byte) error) error
+	OpenWebSocket(ctx context.Context, requestPath string) (*WebSocketStream, error)
 	Close() error
 }
 
@@ -40,6 +43,10 @@ func (c *connection) Do(ctx context.Context, method, path string, body any, out 
 
 func (c *connection) Stream(ctx context.Context, method, path string, body any, emit func([]byte) error) error {
 	return c.transport.Stream(ctx, method, path, body, emit)
+}
+
+func (c *connection) OpenWebSocket(ctx context.Context, requestPath string) (*WebSocketStream, error) {
+	return c.transport.OpenWebSocket(ctx, requestPath)
 }
 
 func (c *connection) Health(ctx context.Context) error {
@@ -174,3 +181,24 @@ func (t *HTTPTransport) Stream(ctx context.Context, method, path string, body an
 }
 
 func (t *HTTPTransport) Close() error { return nil }
+
+// OpenWebSocket establishes a WebSocket session to the given request path. The
+// dial uses the same transport configuration as regular HTTP requests, so a
+// Unix-socket-backed HTTPTransport dials the socket and an HTTP transport
+// dials over the network.
+func (t *HTTPTransport) OpenWebSocket(ctx context.Context, requestPath string) (*WebSocketStream, error) {
+	wsURL, err := toWebSocketURL(t.baseURL, requestPath)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		Subprotocols: []string{"neuron.v1"},
+		HTTPClient:   t.client,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("websocket dial %s: %w", wsURL, err)
+	}
+
+	return &WebSocketStream{conn: conn}, nil
+}

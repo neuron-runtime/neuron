@@ -12,6 +12,7 @@ import (
 
 	"github.com/Muhammad-Jay/neuron/application/client"
 	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/Muhammad-Jay/neuron/application/connection"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/project"
@@ -117,8 +118,45 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// streamEventsAndWait initiates a stream channel to capture execution events in real time until terminal status.
+// streamEventsAndWait streams execution events in real time until the
+// execution reaches a terminal state. It prefers the WebSocket transport and
+// falls back to Server-Sent Events for transports that cannot open a WebSocket
+// session.
 func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID) error {
+	err := c.StreamExecutionEventsWS(ctx, instanceID, executionID, func(evt protocol.StreamEvent) error {
+		printEvent(evt)
+		if isTerminalEvent(evt.Type) {
+			return errExecutionTerminal
+		}
+		return nil
+	})
+
+	switch {
+	case err == nil, errors.Is(err, errExecutionTerminal), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return nil
+	case errors.Is(err, connection.ErrWebSocketUnavailable):
+		return streamEventsAndWaitSSE(ctx, c, instanceID, executionID)
+	default:
+		return err
+	}
+}
+
+// errExecutionTerminal is sent by the streaming callback when the execution
+// reaches a terminal state and the stream can be closed.
+var errExecutionTerminal = errors.New("execution reached terminal state")
+
+func isTerminalEvent(eventType string) bool {
+	switch eventType {
+	case "execution.completed", "execution.failed", "execution.cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+// streamEventsAndWaitSSE is the legacy Server-Sent Events streaming path, kept
+// as a fallback for transports without WebSocket support.
+func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID) error {
 	eventCh := make(chan protocol.StreamEvent, 64)
 	errCh := make(chan error, 1)
 
@@ -143,7 +181,7 @@ func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID strin
 				return nil
 			}
 			printEvent(evt)
-			if evt.Type == "execution.completed" || evt.Type == "execution.failed" || evt.Type == "execution.cancelled" {
+			if isTerminalEvent(evt.Type) {
 				return nil
 			}
 		}

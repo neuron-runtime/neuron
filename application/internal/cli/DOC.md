@@ -127,8 +127,10 @@ simply drops the system into execution.
 be registered first with `neuron register`; running without a prior
 registration stops with a message pointing you to `neuron register`.
 
-By default, `run` streams live execution events as they happen. Pass
-`--detach` to skip the stream and print the execution handles immediately.
+By default, `run` streams live execution events as they happen. Live events
+arrive over the WebSocket endpoint, with a Server-Sent Events fallback when
+WebSocket is unavailable. Pass `--detach` to skip the stream and print the
+execution handles immediately.
 
 ```
 neuron run [flags]

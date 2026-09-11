@@ -11,6 +11,7 @@ import (
 	"net/url"
 
 	"github.com/Muhammad-Jay/neuron/application/connection"
+	wsmessage "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
@@ -185,6 +186,61 @@ func (c *Client) StreamExecutionEvents(ctx context.Context, instanceID string, e
 		}
 		return emit(evt)
 	})
+}
+
+// StreamExecutionEventsWS connects to the WebSocket stream for an execution and
+// calls the emit callback for each StreamEvent received. It subscribes to the
+// execution's room and blocks until the stream ends or the context is
+// cancelled. It returns connection.ErrWebSocketUnavailable when the underlying
+// connection cannot open a WebSocket session.
+func (c *Client) StreamExecutionEventsWS(ctx context.Context, instanceID string, executionID core.ID, emit func(protocol.StreamEvent) error) error {
+	if instanceID == "" {
+		return fmt.Errorf("instance ID is required")
+	}
+	if executionID == "" {
+		return fmt.Errorf("execution ID is required")
+	}
+
+	stream, err := c.conn.OpenWebSocket(ctx, protocol.WebSocketPath)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	room := wsmessage.ExecutionRoom(instanceID, string(executionID))
+	requestID := core.NewID("req_")
+
+	if err := stream.Subscribe(ctx, room, string(requestID)); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		msg, err := stream.Receive(ctx)
+		if err != nil {
+			return err
+		}
+
+		switch msg.Type {
+		case wsmessage.MessageError:
+			if msg.Error != nil {
+				return fmt.Errorf("nore websocket error: %s: %s", msg.Error.Code, msg.Error.Message)
+			}
+		case wsmessage.MessageEvent:
+			var evt protocol.StreamEvent
+			if err := json.Unmarshal(msg.Data, &evt); err != nil {
+				return fmt.Errorf("unmarshal websocket event: %w", err)
+			}
+			if err := emit(evt); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // ListExecutions retrieves all executions recorded for the instance identified

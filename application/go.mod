@@ -5,6 +5,7 @@ go 1.26.5
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/Muhammad-Jay/neuron/shared v0.0.0-20260905200234-63564fa7a003
+	github.com/coder/websocket v1.8.15
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -13,7 +13,7 @@ The following surface is implemented, tested, and intended to work in 0.1.0.
 - Project authoring and registration:
   - `neuron init` — scaffold a project
   - `neuron register` — build, compile, resolve modules, and register with N.O.R.E.
-  - `neuron run` — create an instance and execute, streaming live events
+  - `neuron run` — create an instance and execute, streaming live events (WebSocket, with an SSE fallback)
   - `neuron add` / `neuron remove` — install / uninstall external module packages
   - `neuron executor list` / `neuron executor inspect [name@version]` — manage installed modules
   - `neuron instance list` / `remove` / `clear` — manage instances and their executions
@@ -32,7 +32,7 @@ The following surface is implemented, tested, and intended to work in 0.1.0.
 - Registration of compiled systems with a frozen, resolved module set.
 - Instances: create, list, remove, clear; restoration of persisted instances on restart.
 - Execution: planning, scheduling, connector mappings and validations (CEL), cancellation, deadlines, and terminal execution states.
-- Event streaming: live execution events streamed to the client; events persisted.
+- Event streaming: live execution events streamed to the client over WebSocket (`/v1/ws`), with a Server-Sent Events fallback; events persisted.
 - Built-in modules run in-process inside N.O.R.E. (no installation required).
 - External modules hosted out-of-process:
   - **Process runtime** — long-lived native worker processes over the executor protocol.

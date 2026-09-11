@@ -26,6 +26,8 @@ Readers in a hurry can start with [The core idea](#the-core-idea), [The canonica
 
 ---
 
+
+
 ## The core idea
 
 Modern software is usually assembled from applications, services, workers, libraries, queues, databases, APIs, and infrastructure. As systems grow, the hard part stops being any individual component and becomes making all of them work together as one coherent system.
@@ -36,19 +38,23 @@ Neuron's answer is to stop making the runtime understand what a component *is* a
 
 This leads to a deliberately small set of primitives:
 
-| Primitive | Meaning |
-| --------- | ------- |
-| **System** | A definition — what capabilities exist and how they are connected |
-| **Module** | An executable capability packaged for Neuron (a Service, or the Executor that runs one) |
-| **Service** | The logical capability — what can be done |
-| **Executor** | The machinery that provides the capability — how it is run |
-| **Connector** | How two capabilities communicate |
-| **Instance** | A living realization of a System, with its own state and activity |
-| **N.O.R.E.** | The runtime engine — where Systems are registered, instantiated, and executed |
+
+| Primitive     | Meaning                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------- |
+| **System**    | A definition — what capabilities exist and how they are connected                       |
+| **Module**    | An executable capability packaged for Neuron (a Service, or the Executor that runs one) |
+| **Service**   | The logical capability — what can be done                                               |
+| **Executor**  | The machinery that provides the capability — how it is run                              |
+| **Connector** | How two capabilities communicate                                                        |
+| **Instance**  | A living realization of a System, with its own state and activity                       |
+| **N.O.R.E.**  | The runtime engine — where Systems are registered, instantiated, and executed           |
+
 
 The separation between Service and Executor is the load-bearing wall. It is what lets Neuron host capabilities implemented in any technology without turning the core into a collection of special cases: the Service stays logical, the Executor stays mechanical, and the runtime only ever sees the executor boundary.
 
 ---
+
+
 
 ## Design goals
 
@@ -66,6 +72,8 @@ In priority order:
 10. **Documentation** — intent and constraints are explained where they matter.
 
 ---
+
+
 
 ## The canonical pipeline
 
@@ -92,6 +100,8 @@ Runtime
 Nothing downstream of the **canonical manifest** knows how a system was authored. YAML systems and TypeScript systems produce the same manifest, compile through the same compiler, and run on the same runtime.
 
 ---
+
+
 
 ## What lives where
 
@@ -126,6 +136,8 @@ examples/simple_response
 The version reported by `neuron version` and `nore --version` comes from a single source, `shared/version`, stamped at build time via `-ldflags`.
 
 ---
+
+
 
 ## System definition
 
@@ -174,7 +186,11 @@ Execution flows along the connectors. Each connector defines what data flows bet
 
 ---
 
+
+
 ## Authoring surfaces
+
+
 
 ### YAML
 
@@ -199,6 +215,8 @@ export default new System("order-processing")
 The SDK is a **definition tool**. It describes systems; it does not execute them, and it must never become a runtime. The Go side remains responsible for parsing, validating, compiling, and running the canonical representation.
 
 ---
+
+
 
 ## Building & loading
 
@@ -226,6 +244,8 @@ The validator and compiler are language-agnostic: they consume and emit canonica
 
 ---
 
+
+
 ## The compiler boundary
 
 The compiler transforms the canonical manifest into the runtime/core structures N.O.R.E. consumes.
@@ -239,6 +259,8 @@ The compiler MUST remain source-language agnostic and MUST NOT:
 Those responsibilities belong to their own layers. The compiler is pure transformation: canonical manifest in, core system out.
 
 ---
+
+
 
 ## The module & executor model
 
@@ -278,13 +300,15 @@ Built-in modules are the exception that proves the rule: they run in-process ins
 
 ---
 
+
+
 ## N.O.R.E. — the runtime engine
 
 **N.O.R.E. (Neuron Operational Runtime Engine)** is the daemon that registers systems, creates instances, executes them, and persists their records.
 
 ```text
 N.O.R.E.
-├── API (HTTP/JSON over Unix socket — TCP opt-in)
+├── API (HTTP/JSON over Unix socket — TCP opt-in; WebSocket for live event streaming)
 ├── Instance Manager       live instances, their restoration and lifecycle
 ├── Execution Engine       planner/compiler, scheduler, executor engine
 ├── Event Bus              the single source of truth for state transitions
@@ -311,7 +335,7 @@ A System definition is static. An **Instance** is a living realization with its 
 ```text
 register system → create instance → plan execution → schedule over event bus
    → execute services through the executor runtimes → terminal execution state
-   → events streamed to the client and retained per storage policy
+   → events streamed to the client over WebSocket (SSE fallback) and retained per storage policy
 ```
 
 Instances survive runtime restarts: on startup, N.O.R.E. restores persisted instances and their in-flight executions from storage.
@@ -321,6 +345,8 @@ Instances survive runtime restarts: on startup, N.O.R.E. restores persisted inst
 On `SIGINT`/`SIGTERM`, N.O.R.E. closes listeners and **gracefully stops live instances** before exiting, so executor-backed resources (worker processes, WASM modules) receive a clean shutdown.
 
 ---
+
+
 
 ## The executor protocol
 
@@ -337,6 +363,8 @@ The transport detail lives behind the executor runtime abstraction, which is why
 
 ---
 
+
+
 ## Persistence
 
 N.O.R.E. persists registered systems, instances, executions, and the event log through a small storage provider interface (`storage.Store`), implemented today by SQLite under the configured data directory (`~/.neuron/nore`).
@@ -347,6 +375,8 @@ Execution history and retention are intended to become a **configurable storage 
 
 ---
 
+
+
 ## Security & isolation
 
 - **Default transport is local.** N.O.R.E. listens on a Unix socket (mode `0600`) owned by the local user. TCP is opt-in and the API is unauthenticated — exposing it over an untrusted network is unsupported.
@@ -356,15 +386,19 @@ Execution history and retention are intended to become a **configurable storage 
 
 ---
 
+
+
 ## Performance principles
 
 - Concurrency is bounded by an executor worker pool; long-lived workers are reused across requests rather than respawned per call.
 - Resolution prefers already-installed artifacts, so instance execution stays local and offline once modules are in the store.
-- Optimization follows measurement, not assumption — see [docs/RUNTIME.md](./RUNTIME.md).
+- Optimization follows measurement, not assumption, see [docs/RUNTIME.md](./RUNTIME.md).
 
 Do not prematurely introduce distributed infrastructure; the local model is the base case, and distribution is an explicit, incremental option.
 
 ---
+
+
 
 ## Governance
 
@@ -380,6 +414,8 @@ If no answer is sound, the change does not happen yet.
 
 ---
 
+
+
 ## Related
 
 - [docs/MODULES.md](./MODULES.md) — the unified module model in detail
@@ -388,3 +424,4 @@ If no answer is sound, the change does not happen yet.
 - [nore/README.md](../nore/README.md) — the runtime engine reference (maintainer-focused)
 - [packages/sdk/README.md](../packages/sdk/README.md) — the TypeScript SDK
 - [AGENTS.md](../AGENTS.md) — the engineering contract
+

@@ -110,7 +110,8 @@ start
       ├── GET  /v1/instances/{id}/executions           list executions
       ├── GET  /v1/instances/{id}/executions/{execID}  execution state
       ├── GET  /v1/instances/{id}/executions/{execID}/events        list events
-      ├── GET  /v1/instances/{id}/executions/{execID}/events/stream stream events
+      ├── GET  /v1/instances/{id}/executions/{execID}/events/stream stream events (Server-Sent Events)
+      ├── WS   /v1/ws                 WebSocket endpoint for live event streaming
       └── ...                        (curl the API for the full shape)
 stop
   ├── close listeners
@@ -120,7 +121,9 @@ stop
 
 ### Execution
 
-When an Instance is created, the planner compiles the registered System into an execution plan over the event bus. The scheduler advances the execution across the System's services and connectors, evaluates mappings and validations through the CEL resolver, and drives service executions through the executor layer. Every transition emits an event (started, completed, failed, cancelled); events are streamed to the client and persisted according to storage policy.
+When an Instance is created, the planner compiles the registered System into an execution plan over the event bus. The scheduler advances the execution across the System's services and connectors, evaluates mappings and validations through the CEL resolver, and drives service executions through the executor layer. Every transition emits an event (started, completed, failed, cancelled); events are streamed to clients and persisted according to storage policy.
+
+Live events are streamed over the WebSocket endpoint (`WS /v1/ws`); the SSE stream (`GET .../events/stream`) remains available for transports without WebSocket support.
 
 Executions honor deadlines, support cancellation, and finish in a terminal state (`execution.completed`, `execution.failed`, `execution.cancelled`).
 

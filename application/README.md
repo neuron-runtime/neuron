@@ -58,6 +58,8 @@ The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. W
 
 The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
 
+Regular requests are JSON over HTTP. Live execution events are streamed over the WebSocket endpoint (`/v1/ws`), with a Server-Sent Events fallback for transports without WebSocket support.
+
 ---
 
 
@@ -170,7 +172,7 @@ Flags:
   -v, --verbose        Enable verbose output to display event payloads
 ```
 
-`neuron run` loads the registration key stored by `neuron register`, asks N.O.R.E. to create an instance and execute the system, and streams live execution events back to the terminal.
+`neuron run` loads the registration key stored by `neuron register`, asks N.O.R.E. to create an instance and execute the system, and streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
 
 ```bash
 # Run the registered system with no input, streaming events
