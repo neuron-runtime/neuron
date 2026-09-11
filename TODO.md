@@ -1,7 +1,7 @@
 # TODO
 
 Personal development checklist for Neuron. This file is intentionally **not tracked in git**
-(it is listed in `.gitignore`) — it is a working todo list, not documentation.
+(it is listed in `.gitignore`) it is a working todo list, not documentation.
 
 Tick items off as they are completed. Group by type: **Fixes**, **Improvements**,
 **Distribution**, **Documentation**.
@@ -32,7 +32,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Improvements
 
-- [ ] **Real-time Websocket Connection** `application/connection` uses an `http.Client`
+- [x] **Real-time Websocket Connection** `application/connection` uses an `http.Client`
   ```
   implement websocket connection 
   with room subscribtions and structure json data.
