@@ -1,179 +1,196 @@
-# @neuron/sdk
+# `@neuron/sdk`
 
-A TypeScript SDK for **declaratively defining composable, executable systems**. You describe services, their inputs and outputs, how they connect, and the overall flow of execution — the SDK compiles that description into a portable, JSON-serializable **manifest** that an execution engine later runs.
+A TypeScript SDK for defining **typed, composable Neuron systems** — describe capabilities, their contracts, and how they connect. The SDK compiles everything into a portable JSON **manifest** that the Neuron compiler and runtime consume.
 
-The SDK is a **definition layer**, not a runtime. It produces a manifest that describes *what* your system does; the actual execution is handled by whatever runtime consumes the manifest.
+```mermaid
+flowchart LR
+    A[TypeScript<br/>define services, contracts, connections] --> B[@neuron/sdk]
+    B --> C[SystemManifest<br/>canonical JSON]
+    C --> D[neuron compiler]
+    D --> E[N.O.R.E. runtime]
+```
 
-## Installation
+> [!IMPORTANT]
+> The SDK defines systems. It does not execute them.
+> The manifest it produces is consumed by the Neuron compiler and runtime.
+
+[![Version](https://img.shields.io/badge/version-0.1.0-3178C6?style=flat-square)](https://github.com/Muhammad-Jay/neuron/releases)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)](https://www.typescriptlang.org)
+[![License](https://img.shields.io/badge/license-MIT-18181B?style=flat-square)](../../LICENSE)
+
+---
+
+## Quick install
 
 ```bash
 pnpm add @neuron/sdk
 ```
 
-## Quick Start
+---
 
-The smallest complete system:
+## The scenario
 
-```ts
-import { Service, System } from "@neuron/sdk";
+Throughout this guide, a single production scenario illustrates every SDK feature: **marketplace order fulfillment**.
 
-const hello = Service({ name: "hello" })
-  .executor({ name: "set" });
-
-const manifest = System({
-  name: "my-system",
-  version: "1.0.0",
-})
-  .run(hello)
-  .toManifest();
-
-console.log(JSON.stringify(manifest, null, 2));
+```mermaid
+flowchart LR
+    A[Order received] --> B[order.validate]
+    B --> C[payment.authorize]
+    C -->|amount >= threshold| D[fulfillment.create-shipment]
+    C -.->|below threshold| X[Rejected]
+    D --> E[confirmation.send]
 ```
 
-`toManifest()` throws if the system is missing a version, has no definition, or references a service that was never defined.
+Six capabilities, typed contracts, a conditional guard, and a final manifest. By the end of this guide you will have defined the entire pipeline.
 
-## Core Concepts
+---
 
-### Service
+## Define a capability
 
-A `Service` is a unit of work. It has an **identity** (name, version, optional description), an **executor** (what will actually run it), and — optionally — typed **input/output contracts**.
+A `Service` is a named unit of work. Every service has an **identity**, an **executor** (the machinery that runs it), and typed **input/output contracts**.
 
 ```ts
 import { Service } from "@neuron/sdk";
 
 const validateOrder = Service({
-  name: "validate-order",
+  name: "order.validate",
   version: "1.0.0",
-  description: "Validate incoming order request",
-}).executor({ name: "example:echo" });
-```
-
-#### Identity
-
-Declare the service's name, version, and description once, up front:
-
-```ts
-Service({
-  name: "http.get",
-  version: "1.0.0",
-  description: "Fetch a resource over HTTP",
+  description: "Validate an incoming order before processing",
 })
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order }>()
+  .outputSchema<{ order: Order }>();
 ```
 
-#### Executor
+| Field | Purpose |
+| --- | --- |
+| `name` | Logical identity — the name services, connectors, and the system reference |
+| `version` | Semver version — tracked in the manifest and frozen into registrations |
+| `description` | Human-readable purpose (optional, for documentation and registries) |
 
-An executor is what actually runs the service. By default, the executor name equals the service name, with version `latest` and a local registry:
+---
 
-```ts
-// Default: executor is { name: "http.get", version: "latest", registry: "local" }
-Service({ name: "http.get" })
-```
+## Contracts — what goes in and out
 
-Override the executor explicitly when you need a specific one:
+Contracts tell TypeScript exactly what a service accepts and produces. Two approaches are available, and you can mix them freely.
 
-```ts
-Service({ name: "github.read" }).executor({
-  name: "http.get",
-  version: "^1.2.0",
-  registry: "official",
-})
-```
+### Typed contracts (generic form)
 
-#### Input and output contracts
-
-You can declare typed contracts, which give you full IDE type-safety (autocomplete, type-checked binding, instant errors for wrong field names or types):
+The preferred approach for TypeScript: the contract is a TypeScript type. Autocomplete, wrong-field errors, and type mismatches are caught at compile time.
 
 ```ts
-interface GitHubReadInput {
-  owner: string;
-  repository: string;
-  path: string;
-}
+type Order = {
+  id: string;
+  customerId: string;
+  customerEmail: string;
+  currency: string;
+  totalCents: number;
+  items: { sku: string; name: string; qty: number; priceCents: number }[];
+  shippingAddress: { street: string; city: string; zip: string };
+};
 
-interface GitHubReadOutput {
-  content: string;
-  path: string;
-  sha: string;
-}
-
-const githubRead = Service({
-  name: "github.read",
+const validateOrder = Service({
+  name: "order.validate",
   version: "1.0.0",
 })
-  .inputSchema<GitHubReadInput>()
-  .outputSchema<GitHubReadOutput>();
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order }>()
+  .outputSchema<{ order: Order }>();
 ```
 
-You can also describe contracts with runtime validation rules, which also populate the manifest:
+The generic form produces type-safe expressions everywhere: `validateOrder.output.order` is fully typed, and referencing a field that doesn't exist is a compile error.
+
+### Runtime schema builders
+
+For cases where runtime validation rules are needed — maximum lengths, required fields, format constraints — the SDK provides builder functions:
 
 ```ts
 import { string, number, boolean } from "@neuron/sdk";
 
-const createUser = Service({ name: "user.create" }).inputSchema({
-  email: string().email().required(),
-  age: number().min(18).max(120),
+const authorizePayment = Service({
+  name: "payment.authorize",
+  version: "1.0.0",
+}).inputSchema({
+  orderId: string().required(),
+  amountCents: number().min(1),
+  currency: string().required(),
 }).outputSchema({
-  id: string().required(),
-  active: boolean(),
+  authorizationId: string().required(),
+  approved: boolean(),
 });
 ```
 
-### Expressions
+Runtime rules are encoded into the manifest alongside the structural schema, giving the runtime validation information it can enforce before execution.
 
-The SDK exposes a typed, proxy-backed expression system for referring to a service's output or input fields, and for building conditions.
+> [!NOTE]
+> You cannot mix the generic form and the builder form for the same service. Choose the form that best fits the service's contract.
 
-#### Referencing output fields
+---
 
-```ts
-githubRead.output.content   // Expression<string>
-githubRead.output.sha       // Expression<string>
-githubRead.output.metadata.size  // Expression<number>
-```
+## Expressions — referencing data across services
 
-Autocomplete lists exactly the declared output fields — nothing else. Referencing an unknown field is an IDE error.
+When services are composed, data flows between them. Expressions provide a typed, safe way to reference any field in a service's output or input without constructing raw strings.
 
 ```ts
-// @ts-expect-error — fileData is not a declared output
-githubRead.output.fileData
+validateOrder.output.order          // Expression<Order>
+validateOrder.output.order.id       // Expression<string>
+authorizePayment.output.approved    // Expression<boolean>
 ```
 
-#### Conditions
+Autocomplete shows exactly the declared output fields. Referencing an unknown field is a compile error:
+
+```ts
+// @ts-expect-error — `nonExistent` is not a declared output
+validateOrder.output.nonExistent
+```
+
+### Conditions
 
 Expressions carry comparison operators that build guard conditions:
 
 ```ts
 import { type Expression } from "@neuron/sdk";
 
-const ready: Expression<boolean> =
-  authorizePayment.output.paymentIntent.status.equals("requires_capture");
+const approved: Expression<boolean> =
+  authorizePayment.output.approved.equals(true);
 
-const valid: Expression<boolean> =
-  githubRead.output.content.notEquals("");
+const thresholdMet: Expression<boolean> =
+  authorizePayment.output.amountCents.greaterThanOrEqualTo(1000);
 ```
 
 Available operators: `equals`, `notEquals`, `greaterThan`, `greaterThanOrEqualTo`, `lessThan`, `lessThanOrEqualTo`, `and`, `or`.
 
-### Binding input
+---
 
-**`withInput()`** binds a service's input fields to values or expressions. It is the primary way to feed data into a service.
+## Binding input to a service
 
-#### Automatic style — pass expressions of a previous service's output
+`.withInput()` binds a service's input fields to values, expressions, or a connection. It is the primary way to feed data into a service.
+
+### Automatic binding with expressions
+
+Map another service's output fields to this service's input:
 
 ```ts
-analyzeContent.withInput({
-  content: githubRead.output.content,
-  path: githubRead.output.path,
+authorizePayment.withInput({
+  order: validateOrder.output.order,
+  amountCents: validateOrder.output.order.totalCents,
+  currency: validateOrder.output.order.currency,
 });
 ```
 
-TypeScript checks every binding against the target's input schema. Wrong field names and wrong types are IDE errors:
+Every binding is checked against the target's input schema at compile time — wrong field names and wrong types are caught before you run anything:
 
 ```ts
-// @ts-expect-error — sha is string but path expects a different type
-analyzeContent.withInput({ content: githubRead.output.sha });
+// @ts-expect-error — currency is string, but orderId expects string +
+// the expression resolves to a different string type mismatch
+authorizePayment.withInput({
+  orderId: validateOrder.output.order.totalCents, // number, not string
+});
 ```
 
-#### Literal values
+### Literal values
+
+Bindings can include static values alongside expressions:
 
 ```ts
 githubRead.withInput({
@@ -183,167 +200,237 @@ githubRead.withInput({
 });
 ```
 
-### Chaining services: `.next()`
+---
 
-**`.next()`** wires a service to the next one, producing a sequence. The original `ServiceDefinition` is used to start a chain, and the chain can continue with `.next()` on each step.
+## Composing services — `.next()`
+
+`.next()` wires one service to the next, producing a linear pipeline. Chain as many steps as needed:
 
 ```ts
-const pipeline = githubRead
+const pipeline = validateOrder
+  .withInput({ order: systemInput.order })
   .next(
-    analyzeContent.withInput({
-      content: githubRead.output.content,
-      path: githubRead.output.path,
+    authorizePayment.withInput({
+      order: validateOrder.output.order,
+      amountCents: validateOrder.output.order.totalCents,
+      currency: validateOrder.output.order.currency,
     })
   )
-  .next(saveResult);
-```
-
-#### Guard conditions
-
-The second argument to `.next()` declares a condition that must hold before the next step runs:
-
-```ts
-authorizePayment
   .next(
     capturePayment.withInput({
-      paymentIntentId: authorizePayment.output.paymentIntent.id,
-    }),
-    {
-      when: authorizePayment.output.paymentIntent.status.equals("requires_capture"),
-      message: "Payment not authorized",
-    }
-  )
+      order: authorizePayment.output.order,
+      amountCents: authorizePayment.output.amountCents,
+    })
+  );
 ```
 
-### Explicit mapping: `.connect()`
+### Guard conditions
 
-When automatic field-by-field binding isn't enough (different field names, transformations, or referencing a source that isn't a direct previous step), use **`.connect()`** to define an explicit mapping from a source output to the target's input.
-
-`.connect()` is fully typed: the callback receives the source output, and the returned object is checked against the target's input schema.
+The second argument to `.next()` is an optional guard. The next step runs **only when the condition holds**. If it fails, a controlled failure is recorded with the given message:
 
 ```ts
-const githubToAnalyzer = analyzeContent.connect<GitHubReadOutput>((source) => ({
-  content: source.output.content,
-  path: source.output.path,
-}));
+authorizePayment.next(
+  capturePayment.withInput({
+    order: authorizePayment.output.order,
+    amountCents: authorizePayment.output.amountCents,
+  }),
+  {
+    when: authorizePayment.output.amountCents.greaterThanOrEqualTo(1000),
+    message: "Payment below authorization threshold",
+  }
+);
 ```
 
-You can then pass the connection to `.next()` or into another service's `.withInput()`.
+Guard conditions are compiled into the manifest's connector validation rules, and evaluated at runtime by the CEL resolver.
 
-Referencing a field that doesn't exist on the source is an IDE error:
+---
 
-```ts
-analyzeContent.connect<GitHubReadOutput>((source) => ({
-  // @ts-expect-error — source output has no fileData
-  content: source.output.fileData,
-  path: source.output.path,
-}));
-```
+## Explicit mapping — `.connect()`
 
-### Execution settings
+When automatic field-by-field binding isn't enough — different field names, a transformation, or referencing a source that isn't the direct previous step — use `.connect()` to define an explicit mapping.
 
-**`.executionConfig()`** applies runtime execution policy to a specific invocation:
+`.connect()` is fully typed: the callback receives the source output, and the returned object is checked against the target's input schema:
 
 ```ts
-githubRead
-  .withInput({ owner: "openai", repository: "neuron", path: "README.md" })
-  .executionConfig({
-    timeout: "30s",
-    retries: 2,
+import { connect } from "@neuron/sdk";
+
+// Map a GitHub-read output to an analyzer's expected input shape
+const githubToAnalyzer = connect<GitHubReadOutput, AnalyzeInput>(
+  (source) => ({
+    content: source.output.content,
+    path: source.output.path,
+    region: "us-east-1", // literal value
   })
+);
+
+analyzeContent.withInput(githubToAnalyzer);
 ```
 
-Supported options: `mode` (`"wait" | "detach"`), `timeout`, `retries`, `concurrency`, `continueOnFail`.
+You can pass the connection directly to `.next()`:
 
-> Execution config is the **same shape for every service** — it describes runtime policy (timeouts, retries, concurrency), not service-specific business config.
+```ts
+githubRead.next(analyzeContent.withInput(githubToAnalyzer));
+```
 
-### Parallel composition
+### Adding conditions to a connection
 
-**`Parallel()`** runs multiple branches concurrently. The parallel node completes when all branches complete:
+Connections support `.when()` for conditional logic — useful when a filter should gate an entire mapping:
+
+```ts
+import { connect } from "@neuron/sdk";
+
+const verifiedOnly = connect<{ verified: boolean; id: string }, { id: string }>(
+  (src) => ({ id: src.output.id })
+).when(src.output.verified.equals(true), "User not verified");
+
+saveUser.withInput(verifiedOnly);
+```
+
+Reference a field that doesn't exist on the source and TypeScript catches it:
+
+```ts
+connect<{ id: string }, { content: string }>((source) => ({
+  // @ts-expect-error — source output has no `content` field
+  content: source.output.content,
+}));
+```
+
+---
+
+## Parallel execution — `Parallel()`
+
+`Parallel()` runs multiple branches concurrently. The parallel node completes when all branches complete:
 
 ```ts
 import { Parallel } from "@neuron/sdk";
 
-verify
-  .next(
-    Parallel(
-      saveCustomer.withInput({ ... }),
-      sendEmail.withInput({ ... }),
-      updateAnalytics.withInput({ ... })
-    )
-  )
-  .next(finish);
+const notify = Parallel(
+  sendReceipt.withInput({ email: order.output.customerEmail }),
+  updateCrm.withInput({ customerId: order.output.customerId })
+);
+
+order.next(notify);
 ```
 
-### System
+The manifest produces a parallel composition node with each branch wired to the preceding step:
 
-A `System` aggregates a root composition and compiles it into a manifest. Services referenced in the tree are **auto-discovered** — there is no manual registration.
+```mermaid
+flowchart LR
+    A[order.validate] --> B[sendReceipt]
+    A --> C[updateCrm]
+    B & C --> D[execution continues]
+```
+
+Branches reference the same preceding step's output — the source is shared across all branches.
+
+---
+
+## The system — composing the full pipeline
+
+A `System` ties everything together. It declares the system's identity, an optional typed input contract, and the service composition:
 
 ```ts
 import { System } from "@neuron/sdk";
 
-const system = System({
-  name: "order-processing",
+const manifest = System({
+  name: "order-fulfillment",
   version: "1.0.0",
-  description: "Order processing pipeline",
-});
-
-const manifest = system
-  .inputSchema<SystemInput>()
-  .run(pipeline)
-  .toManifest();
-```
-
-`toManifest()` walks the composition tree, collects every service definition, derives the connections between services, and produces the final `SystemManifest`. If a service is referenced in the tree but never defined, it throws.
-
-#### Typed system input with `.withParams()`
-
-Bind the system's execution input to the very first service in the chain:
-
-```ts
-System({ name: "order-processing", version: "1.0.0" })
-  .inputSchema<SystemInput>()
+  description: "Validate, authorize, and fulfill customer orders",
+})
+  .inputSchema<{ order: Order }>()
   .withParams((input) =>
-    validateOrder.withInput({
-      order: input.order,
-    })
+    validateOrder
+      .withInput({ order: input.order })
+      .next(
+        authorizePayment.withInput({
+          order: validateOrder.output.order,
+          amountCents: validateOrder.output.order.totalCents,
+          currency: validateOrder.output.order.currency,
+        })
+      )
+      .next(
+        createShipment.withInput({
+          order: authorizePayment.output.order,
+        }),
+        {
+          when: authorizePayment.output.amountCents.greaterThanOrEqualTo(1000),
+          message: "Payment authorization threshold not met",
+        }
+      )
+      .next(
+        sendConfirmation.withInput({
+          order: createShipment.output.order,
+          email: createShipment.output.order.customerEmail,
+        })
+      )
   )
   .toManifest();
+
+export default manifest;
 ```
 
-## The Manifest
+### `.withParams()` vs `.run()`
 
-`toManifest()` produces this shape:
+| Method | Use when |
+| --- | --- |
+| `.withParams((input) => ...)` | The system receives typed input that feeds into the first service |
+| `.run(firstService.withInput({...}))` | The first service has all its inputs resolved at build time (no runtime input) |
 
-```ts
-interface SystemManifest {
-  apiVersion: "neuron/v1";
-  kind: "System";
-  metadata: { name: string; version: string; description?: string };
-  services: ServiceManifest[];
-  inputs?: PortManifest[];
-  connectors: ConnectorManifest[];
-  definition: CompositionManifest;
+`.withParams()` calls `.run()` internally — the difference is purely ergonomic. The `input` parameter is typed by the preceding `.inputSchema<T>()` and compiled into `execution.input` references in the manifest.
+
+---
+
+## What `toManifest()` produces
+
+`toManifest()` walks the composition tree, collects every service definition, derives the connectors between them, and produces the final manifest:
+
+```json
+{
+  "apiVersion": "neuron/v1",
+  "kind": "System",
+  "metadata": {
+    "name": "order-fulfillment",
+    "version": "1.0.0",
+    "description": "Validate, authorize, and fulfill customer orders"
+  },
+  "services": [
+    { "name": "order.validate", "version": "1.0.0", "executor": { "name": "neuron:core:set" }, "inputs": [...], "outputs": [...] },
+    { "name": "payment.authorize", "version": "1.0.0", "executor": { "name": "neuron:core:set" }, "inputs": [...], "outputs": [...] }
+  ],
+  "connectors": [
+    { "from": "order.validate", "to": "payment.authorize", "mappings": [...], "validations": [...] }
+  ],
+  "definition": {
+    "kind": "sequence",
+    "steps": [...]
+  }
 }
 ```
 
-- **`services`** — every service definition in the system (identity, executor, contracts).
-- **`connectors`** — the derived connections between services, including field mappings and guard conditions. You don't author this list directly; the SDK derives it from `.next()` / `.withInput()` / `.connect()`.
-- **`definition`** — the composition tree (`service` / `sequence` / `parallel`).
+| Field | What it contains |
+| --- | --- |
+| `services` | Every service definition — identity, executor, contracts, validation rules |
+| `connectors` | Derived connections — field mappings and guard conditions between services |
+| `definition` | The composition tree: `sequence` for chains, `parallel` for concurrent branches |
 
-## CLI
+> [!NOTE]
+> You never author `connectors` directly. The SDK derives them from `.next()`, `.withInput()`, and `.connect()` calls.
 
-The SDK ships a small CLI (`neuron-sdk`) to compile a project's entry into a manifest.
+---
+
+## The CLI
+
+The SDK ships a small CLI to build your project into a manifest:
 
 ```bash
-neuron-sdk build
+npx neuron-sdk build
 ```
 
-It looks for a `neuron.config.ts` (or `.js` / `.mjs`) and uses the `entry` (default `index.ts`) as the manifest source. The import must default-export the compiled manifest. The resulting JSON is written to `.neuron/manifest.json`.
+This compiles the entry file (default `index.ts`, configurable in `neuron.config.ts`) and writes the manifest to `.neuron/manifest.json`.
 
 ```bash
-neuron-sdk version   # print the SDK version
-neuron-sdk help      # show usage
+npx neuron-sdk version   # print the SDK version
+npx neuron-sdk help      # show usage
 ```
 
 ### Configuration
@@ -357,16 +444,27 @@ export default defineConfig({
 });
 ```
 
-## Package Exports
+The `entry` must default-export the compiled manifest from `System(...).toManifest()`.
 
-Public API re-exported from `@neuron/sdk`:
+---
 
-- **Factories:** `Service`, `System`, `Parallel`, `connect`, `defineConfig`
-- **Schema builders:** `string`, `number`, `boolean`, `list`, `record`
-- **Types:** `ServiceDefinition`, `SystemDefinition`, `Expression`, `Expressionify`, `ExpressionArray`, `SourceContext`, `ExecutionContext`, `Connection`, `ExecutionConfig`, `InputBindings`, `InputValue`, `Composition`
-- **Schema types:** `Schema`, `SchemaField`, `Infer`, `InferSchema`, `SchemaObject`, `StringField`, `NumberField`, `BooleanField`, `ListField`, `RecordField`, `FieldRules`
-- **Manifest types:** `SystemManifest`, `ServiceManifest`, `ConnectorManifest`, `ConnectorMappingManifest`, `ConnectorValidationManifest`, `PortManifest`, `SystemNodeManifest`
-- **Config types:** `NeuronConfig`
+## Package exports
+
+| Export | Purpose |
+| --- | --- |
+| `Service` | Define a named capability with executor, contracts, and metadata |
+| `System` | Define a system identity, input schema, and composition tree |
+| `Parallel` | Declare concurrent service branches |
+| `connect` | Explicit field mappings between source output and target input |
+| `defineConfig` | SDK CLI configuration |
+| `string`, `number`, `boolean`, `list`, `record` | Runtime schema builders with validation rules |
+| `Expression` | Typed proxy representing a service output field |
+| `ServiceDefinition`, `ServiceReference` | Service identity and reference types |
+| `Composition`, `Connection`, `InputBindings`, `ExecutionConfig` | Composition and binding internals |
+| `SystemManifest`, `ServiceManifest`, `ConnectorManifest` | Manifest structure types |
+| `Infer`, `Schema`, `SchemaField` | Schema type inference |
+
+---
 
 ## Development
 
@@ -379,12 +477,12 @@ pnpm typecheck:sdk    # tsc --noEmit
 
 Tests live in `packages/sdk/test/` and cover services, expressions, composition, connections, schemas, and full system manifests.
 
-## Versioning & compatibility
+## Versioning and compatibility
 
-- Current version: **0.1.0**.
-- The public API surface listed under *Package Exports* is treated as a contract; changes to it are tracked and documented.
-- The SDK is developed in this monorepo and currently consumed from source (`pnpm install` at the workspace root links it). Installation from an npm registry will be enabled as distribution matures.
-- **Language targets:** modern Node.js with full TypeScript 4.7+ support. The SDK builds to ESM and CJS.
+- Current version: **0.1.0**
+- The public API surface listed above is treated as a contract; changes are tracked and documented
+- The SDK is developed in this monorepo and consumed from source via `pnpm install`
+- Language target: modern Node.js with full TypeScript 5.x support; the SDK builds to ESM and CJS
 
 ## License
 

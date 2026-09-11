@@ -1,37 +1,37 @@
 # N.O.R.E. — Neuron Operational Runtime Engine
 
-N.O.R.E. is the runtime engine of Neuron. It is where Systems are registered, instantiated, operated, and connected to the capabilities they require.
+**N.O.R.E.** is the runtime engine of Neuron: where Systems are registered, instantiated, operated, and connected to the capabilities they require.
 
 This reference is **maintainer-focused** and describes what N.O.R.E. is, how it is structured, how to run it, and how it behaves. Users interact with N.O.R.E. exclusively through the `neuron` CLI; see [application/README.md](../application/README.md).
 
----
-
-## Table of Contents
-
-- [Responsibilities](#responsibilities)
-- [Running N.O.R.E.](#running-nore)
-- [Flags](#flags)
-- [Configuration & Environment](#configuration--environment)
-- [Runtime Lifecycle](#runtime-lifecycle)
-- [Internal Architecture](#internal-architecture)
-- [Safe Shutdown](#safe-shutdown)
-- [Security Model](#security-model)
-- [Performance Characteristics](#performance-characteristics)
-- [Further Reading](#further-reading)
-
----
+```mermaid
+flowchart TB
+    CLI[neuron CLI] -->|register / run / events| API[N.O.R.E. API]
+    API --> IM[Instance Manager]
+    API --> SR[System Repository]
+    IM --> EE[Execution Engine]
+    EE --> EB[Event Bus]
+    EE --> ER[Executor Runtime Registry]
+    EB --> ST[Storage Provider]
+    EE --> Sched[Scheduler]
+    Sched --> Res[CEL Resolver]
+    ER --> PRO[Process Backend]
+    ER --> WASM[WASM Backend]
+```
 
 ## Responsibilities
 
 N.O.R.E. owns the operational side of Neuron:
 
-- **Registration** — receiving compiled System definitions from the CLI and persisting them.
-- **Execution planning** — compiling the registered system and its frozen executor set into a plan over an event bus.
-- **Instances** — creating, running, pausing, restarting, and removing living realizations of Systems.
-- **Executors** — hosting and supervising modules, in-process for built-ins and out-of-process for external modules (process and WASM backends).
-- **Scheduling** — advancing executions, evaluating connector mappings and validations, and handling cancellations.
-- **Persistence** — durable storage of registered systems, instances, executions, and events through an interchangeable storage provider (SQLite by default).
-- **API** — the local HTTP/JSON transport over which the CLI talks to the runtime.
+| Concern | Responsibility |
+| --- | --- |
+| **Registration** | Receiving compiled System definitions from the CLI and persisting them |
+| **Execution planning** | Compiling the registered system and its frozen executor set into a plan over an event bus |
+| **Instances** | Creating, running, pausing, restarting, and removing living realizations of Systems |
+| **Executors** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM backends) |
+| **Scheduling** | Advancing executions, evaluating connector mappings and validations, handling cancellations |
+| **Persistence** | Durable storage of registered systems, instances, executions, and events through an interchangeable storage provider (SQLite by default) |
+| **API** | The local HTTP/JSON transport over which the CLI talks to the runtime |
 
 N.O.R.E. deliberately does **not**:
 
@@ -56,8 +56,6 @@ go build -o nore ./nore/cmd/nore
 
 With no flags this binds a Unix socket (`~/.neuron/nore.sock`) and uses `~/.neuron/nore` as its data directory. The process prefers to live long and be supervised by the CLI, but it is a plain foreground process and shuts down cleanly on `SIGINT`/`SIGTERM`.
 
----
-
 ## Flags
 
 ```
@@ -71,18 +69,15 @@ With no flags this binds a Unix socket (`~/.neuron/nore.sock`) and uses `~/.neur
 
 At least one of `-port` or `-socket` must be configured.
 
-### Defaults are local-only and safe
-
-The default configuration is **Unix socket only** — no TCP listener is opened unless `-port` is supplied explicitly. The socket is created with mode `0600`, so only the owning user can connect to the runtime API.
-
-Exposing N.O.R.E. over TCP (`-port :0` style) is opt-in and intended for development and remote operation where the deployment enforces its own network-level protection.
-
----
+> [!NOTE]
+> The default configuration is **Unix socket only** — no TCP listener is opened unless `-port` is supplied explicitly. The socket is created with mode `0600`, so only the owning user can connect to the runtime API.
+>
+> Exposing N.O.R.E. over TCP (`-port :0` style) is opt-in and intended for development and remote operation where the deployment enforces its own network-level protection.
 
 ## Configuration & Environment
 
 | Variable | Meaning |
-| -------- | ------- |
+| --- | --- |
 | `NEURON_SOCKET` | Override the daemon Unix socket path |
 | `NEURON_DATA_DIR` | Override the daemon persistent data directory |
 
@@ -92,38 +87,87 @@ Command-line flags take precedence over environment variables.
 
 ## Runtime Lifecycle
 
-```text
-start
-  ├── initialize storage (SQLite)
-  ├── recover persisted instances and their live executions
-  ├── start executor runtimes (process / WASM backends)
-  └── serve API on the configured listeners
-      │
-      ├── GET  /health               health check (used by the CLI bootstrap)
-      ├── POST /v1/register          register a compiled System
-      ├── GET  /v1/instances         list Instances
-      ├── POST /v1/instances         create an Instance and begin execution
-      ├── DELETE /v1/instances       remove all Instances
-      ├── GET  /v1/instances/{id}    Instance detail
-      ├── DELETE /v1/instances/{id}  remove an Instance
-      ├── POST /v1/instances/{id}/executions           create an execution
-      ├── GET  /v1/instances/{id}/executions           list executions
-      ├── GET  /v1/instances/{id}/executions/{execID}  execution state
-      ├── GET  /v1/instances/{id}/executions/{execID}/events        list events
-      ├── GET  /v1/instances/{id}/executions/{execID}/events/stream stream events (Server-Sent Events)
-      ├── WS   /v1/ws                 WebSocket endpoint for live event streaming
-      └── ...                        (curl the API for the full shape)
-stop
-  ├── close listeners
-  ├── gracefully stop live Instances (clean executor shutdown)
-  └── close storage
+```mermaid
+flowchart TD
+    subgraph startup
+        A[start] --> B[initialize storage SQLite]
+        B --> C[recover persisted instances<br/>and their live executions]
+        C --> D[start executor runtimes<br/>process / WASM backends]
+        D --> E[serve API on configured listeners]
+    end
+    E --> F1[GET /health]
+    E --> F2[POST /v1/register]
+    E --> F3[POST /v1/instances]
+    E --> F4[WS /v1/ws]
+    F2 --> G[execution + event streaming]
+    G --> H[terminal execution state]
+    H --> I{daemon stop}
+    I --> J[close listeners<br/>gracefully stop live instances<br/>close storage]
+    J --> K[stop]
 ```
+
+### API surface
+
+| Endpoint | Operation |
+| --- | --- |
+| `GET /health` | Health check (used by the CLI bootstrap) |
+| `POST /v1/register` | Register a compiled System |
+| `GET /v1/instances` | List Instances |
+| `POST /v1/instances` | Create an Instance and begin execution |
+| `DELETE /v1/instances` | Remove all Instances |
+| `GET /v1/instances/{id}` | Instance detail |
+| `DELETE /v1/instances/{id}` | Remove an Instance |
+| `POST /v1/instances/{id}/executions` | Create an execution |
+| `GET /v1/instances/{id}/executions` | List executions |
+| `GET /v1/instances/{id}/executions/{execID}` | Execution state |
+| `GET /v1/instances/{id}/executions/{execID}/events` | List events |
+| `GET /v1/instances/{id}/executions/{execID}/events/stream` | Stream events (Server-Sent Events) |
+| `WS /v1/ws` | WebSocket endpoint for live event streaming |
 
 ### Execution
 
-When an Instance is created, the planner compiles the registered System into an execution plan over the event bus. The scheduler advances the execution across the System's services and connectors, evaluates mappings and validations through the CEL resolver, and drives service executions through the executor layer. Every transition emits an event (started, completed, failed, cancelled); events are streamed to clients and persisted according to storage policy.
+When an Instance is created, the planner compiles the registered System into an execution plan over the event bus. The scheduler advances the execution across the System's services and connectors, evaluates mappings and validations through the CEL resolver, and drives service executions through the executor layer.
+
+```mermaid
+sequenceDiagram
+    participant C as API client
+    participant IM as Instance Manager
+    participant S as Scheduler
+    participant EB as Event Bus
+    participant EX as Executor Engine
+    participant RT as Executor Runtime
+
+    C->>IM: POST /v1/instances
+    IM->>S: create execution
+    S->>EB: emit execution.started
+    loop over services via connectors
+        S->>EX: evaluate mappings + validations (CEL)
+        EX->>RT: Execute(request)
+        RT-->>EX: Response
+        EX-->>S: service outcome
+        S->>EB: emit service.completed
+    end
+    S->>EB: emit execution.completed
+    EB-->>C: streamed events
+```
+
+Every transition emits an event (started, completed, failed, cancelled); events are streamed to clients and persisted according to storage policy.
 
 Live events are streamed over the WebSocket endpoint (`WS /v1/ws`); the SSE stream (`GET .../events/stream`) remains available for transports without WebSocket support.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Started: instance created
+    Started --> Scheduling: execution plan ready
+    Scheduling --> Running: service dispatched
+    Running --> Running: next service
+    Running --> Completed: terminal success
+    Running --> Failed: transport or controlled error
+    Running --> Cancelled: cancellation requested
+    Completed --> [*]
+    Failed --> [*]
+    Cancelled --> [*]
+```
 
 Executions honor deadlines, support cancellation, and finish in a terminal state (`execution.completed`, `execution.failed`, `execution.cancelled`).
 
@@ -131,37 +175,66 @@ Executions honor deadlines, support cancellation, and finish in a terminal state
 
 ## Internal Architecture
 
-```text
-nore/
-├── cmd/nore/                  daemon entry point (flags, listeners, shutdown)
-└── internal/
-    ├── api/                   HTTP/JSON API, middleware, route wiring
-    ├── contracts/             internal interface boundaries (compiler, event bus, repositories)
-    ├── data/                  internal data helpers
-    ├── event/                 the event bus, event types, durable event log
-    ├── execution/             execution model, state machine, scheduler, engine, snapshots
-    ├── executors/             built-in in-process executor implementations
-    ├── instance/              instance lifecycle manager, registry, restoration
-    ├── planner/               compiler from the registered core System to an execution plan
-    ├── plugin/                module plugin loading (WASM/process integration)
-    ├── registry/              internal executor registry
-    ├── resolver/              CEL expression resolver (connector mappings and validations)
-    ├── runtime/               executor runtime abstraction (process + WASM backends)
-    ├── storage/               storage provider interface + SQLite implementation
-    ├── stream/                live stream plumbing for events and execution results
-    ├── system/                registered system repository and indexing
-    └── types/                 runtime-facing blueprints
+```mermaid
+flowchart TB
+    subgraph nore
+        cmd[cmd/nore<br/>daemon entrypoint]
+        api[api<br/>HTTP/JSON API]
+        inst[instance<br/>lifecycle manager]
+        exec[execution<br/>state machine · scheduler · engine]
+        ev[event<br/>event bus · durable log]
+        rt[runtime<br/>executor runtime abstraction]
+        pl[planner<br/>system → execution plan]
+        rv[resolver<br/>CEL expressions]
+        st[storage<br/>provider + SQLite]
+        sys[system<br/>registered system repository]
+        plugin[plugin<br/>frozen records → adapters]
+    end
+
+    cmd --> api
+    api --> inst
+    api --> sys
+    inst --> exec
+    exec --> ev
+    exec --> rt
+    exec --> pl
+    rt --> plugin
+    exec --> rv
+    ev --> st
+    inst --> st
 ```
 
-### Key boundaries
+| Package | Responsibility |
+| --- | --- |
+| `cmd/nore` | Daemon entry point — flags, listeners, shutdown |
+| `api` | HTTP/JSON API — transport only: validates requests, calls the instance manager and system repository, serializes responses and streams. Never interprets system semantics |
+| `instance` | Lifecycle — create/remove/clear, restoration on startup, registry of live instances |
+| `execution` | State machine — scheduler transitions, snapshotting, wait-for-completion, the executor engine that drives module calls |
+| `event` | Single source of truth for state transitions; the durable event log used for persistence and streaming |
+| `runtime` | Executor backend abstraction — one interface, multiple backends (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
+| `planner` | Compiles the registered System + frozen executors into an executable plan. Source-language agnostic; owns no HTTP clients, registries, or file downloads |
+| `resolver` | CEL expression resolver — connector mappings and validations |
+| `storage` | Provider interface + SQLite implementation — systems, instances, executions, events |
+| `plugin` | Boundary between frozen executor records and the runtime backends — thin adapters, no process/socket/WASM machinery itself |
+| `system` | Registered system repository and indexing |
 
-- **`api`** owns transport only. It validates requests, calls into the instance manager and system repository, and serializes responses and streams. It never interprets system semantics.
-- **`instance`** owns lifecycle: create/remove/clear, restoration on startup, and the registry of live instances.
-- **`execution`** owns the state machine: scheduler transitions, snapshotting, wait-for-completion, and the executor engine that drives module calls.
-- **`event`** owns the single source of truth for state transitions and provides the durable event log used for persistence and streaming.
-- **`runtime`** owns the executor backend abstraction — one interface, multiple backends (process workers, WASM), with health checks, worker pooling, restart, and cancellation. The registry and installer never own process lifecycle; see [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) and [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md).
-- **`planner`** compiles the registered System + frozen executors into an executable plan. It is source-language agnostic and owns no HTTP clients, registries, or file downloads.
-- **`storage`** is a provider interface; the SQLite implementation persists systems, instances, executions, and events. Verification tests exercise an in-memory provider.
+### The executor runtime boundary
+
+The runtime boundary inside N.O.R.E. is the **executor runtime** abstraction. One interface, multiple backends:
+
+```mermaid
+flowchart TB
+    ER[Executor Runtime] --> PROC[Process Runtime]
+    ER --> WASM[WASM Runtime]
+    ER --> CONT[Container Runtime]
+    ER --> REM[Remote Runtime]
+    PROC -->|neuron/executor-v1 · gRPC over Unix socket| W[long-lived worker processes]
+    WASM -->|neuron/executor-v1-json · stdio| MOD[wasm32-wasi modules]
+    CONT -. planned .-> OCI[OCI images]
+    REM -. planned .-> HOST[Remote executor hosts]
+```
+
+A backend owns starting the executor, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that. See [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) and [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md).
 
 ### Built-in modules
 
@@ -180,18 +253,30 @@ The full module model, protocol, and archive contract live in [docs/MODULES.md](
 
 ## Safe Shutdown
 
-On `SIGINT`/`SIGTERM`, N.O.R.E. closes its listeners and then **gracefully stops all live instances** before exiting (`srv.StopInstances()`). This gives executor-backed resources — worker processes and WASM modules — a clean shutdown instead of being torn down mid-operation by process exit. Executions in-flight are flushed to their storage records before the engine exits, so they can be restored on the next startup.
+On `SIGINT`/`SIGTERM`, N.O.R.E. closes its listeners and then **gracefully stops all live instances** before exiting (`srv.StopInstances()`). This gives executor-backed resources — worker processes and WASM modules — a clean shutdown instead of being torn down mid-operation by process exit.
+
+```mermaid
+flowchart LR
+    A[SIGINT / SIGTERM] --> B[close listeners]
+    B --> C[stop live instances<br/>clean executor shutdown]
+    C --> D[flush in-flight executions to storage]
+    D --> E[close storage]
+    E --> F[exit]
+```
+
+Instances survive runtime restarts: on startup, N.O.R.E. restores persisted instances and their in-flight executions from storage.
 
 ---
 
 ## Security Model
 
 - The default transport is a Unix socket with mode `0600` — local to the owning user, no network exposure.
-- TCP is opt-in and the API currently has no authentication. **Do not expose a TCP listener on an untrusted network.**
+- TCP is opt-in and the API currently has **no authentication**. Do not expose a TCP listener on an untrusted network.
 - External executors are treated as untrusted code. They are verified and installed by the CLI before registration and are hosted out-of-process, isolating the runtime from third-party crashes and malicious behavior.
 - Capability declarations in module manifests are metadata, not permissions. Permissions are enforced by the runtime backends.
 
-See [AGENTS.md](../AGENTS.md) for the security principles that govern the whole repository.
+> [!WARNING]
+> The API is unauthenticated and bound to a local socket by default. Token-based authentication is tracked before any loopback exposure.
 
 ---
 
@@ -203,11 +288,13 @@ Concurrency is bounded by the executor worker pool (`-workers`, default 8). Long
 
 ## Further Reading
 
-- [docs/RUNTIME.md](../docs/RUNTIME.md) — how the runtime works in depth (maintainer-focused)
-- [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) — the process executor backend
-- [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md) — the WASM executor backend
-- [docs/MODULES.md](../docs/MODULES.md) — the unified module model
-- [application/README.md](../application/README.md) — the `neuron` CLI, the user-facing surface
+| | |
+| --- | --- |
+| **Runtime deep dive** | How N.O.R.E. executes services end to end — [docs/RUNTIME.md](../docs/RUNTIME.md) |
+| **Process runtime** | The process executor backend — [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) |
+| **WASM runtime** | The WASM executor backend — [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md) |
+| **Modules & executors** | The unified module model — [docs/MODULES.md](../docs/MODULES.md) |
+| **CLI** | The `neuron` CLI, the user-facing surface — [application/README.md](../application/README.md) |
 
 ---
 

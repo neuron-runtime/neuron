@@ -1,106 +1,67 @@
-# Getting Started
+# Getting Started with Neuron
 
-This guide walks through Neuron in about fifteen minutes: installing the CLI, registering your first system with the runtime engine, running it, and streaming live execution events.
+This guide takes you from a fresh checkout to a running system in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, registered with the runtime, and executed with live event streaming. No prior Neuron knowledge is assumed: building, validation, compilation, module resolution, and starting the runtime engine are all automatic.
 
-No prior knowledge is assumed. Everything underneath — building, module resolution, compilation, starting the runtime engine — is automatic.
-
----
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Install Neuron](#install-neuron)
-- [The Big Picture](#the-big-picture)
-- [Part 1 — Run a shipped example](#part-1--run-a-shipped-example)
-- [Part 2 — Author your own system](#part-2--author-your-own-system)
-- [Part 3 — Use an external module](#part-3--use-an-external-module)
-- [Next steps](#next-steps)
-
----
+```mermaid
+flowchart LR
+    A[Define a System<br/>in TypeScript] --> B[neuron register<br/>build → compile → resolve → freeze]
+    B --> C[N.O.R.E. stores the compiled system]
+    C --> D[neuron run<br/>create an instance]
+    D --> E[Execution events streamed live]
+```
 
 ## Prerequisites
 
-- **Neuron** installed (see [Install Neuron](#install-neuron)); the `neuron` binary must be on your `PATH`.
-- The repository checked out, to access the shipped examples:
+- **The `neuron` binary** on your `PATH` (install from a [release](https://github.com/Muhammad-Jay/neuron/releases) or build from source — see [INSTALLATION.md](./INSTALLATION.md)).
+- **The repository checked out**, to access the shipped example and the SDK workspace:
 
   ```bash
   git clone https://github.com/Muhammad-Jay/neuron.git
   cd neuron
   ```
 
-  (If you installed Neuron from a release archive, clone the repository anywhere to follow Part 1.)
+- **Go, pnpm, and Node.js** for the walkthrough only if you build the examples and SDK from source:
 
-No daemon setup is required. The runtime engine (N.O.R.E.) is started and stopped for you by the CLI.
+  ```bash
+  # link the workspace and build @neuron/sdk (produces the neuron-sdk CLI)
+  pnpm install
+  pnpm build:sdk
+  ```
 
----
-
-## Install Neuron
-
-If you have not installed Neuron yet:
-
-```bash
-neuron version
-```
-
-This prints the CLI version. If it fails, follow [docs/INSTALLATION.md](./INSTALLATION.md).
-
----
-
-## The Big Picture
-
-Three moving parts, one user interface:
-
-```text
-You                             The CLI                      The runtime
-─────                           ───────                      ─────────
-write a system  ──(register)──► build + resolve modules ──►  N.O.R.E. stores it
-                                compile to a core System
-                                hand it to the daemon
-                                                                 │
-──────────────────────────────────────────────────────────────── ┘
-run it          ──(run)──────► ask N.O.R.E. for an instance ──► creates an Instance
-                                stream events back                    │
-                                                                      ▼
-                                                              executes the System
-```
-
-- **System** — a definition: what capabilities exist and how they are connected.
-- **Module** — an executable capability packaged for Neuron (a Service or the Executor that runs it).
-- **Instance** — a living realization of a System, with its own state and activity.
-- **N.O.R.E.** — the runtime engine (daemon) that hosts registered systems, creates instances, and executes them.
-
-You only ever talk to the `neuron` CLI.
+  No daemon setup is required. The runtime engine (N.O.R.E.) is started and stopped for you by the CLI.
 
 ---
 
 ## Part 1 — Run a shipped example
 
-The repository ships an order-processing pipeline defined in YAML (`examples/ecommerce_order`) and the identical pipeline in TypeScript (`examples/ecommerce_order_ts`). They use only built-in modules — capabilities that run in-process inside N.O.R.E. — so they need zero setup.
+The repository ships an order-processing pipeline defined entirely in TypeScript (`examples/ecommerce_order_ts`). It uses only built-in modules — capabilities that run in-process inside N.O.R.E. — so it needs zero configuration beyond the SDK.
 
 ```bash
-cd examples/ecommerce_order
+cd examples/ecommerce_order_ts
 neuron register
 ```
 
 `neuron register` runs the whole authoring pipeline in one step:
 
-1. The project is built into a canonical manifest (`.neuron/manifest.json`).
-2. The manifest is validated and compiled into a core system representation.
-3. All module references are resolved. Built-in modules are skipped — they run inside the runtime engine, no installation needed.
-4. The compiled system is handed to N.O.R.E., which persists it and returns a system key.
+| Step | What happens |
+| --- | --- |
+| **Build** | The TypeScript system is compiled into the canonical manifest (`.neuron/manifest.json`) |
+| **Compile** | The manifest is compiled into a runtime system representation |
+| **Resolve** | Module references are resolved. Built-in modules (`neuron:core:set`) are skipped — they run inside the runtime engine |
+| **Register** | The compiled system is handed to N.O.R.E., which persists it and returns a system key |
 
-Output ends with the registration key:
+The output ends with a registration key:
 
 ```text
-order-processing@1.0.0#<key>:development
+order-processing-ts@2.0.0#<key>:development
 ```
 
 > N.O.R.E. was started automatically. You never start or stop it yourself.
 
-Now run it:
+Now run it. The system expects a typed input of `{ order: {...} }`, so pass one explicitly:
 
 ```bash
-neuron run
+neuron run --input '{"order":{"id":"ord_1001","customerId":"cus_42","customerEmail":"ada@acme.io","currency":"USD","total":4250,"items":[{"sku":"SKU-AG-1","name":"Wireless Mouse","qty":1,"priceCents":4250}],"shippingAddress":{"street":"1 Market St","city":"San Francisco","zip":"94105"}}}'
 ```
 
 The CLI asks N.O.R.E. to create an instance and execute the system, streaming live execution events:
@@ -117,90 +78,169 @@ execution.completed     status: completed
 
 The command returns when execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`).
 
-Look at what you defined — `examples/ecommerce_order/systems/order-processing/system.yaml` describes the whole pipeline: services (validation, parsing, customer enrichment, totals, payment, shipment, confirmation) wired together by connectors, each connector optionally carrying mappings and validations between the two modules.
+Look at what you just ran:
 
-The TypeScript version works the same way:
-
-```bash
-cd ../ecommerce_order_ts
-pnpm install
-neuron register
-neuron run
+```text
+examples/ecommerce_order_ts/
+├── system.ts          the System: identity + input schema + composition
+├── pipeline.ts        the composition: how services chain and guard
+├── services/          each Service: identity, executor, contracts
+└── types.ts           the shared domain types (Order, OrderItem, ...)
 ```
+
+The whole definition is plain TypeScript — types are checked, mappings are verified, and the manifest is derived from the composition.
 
 ---
 
-## Part 2 — Author your own system
+## Part 2 — Author your own system in TypeScript
 
-### Create a project
+### Create the project
 
 ```bash
 neuron init my-first-system
-cd my-first-system
 ```
 
-`neuron init` creates the directory and a starter configuration file:
+`neuron init` creates the directory and a starter `neuron.yaml`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
 
 ```bash
-ls -la
-# neuron.yaml
+mv my-first-system examples/my-first-system
+cd examples/my-first-system
 ```
 
-### Define a system
-
-Create the standard layout:
-
-```bash
-mkdir -p systems/my-system services
-```
-
-A Neuron system is a composition of capabilities (modules) connected by explicit relationships. Define a service — a logical capability provided by a module:
+Open `neuron.yaml` and switch the authoring language to TypeScript:
 
 ```yaml
-# services/echo.yaml
-apiVersion: neuron/v1
-kind: Service
-
-metadata:
-  name: echo
-  version: 1.0.0
-  description: Echoes the execution input back through an external module
-
-spec:
-  executor:
-    type: example:echo@^1.0.0
+lang: typescript
 ```
 
-`spec.executor.type` names the module that provides the capability — here the reference `example:echo` module. The `^1.0.0` says "any compatible 1.x version"; Neuron selects the best match with semantic versioning and **freezes** the exact resolved version into your registration.
+### Add the TypeScript layout
 
-Then define the system itself — a single-service system needs no connectors:
+Create the SDK project files:
 
-```yaml
-# systems/my-system/system.yaml
-apiVersion: neuron/v1
-kind: System
-
-metadata:
-  name: my-system
-  version: 1.0.0
-  description: An echo system
-
-services:
-  - ref: echo
-    entry: '../../services/echo.yaml'
+```text
+examples/my-first-system/
+├── neuron.yaml          ← lang: typescript
+├── package.json         ← declares @neuron/sdk
+├── neuron.config.ts     ← SDK CLI config (entry file)
+├── system.ts            ← the System definition
+└── types.ts             ← domain types
 ```
+
+`package.json`:
+
+```json
+{
+  "name": "my-first-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@neuron/sdk": "workspace:*"
+  }
+}
+```
+
+### Define the capability
+
+A **Service** is a named unit of work with an identity, an executor, and typed contracts:
+
+```ts
+// types.ts
+export interface Order {
+  id: string;
+  customerId: string;
+  customerEmail: string;
+  currency: string;
+  total: number;
+  items: { sku: string; name: string; qty: number; priceCents: number }[];
+  shippingAddress: { street: string; city: string; zip: string };
+}
+
+// system.ts
+import { Service, System } from "@neuron/sdk";
+import type { Order } from "./types";
+
+const validateOrder = Service({
+  name: "order.validate",
+  version: "1.0.0",
+  description: "Validate an incoming order",
+})
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order }>()
+  .outputSchema<{ order: Order }>();
+
+const authorizePayment = Service({
+  name: "payment.authorize",
+  version: "1.0.0",
+  description: "Authorize payment for an order",
+})
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order; amount: number }>()
+  .outputSchema<{ order: Order; amount: number }>();
+```
+
+### Compose the system
+
+`System` defines the pipeline: bind system input to the first service with `.withParams()`, chain with `.next()`, and map outputs into the next input with `.withInput()`:
+
+```ts
+const manifest = System({
+  name: "my-first-system",
+  version: "1.0.0",
+  description: "Validate and authorize customer orders",
+})
+  .inputSchema<{ order: Order }>()
+  .withParams((input) =>
+    validateOrder
+      .withInput({ order: input.order })
+      .next(
+        authorizePayment.withInput({
+          order: validateOrder.output.order,
+          amount: input.order.total,
+        })
+      )
+  )
+  .toManifest();
+
+export default manifest;
+```
+
+Tell the SDK CLI which file is the entry (it must default-export the manifest):
+
+```ts
+// neuron.config.ts
+import { defineConfig } from "@neuron/sdk";
+
+export default defineConfig({
+  entry: "./system.ts",
+});
+```
+
+> [!NOTE]
+> `withParams(input => ...)` binds the system's execution input (typed by `inputSchema`) into the first service. `.next()` wires one service to the next; `.withInput()` maps fields — every binding is type-checked against the target's input contract.
 
 ### Register and run
 
 ```bash
+# from the repository root, link the workspace packages
+pnpm install
+pnpm build:sdk
+
+cd examples/my-first-system
 neuron register
-neuron run --input '{"message": "hello neuron"}'
-neuron run -v
+neuron run --input '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmail":"grace@acme.io","currency":"EUR","total":2250,"items":[{"sku":"SKU-RG-2","name":"Keyboard","qty":1,"priceCents":2250}],"shippingAddress":{"street":"2 Rue de Paris","city":"Lyon","zip":"69002"}}}'
 ```
 
-The `-v` flag renders full event payloads so you can see the echoed input travel through the system.
+Watch the events stream:
 
-> **Note:** the service above references the external reference module. To resolve it you need a registry that serves it. Follow [Part 3](#part-3--use-an-external-module) to point a local registry at the built reference module; in production you would configure a published registry instead (see [docs/MODULES.md](./MODULES.md)).
+```text
+execution.events        instance started
+service.evaluating      order.validate
+service.completed       order.validate
+service.evaluating      payment.authorize
+service.completed       payment.authorize
+execution.completed     status: completed
+```
 
 ### Inspect what is running
 
@@ -217,11 +257,11 @@ neuron instance clear           # remove everything
 
 ## Part 3 — Use an external module
 
-This part makes the Part 2 walkthrough resolvable offline using the included **reference module**, and demonstrates the full module lifecycle — author → build → serve → resolve → install → run.
+Built-in modules cover simple cases. Real systems also use **external modules (executors)** — capabilities authored, packaged, and distributed independently. This part runs the full external-module lifecycle against the repository's reference `echo` module.
 
 ### Build the reference module
 
-The repository ships an `echo` module compiled from one Go source (`examples/executors/echo`) into both a native process runtime and a WebAssembly runtime. Build it into the local registry catalog:
+The echo module is compiled from one Go source (`examples/executors/echo`) into both a native process binary and a WebAssembly module. Build it into a local registry catalog:
 
 ```bash
 cd examples/executors
@@ -237,23 +277,11 @@ catalog/example/echo/1.0.0/
     example-echo-1.0.0-executor.neuron.tar.gz  canonical package archive
 ```
 
-`executor.json` declares identity, runtime type, protocol, and platform artifacts:
-
-```json
-{
-  "apiVersion": "neuron/v1",
-  "kind": "Executor",
-  "metadata": { "name": "example:echo", "version": "1.0.0" },
-  "runtime": { "type": "process", "entrypoint": "echo", "protocol": "neuron/executor-v1-json" },
-  "services": ["example:echo"],
-  "capabilities": [],
-  "platforms": { "linux-amd64": { "artifact": "echo" } }
-}
-```
+`executor.json` declares identity, runtime type, protocol, and platform artifacts.
 
 ### Register the catalog as a local registry
 
-Add a `local` registry pointing at the catalog in your project's `neuron.yaml`:
+Add a `local` registry in your project's `neuron.yaml`:
 
 ```yaml
 executors:
@@ -262,23 +290,69 @@ executors:
       url: /absolute/path/to/neuron/examples/executors/catalog
 ```
 
-The `local` registry is a directory-backed registry served offline. The default `github` registry serves the same kind of packages from GitHub Releases over the network.
+The `local` registry is directory-backed and served offline. The default `github` registry serves the same kind of packages from GitHub Releases over the network.
+
+### Require the module from a service
+
+Add an echo service to your system and chain it at the end:
+
+```ts
+// system.ts
+const echo = Service({
+  name: "echo",
+  version: "1.0.0",
+  description: "Echo a message through the reference module",
+})
+  .executor({ name: "example:echo", version: "^1.0.0", registry: "local" })
+  .inputSchema<{ message: string }>();
+```
+
+Wire it into the pipeline — the system input remains `{ order: ... }`:
+
+```ts
+withParams((input) =>
+  validateOrder
+    .withInput({ order: input.order })
+    .next(
+      authorizePayment.withInput({
+        order: validateOrder.output.order,
+        amount: input.order.total,
+      })
+    )
+    .next(
+      echo.withInput({
+        message: input.order.customerEmail,
+      })
+    )
+)
+```
+
+> [!NOTE]
+> `registry: "local"` tells the resolver to source `example:echo@^1.0.0` from the local catalog. Omit `registry` and the default `local` registry is used; a `github` registry requires an explicit catalog configuration.
 
 ### Resolve, install, run
 
 ```bash
-cd my-first-system
+cd examples/my-first-system
 neuron register
 ```
 
 During registration Neuron resolves `example:echo@^1.0.0`:
 
-1. the registry is queried for available versions (here: `1.0.0`);
-2. the best satisfying version is selected;
-3. the canonical package archive is downloaded, verified, and installed immutably into the executor store (`~/.neuron/executors`);
-4. the exact version is frozen into your registration, so running an instance needs no further resolution.
+```mermaid
+flowchart LR
+    A[Requirement example:echo @ ^1.0.0] --> B[Registry queries available versions]
+    B --> C[best semver-compatible version selected: 1.0.0]
+    C --> D[package archive verified + installed immutably]
+    D --> E[exact version frozen into the registration]
+```
 
-You can also manage the module directly:
+1. the registry is queried for available versions (here: `1.0.0`);
+2. the best satisfying version is selected with semantic versioning;
+3. the canonical package archive is downloaded, verified, and installed immutably into the executor store (`~/.neuron/executors`);
+4. the exact version is frozen into your registration — running an instance needs no further resolution, and works offline.
+
+You can manage the module directly:
 
 ```bash
 neuron add example:echo@^1.0.0      # resolve + install into the store
@@ -290,18 +364,19 @@ neuron remove example:echo@1.0.0
 Now run:
 
 ```bash
-cd my-first-system
-neuron run --input '{"message": "echo me"}'
+neuron run --input '{"order":{"id":"ord_3001","customerId":"cus_11","customerEmail":"leo@acme.io","currency":"USD","total":1900,"items":[{"sku":"SKU-WB-3","name":"Webcam","qty":1,"priceCents":1900}],"shippingAddress":{"street":"3 King St","city":"London","zip":"EC2A 4BX"}}}'
 ```
 
-The execution launches the installed module out-of-process, passes your input through the executor protocol, and streams the events back.
+The execution launches the installed module **out-of-process**, passes your input through the executor protocol, and streams the events back.
 
 ---
 
 ## Next steps
 
-- [docs/MODULES.md](./MODULES.md) — the unified module model, the `executor.json` contract, and authoring your own module
-- [docs/ARCHITECTURE.md](./ARCHITECTURE.md) — how the platform is put together
-- [application/README.md](../application/README.md) — every `neuron` command and flag
-- [docs/STATUS.md](./STATUS.md) — what is available, experimental, and planned
-- [TODO.md](../TODO.md) — known issues and future work
+| | |
+| --- | --- |
+| **TypeScript SDK** | Every SDK feature in depth — [packages/sdk/README.md](../packages/sdk/README.md) |
+| **Modules & executors** | The unified module model, packaging, and authoring — [docs/MODULES.md](./MODULES.md) |
+| **Architecture** | How the platform is put together — [docs/ARCHITECTURE.md](./ARCHITECTURE.md) |
+| **CLI reference** | Every `neuron` command and flag — [application/README.md](../application/README.md) |
+| **Status** | What is available, experimental, and planned — [docs/STATUS.md](./STATUS.md) |

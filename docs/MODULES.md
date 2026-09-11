@@ -1,73 +1,51 @@
 # Modules & Executors
 
-This document describes the unified module model in Neuron: what a module is, how one is named, packaged, resolved, installed, and executed, and how to author one yourself.
+**The unified module model in Neuron** — what a module is, how one is named, packaged, resolved, installed, frozen, and executed, and how to author one yourself.
+
+Modules are the executable spine of Neuron. A **Service** is the logical capability; an **Executor** is the machinery that makes it operate. Both travel together as a **module** — one named, immutable, distributable unit.
+
+```mermaid
+flowchart LR
+    SRV[Service<br/>logical capability] --> MOD[Module]
+    EXE[Executor<br/>operating machinery] --> MOD
+    MOD --> REG[Registry]
+    REG --> PKG[Package archive]
+    PKG --> STORE[Immutable store]
+    STORE --> RT[Runtime<br/>process · wasm]
+```
+
+> [!NOTE]
+> Whether a capability is a logical operation or the machinery that executes it, to every other part of Neuron it is a module: something with a name, a contract, and a way to be run.
 
 ---
 
-## Table of Contents
+## The two module families
 
-- [What is a module?](#what-is-a-module)
-- [The module lifecycle](#the-module-lifecycle)
-- [Naming modules](#naming-modules)
-- [Requirements & version selection](#requirements--version-selection)
-- [The executor contract](#the-executor-contract)
-- [Package archives](#package-archives)
-- [Registries](#registries)
-- [Resolution & installation](#resolution--installation)
-- [Freezing into registered systems](#freezing-into-registered-systems)
-- [Executing installed modules](#executing-installed-modules)
-- [Wire protocols](#wire-protocols)
-- [Authoring a module](#authoring-a-module)
-- [Built-in modules](#built-in-modules)
-- [Security model](#security-model)
+| Family | Hosting | Resolution | Examples |
+| --- | --- | --- | --- |
+| **Built-in modules** | In-process inside N.O.R.E. | Never resolved or installed | `neuron:core:set` |
+| **External modules** | Out-of-process by N.O.R.E. | Resolved, verified, installed by the CLI | `example:echo`, `Muhammad-Jay:github:read` |
 
----
-
-## What is a module?
-
-A **module** is the unified public name for any executable capability packaged for Neuron. Whether a capability is a logical operation or the machinery that executes it, to every other part of Neuron it is simply a module: something with a name, a contract, and a way to be run.
-
-When more precision is needed, a module is one of two things:
-
-- **Service** — the logical capability. `github.read`, `customer.verify`, `payment.authorize`, `database.query`, `model.predict`. The name does not determine the implementation: one Service could run locally, another remotely, another as WebAssembly.
-- **Executor** — the mechanism that actually runs a Service: the runtime type (process, wasm, …), the entrypoint, the wire protocol, and the platform artifacts that make the capability operate.
-
-From Neuron's perspective they are all capabilities that can participate in a System. The Service stays logical; the Executor stays mechanical. This separation is what lets Neuron host capabilities implemented in different technologies without turning the core runtime into a collection of special cases.
-
-Two families of modules exist today:
-
-- **Built-in modules** — shipped inside N.O.R.E., run in-process in the runtime engine, and require no resolution or installation.
-- **External modules** — authored, packaged, and distributed independently, resolved and installed by the CLI, hosted out-of-process by N.O.R.E.
-
-This document is mostly about the second family.
+This document is about the second family.
 
 ---
 
 ## The module lifecycle
 
-```text
-Requirement      the system declares a logical name + version constraint
-    ↓
-Registry         where the package can be obtained (github, local)
-    ↓
-Resolver         which version satisfies the requirement (semver)
-    ↓
-Package          the immutable, self-describing artifact set (executor.json + binaries)
-    ↓
-Verification     cryptographic checks before anything untrusted executes
-    ↓
-Installation     install the selected artifact immutably into the local store
-    ↓
-Store            ~/.neuron/executors/<owner>/<path>/<version>/
-    ↓
-Freezing         exact versions recorded into the registered System
-    ↓
-Runtime          N.O.R.E. launches the frozen executables (process / wasm)
-    ↓
-Instance         a live, running realization of the module
-```
+Each stage is a separate responsibility with its own package. The registry only answers *where*; the resolver only answers *which*; the installer only answers *how*; the store only owns *where the artifact lives*; the runtime only owns *how the artifact executes*.
 
-Each step is a separate responsibility with its own package. The registry only answers *where*; the resolver only answers *which*; the installer only answers *how*; the store only owns *where the artifact lives*; the runtime only owns *how the artifact executes*.
+```mermaid
+flowchart TB
+    A[Requirement<br/>logical name + version constraint] --> B[Registry<br/>where packages are obtained]
+    B --> C[Resolver<br/>which version satisfies the requirement]
+    C --> D[Package<br/>immutable artifact set<br/>executor.json + binaries]
+    D --> E[Verification<br/>cryptographic checks]
+    E --> F[Installation<br/>install immutably into the store]
+    F --> G[Store<br/>~/.neuron/executors/&lt;owner&gt;/&lt;path&gt;/&lt;version&gt;]
+    G --> H[Freezing<br/>exact versions recorded into the registered System]
+    H --> I[Runtime<br/>N.O.R.E. launches the frozen executables]
+    I --> J[Instance<br/>a live running realization]
+```
 
 ---
 
@@ -75,13 +53,13 @@ Each step is a separate responsibility with its own package. The registry only a
 
 A module is referenced by a logical name: a `:`-separated path whose first segment is the **owner** and whose remaining segments are the functional path.
 
-```text
-example:echo                 owner "example", path "echo"
-github:read                  owner "github", path "read"
-Muhammad-Jay:github:read     owner "Muhammad-Jay", path "github", "read"
-```
+| Logical name | Owner | Path |
+| --- | --- | --- |
+| `example:echo` | `example` | `echo` |
+| `github:read` | `github` | `read` |
+| `Muhammad-Jay:github:read` | `Muhammad-Jay` | `github`, `read` |
 
-The owner is always the first segment; at least one functional segment must follow. The same logical name is used everywhere in the authoring surface — in a Service's `spec.executor.type`, on the `neuron add` command line, and in the executor manifest's `metadata.name`.
+The owner is always the first segment; at least one functional segment must follow. The same logical name is used everywhere in the authoring surface — in a Service's executor requirement, on the `neuron add` command line, and in the executor manifest's `metadata.name`.
 
 The GitHub registry interprets a logical name as `owner/repo`, hyphen-joining the trailing path segments (`Muhammad-Jay:github:read` → `Muhammad-Jay/github-read`). The local store keeps the `:` delimiters as directory separators, so related modules stay grouped by owner.
 
@@ -92,14 +70,14 @@ The GitHub registry interprets a logical name as `owner/repo`, hyphen-joining th
 A module **requirement** is a logical name plus an optional version constraint:
 
 | Form | Meaning |
-| ---- | ------- |
-| `example:echo` | any version — the latest satisfying version is chosen |
-| `example:echo@1.0.0` | exact version pin |
-| `example:echo@^1.0.0` | any compatible `1.x` |
-| `example:echo@~1.0.0` | any `1.0.x` |
-| `example:echo@>=1.0.0, <2.0.0` | explicit range |
+| --- | --- |
+| `example:echo` | Any version — the latest satisfying version is chosen |
+| `example:echo@1.0.0` | Exact version pin |
+| `example:echo@^1.0.0` | Any compatible `1.x` |
+| `example:echo@~1.0.0` | Any `1.0.x` |
+| `example:echo@>=1.0.0, <2.0.0` | Explicit range |
 
-Semver governs selection (via `Masterminds/semver`). Selection is performed by the resolver *above* the providers — the registry never decides compatibility. The rules are:
+Semver governs selection (via `Masterminds/semver/v3`). Selection is performed by the **resolver above the providers** — the registry never decides compatibility. The rules:
 
 1. If an exact pin is already installed, it is used directly — no network.
 2. If a constraint is satisfied by an already-installed version, the best installed version is used — no network.
@@ -112,10 +90,6 @@ A floating requirement (no version) always talks to the registries so "latest" i
 ## The executor contract
 
 Every external module is described by a single manifest file, `executor.json`, at the root of its package:
-
-```text
-executor.json
-```
 
 ```json
 {
@@ -141,10 +115,10 @@ executor.json
 
 The manifest answers three questions:
 
-| Field | Answer |
-| ----- | ------ |
-| `metadata.name` / `metadata.version` | What is this artifact? Identity is certified by the manifest in the package. |
-| `runtime.type` / `runtime.entrypoint` / `runtime.protocol` | How is it launched and how do we speak to it? |
+| Field | Answers |
+| --- | --- |
+| `metadata.name` / `metadata.version` | What IS this artifact? Identity, certified by the manifest in the package |
+| `runtime.type` / `runtime.entrypoint` / `runtime.protocol` | How is it launched and how do we talk to it? |
 | `platforms` | Which artifact backs which execution boundary? |
 
 Validation is strict:
@@ -156,13 +130,13 @@ Validation is strict:
 ### Runtime types
 
 | `runtime.type` | Meaning | Status |
-| -------------- | ------- | ------ |
+| --- | --- | --- |
 | `process` | Runs the entrypoint as an OS child process | Supported |
 | `wasm` | Runs the entrypoint inside an embedded WASI runtime | Supported |
 | `container` | Runs the entrypoint inside an OCI container | Planned |
 | `remote` | Runs the entrypoint on a remote executor host | Planned |
 
-### Platform keys and artifacts
+### Platform keys & artifacts
 
 Each entry of `platforms` maps an execution boundary to its artifact:
 
@@ -190,7 +164,8 @@ executor.json
 
 The `executor.json` inside the archive is **authoritative** for identity and content. Registries prefer archives over per-platform assets because one asset carries the manifest plus every platform binary it references.
 
-An archive is constructed and staged externally, then published through a registry (in this repository, `examples/executors/build.sh` produces the archive for the reference module). Installing from an archive extracts it, re-validates the manifest, verifies declared digests, and writes an installation record.
+> [!TIP]
+> An archive is constructed and staged externally, then published through a registry. In this repository, `examples/executors/build.sh` produces the archive for the reference module. Installing from an archive extracts it, re-validates the manifest, verifies declared digests, and writes an installation record.
 
 ---
 
@@ -198,14 +173,12 @@ An archive is constructed and staged externally, then published through a regist
 
 A **registry** is a provider that answers *where a package can be obtained*. It is deliberately pluggable; the resolver and runtime never know or care which registry a package came from.
 
-Two registries ship by default:
+| Registry | Backing | Serve |
+| --- | --- | --- |
+| `github` | GitHub Releases | Version discovery via releases; artifacts as release assets |
+| `local` | A directory path | A directory-backed catalog for offline development and tests |
 
-| Registry | URL | Backing |
-| -------- | --- | ------- |
-| `github` | `https://api.github.com` | GitHub Releases — version discovery via releases, artifacts as release assets |
-| `local` | a directory path | A directory-backed catalog, used for offline development and tests |
-
-The `github` registry resolves a logical name like `example:echo` to a repository (`example/echo`), discovers versions from release tags, and reads `executor.json` from a release asset. The GitHub registry is **catalog-driven**: only modules listed in its configured catalog are served (it never guesses at repositories), so publishing your own module distribution will add catalog entries and release assets.
+The `github` registry resolves a logical name like `example:echo` to a repository (`example/echo`), discovers versions from release tags, and reads `executor.json` from a release asset. The GitHub registry is **catalog-driven**: only modules listed in its configured catalog are served — it never guesses at repositories.
 
 The `local` registry serves a directory laid out exactly like the installed store:
 
@@ -232,23 +205,18 @@ executors:
 
 ## Resolution & installation
 
-Resolution is performed by the CLI during `neuron add` and `neuron register`. The flow:
+Resolution is performed by the CLI during `neuron add` and `neuron register`:
 
-```text
-Requirement (name + constraint + allowed registries)
-    ↓
-already satisfied in the store?  →  use installed version (no network)
-    ↓
-per configured registry:
-    list available versions
-    SelectVersion(constraint, versions)     ← semver, chosen by the resolver
-    Package(type, version)                  ← immutable package from the registry
-    ↓
-verify (declared digests, manifest re-validation)
-    ↓
-install immutably into the store
-    ↓
-Installed executor
+```mermaid
+flowchart TB
+    A[Requirement<br/>name + constraint + allowed registries] --> B{Already satisfied<br/>in the store?}
+    B -->|yes| C[Use installed version<br/>no network]
+    B -->|no| D[Per configured registry: list available versions]
+    D --> E[SelectVersion constraint + versions<br/>semver chosen by the resolver]
+    E --> F[Package type + version<br/>immutable package from the registry]
+    F --> G[Verify<br/>declared digests + manifest re-validation]
+    G --> H[Install immutably into the store]
+    H --> I[Installed executor]
 ```
 
 Installation is atomic: artifacts are staged, verified, and reconciled against the inner manifest before the final immutable record is written (`install.json`). The installed layout mirrors the logical name:
@@ -288,10 +256,10 @@ The runtime therefore never resolves anything — it receives a closed set of fr
 
 N.O.R.E. hosts external modules out-of-process. The runtime dispatches on `runtime.type`:
 
-- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancelled/deadline-aware, and gracefully terminated. See [docs/RUNTIME_PROCESS.md](./RUNTIME_PROCESS.md).
+- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [docs/RUNTIME_PROCESS.md](./RUNTIME_PROCESS.md).
 - **WASM runtime** — a WASI module loaded into an embedded, sandboxed runtime, with a fresh module instance per request. See [docs/RUNTIME_WASM.md](./RUNTIME_WASM.md).
 
-The runtime never assumes an implementation language. The contract is the frozen `ResolvedExecutor` record (runtime type, protocol, entrypoint, exact version) plus the declared wire protocol.
+The runtime never assumes an implementation language. The contract is the frozen resolved-executor record (runtime type, protocol, entrypoint, exact version) plus the declared wire protocol.
 
 ---
 
@@ -327,7 +295,7 @@ A controlled failure can be reported in-band (`"error": "..."`, possibly with ex
 The runtime also injects execution context as environment variables, so an executor can observe which protocol version, logical type, and exact version it is being run as:
 
 | Variable | Meaning |
-| -------- | ------- |
+| --- | --- |
 | `NEURON_EXECUTOR_PROTOCOL` | Expected protocol version |
 | `NEURON_EXECUTOR_TYPE` | Logical executor type being executed |
 | `NEURON_EXECUTOR_VERSION` | Exact resolved version |
@@ -340,7 +308,7 @@ Authoring an external module means producing a directory that satisfies the exec
 
 ### The easy path — the Go SDK
 
-The Go SDK (`packages/executor-go`) removes the protocol plumbing. Write a `Handler`, serve it, and you have an executor:
+The Go SDK (`packages/executor-go`) removes the protocol plumbing. Write a `Handler`, call `executor.Serve`, and you have an executor:
 
 ```go
 package main
@@ -411,13 +379,16 @@ neuron executor inspect example:echo@1.0.0
 
 N.O.R.E. ships a small set of built-in modules for common operations. They run **in-process** inside the runtime engine and require no resolution or installation — referencing one in a Service is a plain module reference, and the runtime dispatches it directly to the in-process implementation.
 
-Built-ins are the deliberate exception to out-of-process hosting: they are part of N.O.R.E. itself (and thereby of the trusted, tested runtime). Everything else follows the external-module path above, with verification and process/WASM isolation.
+> [!IMPORTANT]
+> Built-ins are the deliberate exception to out-of-process hosting: they are part of N.O.R.E. itself (and thereby of the trusted, tested runtime). Everything else follows the external-module path above, with verification and process/WASM isolation.
 
 ---
 
 ## Security model
 
-- External modules are **untrusted code**. Never add an arbitrary module to a registry without verification.
+> [!WARNING]
+> External modules are **untrusted code**. Never add an arbitrary module to a registry without verification.
+
 - Artifacts are verified by digest whenever the manifest declares a SHA-256. A digest declaration is not proof of trustworthiness — it proves the artifact is the one the publisher shipped.
 - GitHub is a **distribution source, not a security boundary**. A release asset is not automatically trustworthy.
 - Hosting is out-of-process; arbitrary external code never runs inside the N.O.R.E. address space.

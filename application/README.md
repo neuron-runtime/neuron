@@ -1,10 +1,41 @@
 # Neuron Command Line Reference
 
-The `neuron` CLI is the single user-facing interface to Neuron. It lets you author projects, build and register systems, manage external modules, create instances, execute systems, and stream execution events — while it manages the N.O.R.E. runtime engine (the daemon) for you in the background.
+The `neuron` CLI is the single user-facing interface to Neuron: author projects, build and register systems, manage external modules, create instances, execute systems, and stream execution events while it manages the N.O.R.E. runtime engine (the daemon) for you in the background.
 
-Everything below is generated from the actual command definitions in this module (`application/cmd/neuron` and `application/internal/cli`), so it stays accurate as long as it is kept in sync with the code.
+> [!IMPORTANT]
+> You never interact with the N.O.R.E. daemon directly. The CLI starts it, checks its health, talks to it over a local Unix socket, and stops it. From the user's perspective there is a single product: `neuron`.
 
-**You never interact with the N.O.R.E. daemon directly.** The CLI starts it, checks its health, talks to it over a local Unix socket, and stops it. From the user's perspective there is a single product: `neuron`.
+Everything in the [command reference](#command-reference) is generated from the actual command definitions in this module (`application/cmd/neuron` and `application/internal/cli`), so it stays accurate as long as it is kept in sync with the code.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as neuron CLI
+    participant D as N.O.R.E. daemon
+    participant S as Executor Store
+
+    U->>C: neuron register
+    C->>C: build project → canonical manifest
+    C->>C: compile → resolve modules → freeze versions
+    C->>D: daemon healthy?
+    alt not running
+        C->>D: start bundled nore (Unix socket + data dir)
+    end
+    C->>D: POST /v1/register (compiled system + frozen executors)
+    D-->>C: system key
+    C-->>U: registered with key
+
+    U->>C: neuron run --input '{...}'
+    C->>D: POST /v1/instances
+    D-->>C: instance + execution events streamed (WebSocket / SSE)
+    C-->>U: terminal state reached
+```
+
+
+
+[Version](https://github.com/Muhammad-Jay/neuron/releases)
+[Go](https://go.dev)
+[License](../LICENSE)
 
 ---
 
@@ -16,20 +47,9 @@ Everything below is generated from the actual command definitions in this module
 - [How the CLI Talks to N.O.R.E.](#how-the-cli-talks-to-nore)
 - [Global Flags](#global-flags)
 - [Command Reference](#command-reference)
-  - `[neuron version](#neuron-version)`
-  - `[neuron init](#neuron-init)`
-  - `[neuron register](#neuron-register)`
-  - `[neuron run](#neuron-run)`
-  - `[neuron add](#neuron-add)`
-  - `[neuron remove](#neuron-remove)`
-  - `[neuron executor](#neuron-executor)`
-  - `[neuron instance](#neuron-instance)`
-  - `[neuron daemon](#neuron-daemon)`
-  - `[neuron completion](#neuron-completion)`
 - [Configuration Reference](#configuration-reference)
 - [Module Resolution](#module-resolution)
-
----
+- [Building the CLI](#building-the-cli)
 
 
 
@@ -43,10 +63,6 @@ neuron version
 
 See [docs/INSTALLATION.md](../docs/INSTALLATION.md) for the full installation guide.
 
----
-
-
-
 ## How the CLI Talks to N.O.R.E.
 
 The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. When you run a command that needs the runtime, the CLI automatically:
@@ -58,9 +74,13 @@ The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. W
 
 The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
 
-Regular requests are JSON over HTTP. Live execution events are streamed over the WebSocket endpoint (`/v1/ws`), with a Server-Sent Events fallback for transports without WebSocket support.
 
----
+| Transport            | Purpose                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| JSON over HTTP       | Regular requests — registration, instance and execution management |
+| WebSocket (`/v1/ws`) | Live execution event streaming                                     |
+| Server-Sent Events   | Streaming fallback for transports without WebSocket support        |
+
 
 
 
@@ -81,8 +101,6 @@ The following flags are available on every `neuron` command.
 | `--version`          | Print the CLI version and exit                                   |
 
 
----
-
 
 
 ## Command Reference
@@ -98,7 +116,7 @@ neuron version
 neuron --version
 ```
 
-Both print the same version. The version is injected at build time from the release tag, so a development build reports `dev`.
+Both print the same version. The version is injected at build time from the release tag; a development build reports `dev`.
 
 ### `neuron init`
 
@@ -117,7 +135,7 @@ neuron init my-system
 cd my-system
 ```
 
-The scaffolded config selects the YAML authoring language. Add `systems/`, `services/`, and `connectors/` directories and start defining your system — see [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md).
+The scaffolded config selects the YAML authoring language. To author in TypeScript, set `lang: typescript` and add the SDK project files — see [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md).
 
 ### `neuron register`
 
@@ -134,10 +152,14 @@ Flags:
 
 `neuron register` runs the full authoring pipeline in one step:
 
-1. **Build** — the project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`.
-2. **Compile** — the canonical manifest is compiled into a runtime system representation.
-3. **Resolve** — external module requirements declared by services are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the registration payload. Built-in modules are skipped — they run in-process inside N.O.R.E.
-4. **Register** — the compiled system and its frozen module set are sent to N.O.R.E., which persists it and returns a system key.
+
+| Step         | Responsibility                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Build**    | The project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`                                                                                                                                                          |
+| **Compile**  | The canonical manifest is compiled into a runtime system representation                                                                                                                                                                          |
+| **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the registration payload. Built-in modules are skipped — they run in-process inside N.O.R.E. |
+| **Register** | The compiled system and its frozen module set are sent to N.O.R.E., which persists it and returns a system key                                                                                                                                   |
+
 
 The CLI stores the registration key locally and prints it on success:
 
@@ -391,8 +413,6 @@ Generate the autocompletion script for your shell (bash, zsh, fish, or powershel
 source <(neuron completion bash)
 ```
 
----
-
 
 
 ## Configuration Reference
@@ -404,7 +424,7 @@ The CLI resolves configuration from several layers, later layers overriding earl
 3. Environment variables.
 4. Command-line flags.
 
-The scaffolded `neuron.yaml` produced by `neuron init` looks like:
+**The scaffolded** `neuron.yaml` **produced by** `neuron init`
 
 ```yaml
 apiVersion: neuron/v1
@@ -449,23 +469,23 @@ inspector:
 ### Key configuration values
 
 
-| Key                         | Default               | Meaning                                                                  |
-| --------------------------- | --------------------- | ------------------------------------------------------------------------ |
+| Key                         | Default               | Meaning                                                                                                    |
+| --------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `lang`                      | auto-detected         | Project authoring language (`yaml`, `yml`, `typescript`, `ts`); detected from the project files when unset |
-| `systems.entry`             | —                     | Path to the project's entry system definition                            |
-| `runtime.execution.mode`    | `wait`                | Execution mode (`wait` for a blocking result, `detach` for asynchronous) |
-| `runtime.execution.timeout` | `30m`                 | Execution timeout                                                        |
-| `runtime.workers.min`       | `1`                   | Minimum executor workers                                                 |
-| `runtime.workers.max`       | `8`                   | Maximum executor workers                                                 |
-| `storage.provider`          | `local`               | Storage provider                                                         |
-| `storage.directory`         | `~/.neuron/nore`      | Persistent data directory                                                |
-| `daemon.socket`             | `~/.neuron/nore.sock` | Local Unix socket for the daemon                                         |
-| `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                  |
-| `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                         |
-| `executors.storeDir`        | `~/.neuron/executors` | Where resolved modules are installed                                     |
-| `executors.registries`      | `github`, `local`     | Registries used to resolve modules                                       |
-| `inspector.enabled`         | `true`                | Enable the runtime inspector                                             |
-| `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                        |
+| `systems.entry`             | —                     | Path to the project's entry system definition                                                              |
+| `runtime.execution.mode`    | `wait`                | Execution mode (`wait` for a blocking result, `detach` for asynchronous)                                   |
+| `runtime.execution.timeout` | `30m`                 | Execution timeout                                                                                          |
+| `runtime.workers.min`       | `1`                   | Minimum executor workers                                                                                   |
+| `runtime.workers.max`       | `8`                   | Maximum executor workers                                                                                   |
+| `storage.provider`          | `local`               | Storage provider                                                                                           |
+| `storage.directory`         | `~/.neuron/nore`      | Persistent data directory                                                                                  |
+| `daemon.socket`             | `~/.neuron/nore.sock` | Local Unix socket for the daemon                                                                           |
+| `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                                                    |
+| `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                                                           |
+| `executors.storeDir`        | `~/.neuron/executors` | Where resolved modules are installed                                                                       |
+| `executors.registries`      | `github`, `local`     | Registries used to resolve modules                                                                         |
+| `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
+| `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
 
 
 
@@ -483,26 +503,33 @@ Environment variables can also be used for any configuration value with the `NEU
 
 ### Project layout
 
-A Neuron project (authoring surface: YAML) is conventionally laid out as:
+`neuron init <project>` creates the project directory and a starter `neuron.yaml` (project configuration with `lang: yaml`). From there you add the system and service definitions by hand. The canonical YAML layout (as shipped in `examples/ecommerce_order`) is:
 
 ```text
 <project>
-├── neuron.yaml            project configuration
-├── systems/               system definitions
-│   └── <system>/system.yaml
-├── services/              service (module) definitions
-└── connectors/            connector definitions
+├── neuron.yaml              project configuration + systems entry
+├── systems/
+│   └── <name>/system.yaml   system definition
+└── services/                service (module) definitions
 ```
 
+The `neuron.yaml` template wires `systems.entry` to `./systems/<name>/system.yaml`. The system file lists its services either by `entry:` reference or inline, and connectors are declared **inline** in the system file (mappings and validations) — there is no separate `connectors/` directory.
+
 `neuron register` resolves this layout, builds the canonical manifest into `.neuron/manifest.json`, compiles it, and registers the result. The TypeScript authoring surface produces the same canonical manifest from SDK definitions.
-
----
-
-
 
 ## Module Resolution
 
 When a system references an external module (for example `example:echo@1.0.0`), the CLI resolves it as follows:
+
+```mermaid
+flowchart LR
+    A[Requirement<br/>logical name + version constraint] --> B[Resolution<br/>registries queried · semver match]
+    B --> C[Verification<br/>canonical archive + digest]
+    C --> D[Installation<br/>immutable executor store]
+    D --> E[Freezing<br/>exact versions pinned in the system]
+```
+
+
 
 1. **Requirement** — the system declares the module by logical name (`owner:path`) and optionally a version constraint.
 2. **Resolution** — the configured registries are queried for available versions; the best matching version is chosen using semantic versioning (an empty constraint selects the latest version).
@@ -513,10 +540,6 @@ When a system references an external module (for example `example:echo@1.0.0`), 
 Built-in modules shipped inside N.O.R.E. are skipped during resolution; they run in-process. Everything else travels the resolution + installation + freezing path.
 
 See [docs/MODULES.md](../docs/MODULES.md) for the complete module model and how to author a module.
-
----
-
-
 
 ## Building the CLI
 
@@ -529,7 +552,17 @@ go build -o neuron ./application/cmd/neuron
 
 The release pipeline passes the release version through `-ldflags` so `neuron version` reports the exact release; see [scripts/release.sh](../scripts/release.sh).
 
----
+## Related documentation
+
+
+|                         |                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| **Getting started**     | Run your first system — [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)               |
+| **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](../docs/INSTALLATION.md) |
+| **Modules & executors** | The unified module model — [docs/MODULES.md](../docs/MODULES.md)                            |
+| **N.O.R.E.**            | The runtime engine in depth — [nore/README.md](../nore/README.md)                           |
+| **Architecture**        | Canonical pipeline and boundaries — [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)         |
+
 
 
 

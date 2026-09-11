@@ -1,335 +1,306 @@
 # Neuron
 
-Neuron is a runtime for building and operating complex software systems from composable, executable capabilities.
+**A runtime for building and operating complex software systems from composable, executable capabilities.**
 
-It is built around a simple idea:
+Neuron treats software as a composition of **capabilities** connected by **explicit relationships** and operated by a runtime that does not need to understand what those capabilities are.
 
 > Software should be composed from things that can do something, connected by explicit relationships, and operated by a runtime that does not need to understand what those things are.
 
-Neuron is not a workflow platform.
-
-It is not tied to a particular kind of application, service, language, or execution model.
-
-It is closer to a small operating environment — a micro-kernel-like foundation for systems whose capabilities can be composed, connected, and operated independently of the technology used to implement them.
-
----
-
-
-
-## Status
-
-**Version:** `0.1.0` — first public development release.
-
-Neuron is in active, early development. The core ideas are implemented and usable, the architecture is deliberate, and the repository is structured for long-term growth — but everything is still subject to change as the platform matures.
-
-Current state in one sentence:
-
-- **Working today:** the `neuron` CLI, system definition in YAML and TypeScript, compilation and registration, the N.O.R.E. runtime engine, in-process built-in modules, external modules hosted as processes or WebAssembly, system instances, and execution with live event streaming.
-- **Experimental:** the external module ecosystem, Git-based module resolution, and several runtime refinements.
-- **Planned:** runtime hardening, broader module distribution, and additional execution models.
-
-See [docs/STATUS.md](./docs/STATUS.md) for the current supported surface, and [TODO.md](./TODO.md) for what is known to need work.
+[Version](https://github.com/Muhammad-Jay/neuron/releases)
+[Go](https://go.dev)
+[TypeScript](https://www.typescriptlang.org)
+[License](./LICENSE)
 
 ---
 
 
 
-## What Is Neuron?
+## The Runtime Model
 
-Modern software is usually built as a collection of applications, services, workers, libraries, queues, databases, APIs, and infrastructure.
+Neuron defines a deliberately small set of primitives. Each one owns a single responsibility and deliberately ignores everything else:
 
-As systems grow, the difficulty is rarely writing one individual component. The difficulty is making all of those components work together as one coherent system.
 
-Neuron approaches this differently.
+| Primitive     | Responsibility                                               | What it deliberately never knows       |
+| ------------- | ------------------------------------------------------------ | -------------------------------------- |
+| **System**    | Defines what exists and how it is connected                  | How capabilities are implemented       |
+| **Service**   | Exposes one executable capability                            | How the capability is executed         |
+| **Connector** | Defines how two capabilities communicate                     | The business meaning of the data       |
+| **Executor**  | Provides the machinery that runs a Service                   | The composition of the System          |
+| **Instance**  | A living realization of a System                             | Implementation details of its Services |
+| **N.O.R.E.**  | Operates registered Systems — instantiate, schedule, execute | What any capability actually means     |
 
-Instead of making the runtime understand every kind of application or service, it defines a small set of primitives:
 
-- **System** — what a complete software system is made of
-- **Module** — an executable capability, packaged for Neuron
-- **Connector** — how capabilities communicate
-- **Instance** — a living realization of a System
-- **N.O.R.E.** — the runtime engine in which Systems exist and operate
+N.O.R.E. (**Neuron Operational Runtime Engine**) is the runtime at the center. A System describes what should exist; N.O.R.E. makes it operational — and hosts each capability through an **Executor boundary** that keeps the runtime independent of any single technology.
 
-These concepts deliberately remain independent.
+```mermaid
+flowchart TB
+    Sys[System] --> NOR[N.O.R.E. — Neuron Operational Runtime Engine]
+    NOR --> MP[In-process built-in modules]
+    NOR --> PR[Process Runtime]
+    NOR --> WR[WASM Runtime]
+    NOR --> CR[Container Runtime]
+    NOR --> RR[Remote Runtime]
 
-A module does not need to be a function. A connector does not need to be an HTTP request. A module does not need to be written in the same language as the system using it. And N.O.R.E. does not need to know what a module actually does — it only needs to know how to operate it.
+    MP --> SET[built-in: set / log / delay / command]
+    PR --> PROCS[Native executor processes]
+    WR --> WASMI[wasm32-wasi modules]
 
-**Neuron treats software as a composition of capabilities rather than a collection of applications.**
+    CR -. planned .-> OCI[OCI images]
+    RR -. planned .-> REMOTE[Remote executor hosts]
+```
 
-A capability can be almost anything: a function, a library, an API, a database operation, a model, a filesystem operation, a browser automation task, a GitHub operation, a native program, a WebAssembly module, a process running on another machine, a service written in another programming language, or another system exposed as a capability.
 
-Neuron does not need to understand the implementation. It only needs a contract describing what the capability provides and how it can be reached. This makes the boundary between "application", "service", "worker", and "external system" much less important. They can all become **modules**.
+
+> [!IMPORTANT]
+> Neuron is **not** a workflow engine. A workflow is one thing a System can represent — it is not the boundary of the platform. The fundamental abstraction is a System of capabilities and explicit relationships.
+
+A Service does not have to be a "microservice". A database query, an HTTP call, a model prediction, a browser automation task, a WebAssembly module, a native program, or another System can all be capabilities. What matters is the **contract** describing what a capability provides and how it can be reached.
+
+> [!NOTE]
+> A Service is a capability, not necessarily a process, function, API, or worker. A Connector is a relationship, not necessarily an HTTP request.
 
 ---
 
 
 
-# Core Concepts
+## Build a System
 
+Systems are defined in TypeScript with the (`@neuron/sdk`)`[@neuron/sdk](https://github.com/Muhammad-Jay/neuron/blob/main/packages/sdk)` — a typed, autocompleted system-definition language — or in YAML. Both authoring surfaces converge on the **same canonical manifest** before anything runtime-specific happens.
 
+Here is a real order-fulfillment definition. Three independent capabilities, wired by explicit relationships, executed by the Neuron runtime:
 
-## Module
+```ts
+import { Service, System } from "@neuron/sdk";
 
-A **module** is the unified name for any executable capability packaged for Neuron.
+type Address = { street: string; city: string; zip: string };
+type OrderItem = { sku: string; name: string; qty: number; priceCents: number };
+type Order = {
+  id: string;
+  customerId: string;
+  customerEmail: string;
+  currency: string;
+  totalCents: number;
+  items: OrderItem[];
+  shippingAddress: Address;
+};
 
-Neuron uses one word deliberately: whether a capability is a logical operation or the machinery that executes it, to every other part of Neuron it is simply a **module**, something with a name, a contract, and a way to be run.
+const validateOrder = Service({
+  name: "order.validate",
+  version: "1.0.0",
+  description: "Validate an incoming order",
+})
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order }>()
+  .outputSchema<{ order: Order; valid: boolean }>();
 
-When more precision is needed, a module is one of two things:
+const authorizePayment = Service({
+  name: "payment.authorize",
+  version: "1.0.0",
+  description: "Authorize payment for an order",
+})
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order; amountCents: number; currency: string }>()
+  .outputSchema<{ order: Order; amountCents: number }>();
 
-- **Service** —an executable capability. `github.read`, `customer.verify`, `payment.authorize`, `database.query`, `model.predict`, `filesystem.read`, `email.send`. The name does not determine how the capability is implemented: one Service could run locally, another remotely, another as a WebAssembly module, another implemented in Rust, Go, Python, or JavaScript.
-- **Executor** — the mechanism that actually runs a Service. The Executor provides the machinery required to make that capability operate.
+const createShipment = Service({
+  name: "fulfillment.create-shipment",
+  version: "1.0.0",
+  description: "Create a shipment for a paid order",
+})
+  .executor({ name: "neuron:core:set" })
+  .inputSchema<{ order: Order }>()
+  .outputSchema<{ order: Order; trackingId: string }>();
 
-From Neuron's perspective, they are all capabilities that can participate in a System. The Service remains the logical capability; the Executor provides the machinery. This separation is what allows Neuron to support capabilities implemented using different technologies without turning the core runtime into a collection of special cases.
+const manifest = System({
+  name: "order-fulfillment",
+  version: "1.0.0",
+  description: "Validate, authorize, and fulfill customer orders",
+})
+  .inputSchema<{ order: Order }>()
+  .withParams((input) =>
+    validateOrder
+      .withInput({ order: input.order })
+      .next(
+        authorizePayment.withInput({
+          order: validateOrder.output.order,
+          amountCents: validateOrder.output.order.totalCents,
+          currency: validateOrder.output.order.currency,
+        })
+      )
+      .next(
+        createShipment.withInput({
+          order: authorizePayment.output.order,
+        }),
+        {
+          when: authorizePayment.output.amountCents.greaterThanOrEqualTo(1000),
+          message: "Payment authorization threshold not met",
+        }
+      )
+  )
+  .toManifest();
 
-Modules are referenced by name (for example `example:echo`), either because the module is built into N.O.R.E. and runs in-process, or because it is resolved, installed, and hosted out-of-process by N.O.R.E. See [docs/MODULES.md](./docs/MODULES.md) for the full module model.
-
-## System
-
-A **System** is the definition of a software system. It describes the capabilities that belong together and the relationships between them. A System can be small:
-
-> receive a request → validate it → return a result
-
-Or it can become extremely large:
-
-> authentication → billing → inventory → notifications → analytics → external APIs → background processing
-
-The important distinction is that a System describes **what exists and how it is connected**, rather than forcing everything to be implemented as one application. A System is therefore a composition. Systems can themselves become building blocks for larger systems.
-
-```text
-                 System
-                    │
-        ┌───────────┼───────────┐
-        │           │           │
-     Service     Service     Service
-        │           │           │
-        └─────── Connectors ────┘
+export default manifest;
 ```
 
 
 
-## Connector
+### What this definition establishes
 
-A **Connector** describes how one module communicates with another.
-
-This distinction is important. A Service describes what can be done. A Connector describes how it can be reached or connected.
-
-Depending on the environment, a Connector could represent communication through an in-process interface, a local process, a Unix socket, a network connection, an RPC protocol, a message channel, an external API, or another supported transport. This allows the architecture of a System to remain independent from the transport used underneath it.
-
-```text
-Service A
-   │
-   │ Connector
-   ▼
-Service B
+```mermaid
+flowchart LR
+    A[Order received] --> B[order.validate]
+    B -->|order, amount| C[payment.authorize]
+    C -->|amount >= 1000| D[fulfillment.create-shipment]
+    C -.->|amount < 1000| X[Execution rejected]
+    D --> E[Confirmed]
 ```
 
-The same logical relationship can exist whether both services are on the same machine or separated across a network.
 
-## Instance
 
-A System is a definition. An **Instance** is a living realization of that definition.
+1. **Three independently executable capabilities** — `order.validate`, `payment.authorize`, `fulfillment.create-shipment`. Neuron does not require them to share an implementation language, process, deployment model, or infrastructure.
+2. **Explicit relationships** — `.next()` chains data from one capability to the next; `.withInput()` maps output fields to the next input contract; `{ when: ... }` guards whether a step runs at all.
+3. **A stationary boundary** — the System defines *what* and *how things connect*. The Executors determine *how each capability actually runs*: in-process, as a native worker process, or as a WebAssembly module.
 
-A System might describe "Customer Verification". An Instance represents an actual running or available realization of that system with its own state, resources, configuration, and activity.
-
-This distinction allows the same System definition to have many independent instances. The same definition can be reused without forcing every realization to share the same state.
-
-```text
-                 System
-          Customer Verification
-                   │
-          ┌────────┼────────┐
-          │        │        │
-       Instance  Instance  Instance
-          A        B        C
-```
-
-This is one of the foundations that allows Neuron to move beyond simple task execution.
-
-## N.O.R.E.
-
-**Neuron Operational Runtime Engine**
-
-N.O.R.E. is the runtime engine of Neuron.
-
-It is where Systems are registered, instantiated, operated, and connected to the capabilities they require. N.O.R.E. provides the environment in which a System can become something that actually exists.
-
-```text
-                    Neuron
-                      │
-                      ▼
-                   N.O.R.E.
-                      │
-          ┌───────────┼───────────┐
-          │           │           │
-       Systems     Instances    Services
-          │           │           │
-          └───────────┼───────────┘
-                      │
-                  Executors
-                      │
-          ┌───────────┼───────────┐
-          │           │           │
-       Local       WASM        Remote
-```
-
-N.O.R.E. is intentionally not responsible for understanding the business meaning of the capabilities it operates. It provides the runtime primitives; the capabilities provide the behavior.
-
-You do not interact with N.O.R.E. directly. The `neuron` CLI manages it for you — starting it, stopping it, and communicating with it over a local connection as needed. From a user's perspective there is a single product: **Neuron**.
+The complete, runnable version of this pipeline ships in `examples/ecommerce_order_ts`. The same logic expressed in YAML lives in `examples/ecommerce_order`.
 
 ---
 
 
 
-## How Neuron Works
+## Why Neuron
 
-The conceptual lifecycle of a Neuron System is:
+The boundary Neuron introduces is between the **definition of a system** and the **mechanisms that execute it**.
 
-```text
-Definition
-    │
-    ▼
-Resolution
-    │
-    ▼
-System
-    │
-    ▼
-Registration
-    │
-    ▼
-N.O.R.E.
-    │
-    ▼
-Instance
-    │
-    ▼
-Execution
-```
 
-The important part is that a System definition is not the same thing as a running Instance. A definition describes what should exist. N.O.R.E. provides the environment. An Instance makes that definition operational. Modules provide the actual capabilities.
+| Without a runtime model                 | With Neuron                                     |
+| --------------------------------------- | ----------------------------------------------- |
+| Application-specific integration code   | Explicit Service contracts                      |
+| Implementation leaks into composition   | A stable Executor boundary                      |
+| Runtime coupled to one technology stack | Runtime operates contracts, not implementations |
+| A single deployment model               | Multiple executor runtimes (process, WASM, …)   |
+| Implicit, ad-hoc relationships          | Explicit Connectors                             |
+| Configuration-heavy composition         | Typed System definitions                        |
 
-With the `neuron` CLI this becomes a short workflow:
 
-1. **Define** a System in YAML or TypeScript.
-2. **Register** it with N.O.R.E. — the CLI builds the project, resolves any external modules it needs, and hands a compiled System to the runtime.
-3. **Run** it — the CLI asks N.O.R.E. to create an Instance and execute the System, streaming live execution events back to you.
+Because capabilities are reached through contracts, the same System can run entirely locally today and distribute individual capabilities later — the physical location never has to redefine the logical architecture.
 
-```text
-Neuron CLI
-    │
-    ├── project → build → compiler
-    ├── module resolution
-    └── N.O.R.E. client
-             │
-             ▼
-         N.O.R.E.
-             │
-             ▼
-         Instance
-             │
-             ▼
-        Service Executor
+```mermaid
+flowchart LR
+    subgraph Local
+        A[System] --> B[In-process capability]
+        A --> C[Worker process capability]
+        A --> D[WASM capability]
+    end
+    subgraph Distributed
+        E[System] --> F[Remote capability A]
+        E --> G[Remote capability B]
+    end
 ```
 
 
 
-## The Runtime as a Small Operating Environment
+> [!WARNING]
+> WebAssembly and out-of-process execution are **execution boundaries**, not a requirement for every Service. They exist so a capability can be portable, isolated, and independently implemented, not so every capability must become one.
 
-The operating-system analogy is useful, but with an important distinction. Neuron is not trying to become an operating system for hardware. It is an operating environment for software capabilities.
 
-An operating system provides primitives such as processes, memory, resources, communication, isolation, scheduling, identity, and persistence. Neuron applies a similar philosophy at a higher level, providing a foundation around Systems, Instances, Services, Executors, Connectors, resources, state, communication, and execution.
 
-This is why N.O.R.E. can be thought of as a micro-kernel-like runtime for Neuron. The kernel should remain small. Capabilities should live outside it.
+## N.O.R.E. as a Small Operating Environment
 
-## Everything Is a Capability
+An operating system provides processes, memory, resources, communication, isolation, and scheduling. N.O.R.E. applies the same discipline one level higher: Systems, Instances, Services, Executors, Connectors, resource management, and execution. The kernel stays small; capabilities live outside it.
 
-One of the most important ideas in Neuron is that a Service does not have to correspond to a traditional "microservice". A Service can represent a capability at any level.
-
-```text
-                 System
-                    │
-        ┌───────────┼───────────┐
-        │           │           │
-    Database      Model       GitHub
-     Service     Service      Service
-        │           │           │
-        └───────────┼───────────┘
-                    │
-                Application
+```mermaid
+flowchart TB
+    CLI[neuron CLI] -->|config / register / run / events| API[N.O.R.E. Local API]
+    API --> IM[Instance Manager]
+    API --> SR[System Repository]
+    IM --> EE[Execution Engine]
+    EE --> EB[Event Bus]
+    EE --> ER[Executor Runtime Registry]
+    EB --> ST[Storage Provider]
+    EE --> Sched[Scheduler]
+    Sched --> Res[Expr. Resolver]
+    ER --> PRO[Process Backend]
+    ER --> WASM[WASM Backend]
 ```
 
-Or:
 
-```text
-System
-  │
-  └── Another System
-          │
-          ├── Service
-          ├── Service
-          └── Service
-```
 
-This creates a recursive model of software composition. Complex systems can be constructed from smaller systems without requiring the runtime to treat them as fundamentally different things.
-
-## Local and Distributed
-
-Neuron is designed so that location does not have to define the architecture.
-
-```text
-Same process
-     ↓
-Same machine
-     ↓
-Another local process
-     ↓
-Another machine
-     ↓
-Another runtime
-     ↓
-Another environment
-```
-
-The logical System can remain the same while its physical deployment changes. This makes it possible to begin with a completely local system and gradually distribute individual capabilities as the system grows.
-
-## WebAssembly
-
-WebAssembly provides one possible execution environment for Services. Its value in Neuron is not simply that it is "fast". It provides a portable and controlled execution boundary.
-
-That makes it useful when a Service needs to be portable, isolated, distributed as a single artifact, executable across different environments, implemented independently from the main runtime, or loaded dynamically. WebAssembly therefore fits naturally at the Executor boundary. It is one execution mechanism among many, rather than something every Service must become.
-
-## Why Neuron Is Not a Workflow Engine
-
-Workflow engines generally begin with a predefined abstraction: a workflow consists of a sequence of tasks. Neuron starts somewhere else: a System consists of capabilities and relationships.
-
-That difference matters. A workflow is one possible thing that can be represented using Neuron — it is not the boundary of the platform. A System may represent an API backend, an automation system, an AI application, a data-processing environment, an interactive application, a distributed service, an internal platform, a long-running process, or something that does not fit neatly into traditional application categories.
-
-Neuron is intended to provide the underlying runtime model rather than dictate the application model.
+You never interact with N.O.R.E. directly. The `neuron` CLI starts it, checks its health, talks to it over a local Unix socket, and stops it — from your perspective there is a single product.
 
 ---
 
 
 
-## Architecture
+## How a System Runs
 
-The repository is a monorepo containing the whole platform:
-
-```text
-nuron/
-├── application/    The neuron CLI, compiler, loader, and project toolchain
-├── nore/           N.O.R.E. — the Neuron Operational Runtime Engine
-├── shared/         Canonical types and protocol contracts shared by both modules
-├── packages/
-│   ├── sdk/        TypeScript SDK for defining Neuron systems (@neuron/sdk)
-│   └── executor-go/ Go SDK for authoring Neuron modules (executors)
-├── examples/       Runnable example systems and reference executors
-├── docs/           Architecture, getting started, installation, and module docs
-└── scripts/        Workspace development and release helpers
+```mermaid
+flowchart LR
+    A[Define a System<br/>TypeScript or YAML] --> B[Register with neuron<br/>build → compile → resolve → freeze]
+    B --> C[N.O.R.E. persists the compiled system]
+    C --> D[Run: create an Instance]
+    D --> E[N.O.R.E. plans & executes]
+    E --> F[Live execution events streamed back]
 ```
 
-`application` and `nore` are separate Go modules that only agree through the canonical types in `shared`. The CLI authoring toolchain never speaks to the runtime's internals, and the runtime never parses YAML or TypeScript. The source language converges on one canonical manifest before anything runtime-specific happens.
 
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full architecture.
+
+
+| Stage            | Responsibility                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| **Definition**   | Author a System in TypeScript or YAML using the SDK or the YAML surface               |
+| **Manifest**     | Produce the canonical System representation both surfaces agree on                    |
+| **Validation**   | Verify structural and semantic correctness                                            |
+| **Compilation**  | Build the runtime representation from the canonical manifest                          |
+| **Resolution**   | Resolve required external executor packages and freeze exact versions                 |
+| **Registration** | Hand the compiled System + frozen executor set to N.O.R.E.                            |
+| **Instance**     | Create a living realization of the registered System                                  |
+| **Execution**    | N.O.R.E. schedules Services across connectors and runs them through executor runtimes |
+
+
+```bash
+# The fastest way to feel Neuron — run the shipped order pipeline
+git clone https://github.com/Muhammad-Jay/neuron.git
+cd neuron/examples/ecommerce_order_ts
+pnpm install
+neuron register          # build the TS project, compile, register with the runtime
+neuron run               # create an instance and stream live execution events
+```
+
+Walk through it in detail in [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md).
+
+---
+
+
+
+## Executors & External Modules
+
+A Service is the logical capability. An **Executor** is the machinery that makes it operate. Neuron distinguishes two kinds:
+
+- **Built-in modules** — shipped inside N.O.R.E., run in-process, require no resolution or installation (for example `neuron:core:set`).
+- **External modules (executors)** — authored, packaged, distributed, and hosted independently. N.O.R.E. resolves them, verifies them, installs them immutably, and executes them out-of-process as native processes or WebAssembly modules.
+
+External modules share one unified contract: an `executor.json` manifest (identity, runtime type, protocol, platforms), a canonical package archive, and a declared wire protocol (`neuron/executor-v1` over gRPC, or `neuron/executor-v1-json` over stdio).
+
+```mermaid
+flowchart LR
+    REQ[Executor Requirement<br/>example:echo ^1.0.0] --> RES[Resolver<br/>semver selection]
+    RES --> REG[Registry<br/>github / local]
+    REG --> PKG[Executor Package<br/>name-version-executor.neuron.tar.gz]
+    PKG --> VRFY[Verify<br/>manifest + digest]
+    VRFY --> INST[Install<br/>immutable store]
+    INST --> FRZ[Freeze exact version<br/>into registered System]
+    FRZ --> RT[N.O.R.E. Executor Runtime<br/>process / wasm]
+    RT --> W[Live worker pool]
+```
+
+
+
+The exact resolved version is **frozen into every registered system**, so instances run the precise modules that were verified at registration time — reproducibly, and offline.
+
+> [!WARNING]
+> Neuron treats external executors as untrusted code. Artifacts are verified by digest before installation and hosted out-of-process, never inside the runtime's address space. GitHub is a distribution source, not a security boundary.
+
+See [docs/MODULES.md](./docs/MODULES.md) for the full module model and how to author one. A reference executor (`examples/executors/echo`) ships in this repository, compiled to both a native binary and a WebAssembly module from a single Go source.
 
 ---
 
@@ -337,9 +308,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full architecture.
 
 ## Installation
 
-Neuron ships as one product: the `neuron` CLI plus the N.O.R.E. runtime engine, distributed together as a single archive for your operating system and architecture.
-
-Supported release targets:
+Neuron is one product: the `neuron` CLI plus the N.O.R.E. runtime engine, distributed as a single archive for your platform. There is no daemon to install or service to manage — the CLI runs the engine for you.
 
 
 | Platform | Architectures    |
@@ -349,129 +318,15 @@ Supported release targets:
 | Windows  | `amd64`          |
 
 
-The quick path:
-
 1. Download the latest release archive for your platform from the [releases page](https://github.com/Muhammad-Jay/neuron/releases).
-2. Extract it.
-3. Place the `neuron` binary on your `PATH`.
-
-Verify the installation:
+2. Extract it and place `neuron` on your `PATH`.
+3. Verify:
 
 ```bash
 neuron version
 ```
 
-The CLI runs the N.O.R.E. runtime engine for you. You do not install, start, or manage N.O.R.E. separately.
-
-See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete, step-by-step installation guide, including installing from source.
-
----
-
-
-
-## Quick Start
-
-The fastest way to experience Neuron is with the [official example project](./examples/ecommerce_order_ts), which defines an order-processing pipeline in TypeScript.
-
-```bash
-# Clone the repository
-git clone https://github.com/Muhammad-Jay/neuron.git
-cd neuron
-
-# From the example project
-cd examples/ecommerce_order_ts
-pnpm install
-
-# Register the system with the runtime engine
-neuron register
-
-# Run it
-neuron run
-```
-
-The same flow works with YAML — see the [YAML example](./examples/ecommerce_order).
-
-To author your own project:
-
-```bash
-neuron init my-system
-cd my-system
-# ... define your system in YAML or TypeScript ...
-neuron register
-neuron run
-```
-
-`neuron init` scaffolds a project, `neuron register` builds and registers your system (starting the local runtime automatically), and `neuron run` executes it while streaming events.
-
-Walk through it in detail in [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md).
-
----
-
-
-
-## TypeScript SDK
-
-The TypeScript SDK (`[@neuron/sdk](./packages/sdk)`) is Neuron's system-definition language: a typed, always-autocompleted way to describe services, connectors, and system composition in TypeScript, producing the canonical manifest the compiler consumes.
-
-```typescript
-import { Service, System } from "@neuron/sdk";
-
-const validate = new Service("validate")
-  .inputSchema({ order: "object" })
-  .outputSchema({ valid: "boolean" });
-
-const enrich = validate.next(new Service("enrich"));
-
-export default System({
-  name: "order-processing",
-  version: "1.0.0",
-  description: "An order-processing pipeline",
-}).run(enrich);
-```
-
-The SDK is a definition tool — it describes systems; it does not execute them. The Go side remains responsible for parsing, validating, compiling, and running the canonical representations.
-
-See [packages/sdk/README.md](./packages/sdk/README.md) for the SDK documentation.
-
----
-
-
-
-## Modules & Executors
-
-Neuron distinguishes two kinds of modules:
-
-- **Built-in modules** — N.O.R.E. ships with a small set of in-process modules for common operations. Referencing one requires no installation; it runs inside the runtime engine.
-- **External modules (executors)** — authored, packaged, and distributed independently. N.O.R.E. resolves them, verifies them, installs them, and hosts them out-of-process as native processes or WebAssembly modules.
-
-External modules have a stable, unified contract:
-
-- an `executor.json` manifest declaring identity, runtime type, protocol, and supported platforms;
-- a canonical package archive (`<name>-<version>-executor.neuron.tar.gz`);
-- a declared wire protocol so the runtime knows how to talk to them.
-
-Neuron resolves external modules by name and version — for example `example:echo@1.0.0` — against configured registries (Git-releases based by default), selects the best matching version with semantic versioning, verifies the artifact, installs it immutably, and freezes the exact resolved set into every registered system.
-
-A reference module is included in this repository: `[examples/executors/echo](./examples/executors/echo)`, built as both a native process and a WebAssembly module from the same Go source.
-
-See [docs/MODULES.md](./docs/MODULES.md) for the complete module model, how resolution works, and how to author a module.
-
----
-
-
-
-## Examples
-
-The repository ships runnable examples for every authoring surface:
-
-
-| Example                                                        | Surface          | What it demonstrates                                                     |
-| -------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------ |
-| `[examples/ecommerce_order_ts](./examples/ecommerce_order_ts)` | TypeScript SDK   | Typed system definition of a full order-processing pipeline              |
-| `[examples/ecommerce_order](./examples/ecommerce_order)`       | YAML             | The same pipeline expressed with YAML project, system, and service files |
-| `[examples/executors](./examples/executors)`                   | Module authoring | Reference `echo` module compiled for both process and WASM runtimes      |
-| `[examples/simple_response](./examples/simple_response)`       | Go               | A minimal Go-defined system using the SDK builders                       |
-
+See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, including installing from source and verifying release checksums.
 
 ---
 
@@ -479,17 +334,62 @@ The repository ships runnable examples for every authoring surface:
 
 ## Documentation
 
-- [Architecture](./docs/ARCHITECTURE.md) — how the platform is put together
-- [Getting Started](./docs/GETTING_STARTED.md) — run your first Neuron system
-- [Installation](./docs/INSTALLATION.md) — install Neuron from an official release
-- [Modules & Executors](./docs/MODULES.md) — the unified module model
-- [Status](./docs/STATUS.md) — what is available, experimental, and planned
-- [TODO](./TODO.md) — known issues and future work
-- [Runtime deep-dives](./docs/RUNTIME.md) — the N.O.R.E. runtime in depth (maintainer-focused)
-- [CLI reference](./application/README.md) — every `neuron` command and flag
-- [N.O.R.E. reference](./nore/README.md) — the runtime engine in detail (maintainer-focused)
+
+|                         |                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Getting started**     | Build and run your first System in TypeScript — [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md)       |
+| **Architecture**        | The canonical pipeline and the boundaries that never blur — [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
+| **Modules & executors** | The unified module model, packaging, resolution, and protocol — [docs/MODULES.md](./docs/MODULES.md)       |
+| **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
+| **TypeScript SDK**      | Define systems as typed, composable capabilities — [packages/sdk/README.md](./packages/sdk/README.md)      |
+| **Go executor SDK**     | Build production executors — [packages/executor-go/README.md](./packages/executor-go/README.md)            |
+| **CLI reference**       | Every `neuron` command and flag — [application/README.md](./application/README.md)                         |
+| **N.O.R.E.**            | The runtime engine in depth (maintainer-focused) — [nore/README.md](./nore/README.md)                      |
+| **Status**              | What is available, experimental, and planned — [docs/STATUS.md](./docs/STATUS.md)                          |
+
+
+
+
+## Repository
+
+`neuron` is a monorepo with strict architectural boundaries:
+
+
+| Path                    | Responsibility                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `application/`          | The `neuron` CLI — authoring, building, module resolution, client, daemon bootstrap |
+| `nore/`                 | N.O.R.E. — the Neuron Operational Runtime Engine                                    |
+| `shared/`               | Canonical types and protocol contracts agreed on by both Go modules                 |
+| `packages/sdk/`         | `@neuron/sdk` — TypeScript system-definition language                               |
+| `packages/executor-go/` | Go SDK for authoring Neuron modules (executors)                                     |
+| `examples/`             | Runnable systems and reference executors                                            |
+| `docs/`                 | Architecture, getting started, installation, module, and runtime docs               |
+
+
+`application` and `nore` are **separate Go modules**. They agree only through the canonical types and protocol contracts in `shared`. The CLI never reaches into runtime internals; the runtime never parses YAML or TypeScript.
 
 ---
+
+
+
+## Project Status
+
+**Version** `0.1.0` — first public development release. The core is implemented and deliberately structured for long-term growth; everything is still subject to change until 1.0.
+
+- **Working today:** the `neuron` CLI, system definition in TypeScript and YAML, compilation and registration, N.O.R.E., built-in modules, external modules hosted as processes or WebAssembly, instances, and execution with live event streaming.
+- **Experimental:** the external module ecosystem, GitHub-based module resolution, and several runtime refinements.
+- **Planned:** runtime hardening (API authentication, resource limits, retention policies), broader module distribution, and additional execution models.
+
+> [!NOTE]
+> The docs describe current behavior and architectural direction. Where a capability is designed for but not yet shipped — container/remote runtimes, TLS, execution-retention policies — it is labeled as planned, not promised.
+
+See [docs/STATUS.md](./docs/STATUS.md) for the exact supported surface and [TODO.md](./TODO.md) for known work.
+
+## Roadmap
+
+- **0.1.x** — stabilization of the 0.1.0 foundation: bug fixes, documentation corrections, installation refinements, runtime correctness.
+- **0.2.x** — new runtime capabilities, a broader external module ecosystem, and new SDK capabilities as they mature.
+- **1.0** — a stable public model and compatibility guarantees.
 
 
 
@@ -497,34 +397,20 @@ The repository ships runnable examples for every authoring surface:
 
 The repository is a Go workspace plus a pnpm monorepo.
 
-Prerequisites:
-
-- Go `1.26.5` or newer
-- pnpm `10.33.0` (or newer, in the `10.x` series)
-- Node.js (for the TypeScript SDK)
-
-Verify everything locally:
-
 ```bash
-# Go workspace
-go test ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
-go vet  ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
-go build ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+# Prerequisites: Go 1.26.5+, pnpm 10.33.0 (10.x), Node.js
 
-# TypeScript SDK
+go test   ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+go vet    ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+go build  ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+
 pnpm install
 pnpm build:sdk
 pnpm test:sdk
 pnpm typecheck:sdk
 ```
 
-Or run the convenience helper from the repository root:
-
-```bash
-npm run script
-```
-
-which validates every Go module and every npm package in the workspace.
+Or run the convenience helper — `npm run script` — which validates every Go module and npm package in the workspace.
 
 A local smoke test of the full product flow:
 
@@ -534,19 +420,7 @@ go build -o /tmp/neuron ./application/cmd/neuron
 cd examples/ecommerce_order_ts && /tmp/neuron register && /tmp/neuron run
 ```
 
-Contributions should follow the engineering contract in [AGENTS.md](./AGENTS.md): preserve architectural boundaries, avoid duplication, remove dead code, and test at the correct boundary.
-
----
-
-
-
-## Roadmap
-
-- **0.1.x** — stabilization of the 0.1.0 foundation: bug fixes, documentation corrections, installation refinements, and runtime correctness.
-- **0.2.x** — new runtime capabilities, a broader external module ecosystem, and new SDK capabilities as they mature.
-- **1.0** — a stable public model and compatibility guarantees.
-
-The granular, always-current list of intended work lives in [TODO.md](./TODO.md).
+Contributions follow the repository's engineering contract: preserve architectural boundaries, avoid duplication, remove dead code, and test at the correct boundary.
 
 ---
 
