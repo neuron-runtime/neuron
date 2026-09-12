@@ -138,9 +138,9 @@ func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, 
 // ExecuteByKey triggers a workflow execution on the system identified by key,
 // without sending the system definition. The server lazily creates the instance
 // from the durable registered system on the first execution.
-func (c *Client) ExecuteByKey(ctx context.Context, key protocol.InstanceKey, input map[string]any, mode string) (protocol.ExecutionResult, error) {
-	if key.SystemID == "" {
-		return protocol.ExecutionResult{}, fmt.Errorf("instance SystemID is required")
+func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.InstanceKey, target string, input map[string]any, mode string) (protocol.ExecutionResult, error) {
+	if key.SystemID == "" && target == "" {
+		return protocol.ExecutionResult{}, fmt.Errorf("instance SystemID or Name is required")
 	}
 
 	req := protocol.ExecuteRequest{
@@ -148,7 +148,13 @@ func (c *Client) ExecuteByKey(ctx context.Context, key protocol.InstanceKey, inp
 		Mode:  mode,
 	}
 
-	endpoint := fmt.Sprintf(protocol.ExecutePath, url.PathEscape(key.ColonString()))
+	k := target
+
+	if k == "" {
+		k = key.ColonString()
+	}
+
+	endpoint := fmt.Sprintf(protocol.ExecutePath, url.PathEscape(k))
 
 	if mode == "detach" {
 		var response struct {

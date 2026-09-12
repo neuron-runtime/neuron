@@ -186,7 +186,7 @@ Run a Neuron System.
 
 ```
 Usage:
-  neuron run [flags]
+  neuron run [instance-id|system-key] [flags]
 
 Flags:
       --detach         Return execution handles immediately without streaming live events
@@ -194,7 +194,18 @@ Flags:
   -v, --verbose        Enable verbose output to display event payloads
 ```
 
-`neuron run` loads the registration key stored by `neuron register`, asks N.O.R.E. to create an instance and execute the system, and streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
+`neuron run` asks N.O.R.E. to create an instance and execute a system, then streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
+
+Without an argument, `neuron run` runs the registered system: it loads the registration key stored by `neuron register` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
+
+| Target form             | Example                             | Meaning                                  |
+| ----------------------- | ----------------------------------- | ---------------------------------------- |
+| Instance ID             | `inst_ab12cd`                       | Run the instance with that exact ID      |
+| Key, colon form         | `order-processing:1.0.0`            | Run the system at that version           |
+| Key, at form            | `order-processing@1.0.0`            | Same as the colon form                   |
+| Bare name               | `order-processing`                  | Run the key's latest registered version  |
+
+Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as a system key and normalized to its colon-encoded wire form. When no argument is given and the project is not registered, the command stops with a message pointing you at `neuron register`.
 
 ```bash
 # Run the registered system with no input, streaming events
@@ -203,6 +214,12 @@ neuron run
 # Provide input
 neuron run --input '{"order": {"id": "ord_123", "total": 4250, "currency": "USD"}}'
 
+# Re-run a specific instance
+neuron run inst_ab12cd
+
+# Run the latest registered version of a named system
+neuron run order-processing
+
 # Show event payloads
 neuron run -v
 
@@ -210,7 +227,7 @@ neuron run -v
 neuron run --detach
 ```
 
-In the default (streaming) mode, the command returns when the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`). In `--detach` mode it prints the execution ID, instance ID, and status, and returns immediately, so you can follow the run with `neuron instance list`.
+The command always asks N.O.R.E. to accept the execution asynchronously (HTTP `202`, returning execution ID, instance ID, and status), and then decides how to present it: by default it streams live events until the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`), while `--detach` prints the returned handles and returns immediately so you can follow progress with `neuron instance list`. `service.log` events render their level and message inline; other event payloads are shown only with `-v`, which also attaches the daemon's output.
 
 ### `neuron add`
 

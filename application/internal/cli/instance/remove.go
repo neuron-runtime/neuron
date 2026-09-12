@@ -8,6 +8,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/config"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +21,7 @@ func newRemoveCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			target, err := normalizeInstanceTarget(args[0])
+			target, err := utils.NormalizeInstanceTarget(args[0])
 			if err != nil {
 				return err
 			}

@@ -70,7 +70,9 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	id := utils.PathID(r.PathValue("id"))
-	i, ok := h.instances.GetByID(id)
+
+	i, ok := h.resolveInstance(r, id)
+	// i, ok := h.instances.GetByID(id)
 	if !ok {
 		// Not an instance ID: resolve the segment as a system key
 		// (systemID:version:hash[:env]) and lazily create the runtime from

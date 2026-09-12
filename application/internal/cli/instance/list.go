@@ -3,12 +3,12 @@ package instance
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/Muhammad-Jay/neuron/application/config"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/render"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/utils"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
 )
@@ -63,26 +63,9 @@ func resolveInstanceID(cmd *cobra.Command, args []string) (string, error) {
 	if len(args) > 0 {
 		target = args[0]
 	}
-	return normalizeInstanceTarget(target)
+	return utils.NormalizeInstanceTarget(target)
 }
 
-// normalizeInstanceTarget maps a user-facing target to the canonical string
-// for the REST API: instance IDs (inst_*) pass through unchanged; anything
-// else is parsed as a system key and converted to its colon-encoded form.
-func normalizeInstanceTarget(target string) (string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", nil
-	}
-	if strings.HasPrefix(target, "inst_") {
-		return target, nil
-	}
-	key, err := protocol.ParseUserKey(target)
-	if err != nil {
-		return "", fmt.Errorf("invalid instance target %q: %w", target, err)
-	}
-	return key.ColonString(), nil
-}
 
 // listInstances lists instances, honoring the --all and --status filters.
 func listInstances(ctx context.Context, cmd *cobra.Command) error {

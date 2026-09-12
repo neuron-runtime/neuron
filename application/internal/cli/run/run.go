@@ -15,6 +15,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/connection"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/utils"
 	"github.com/Muhammad-Jay/neuron/application/project"
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
@@ -64,12 +65,24 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get current directory: %w", err)
 	}
 
+	if len(args) == 0 {
+		args = []string{""}
+	}
+	target, err := utils.NormalizeInstanceTarget(args[0])
+	if err != nil {
+		return err
+	}
+
 	var key protocol.InstanceKey
-	if err := project.LoadRegistrationKey(root, &key); err != nil {
-		if errors.Is(err, project.ErrNotRegistered) {
-			return fmt.Errorf("project is not registered; run `neuron register` first")
+
+	if target == "" {
+
+		if err := project.LoadRegistrationKey(root, &key); err != nil {
+			if errors.Is(err, project.ErrNotRegistered) {
+				return fmt.Errorf("project is not registered; run `neuron register` first")
+			}
+			return fmt.Errorf("load registration: %w", err)
 		}
-		return fmt.Errorf("load registration: %w", err)
 	}
 
 	cfg, ok := config.FromContext(cmd.Context())
@@ -99,7 +112,7 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	//  and hide logs if `--detach`
 	mode := core.ExecutionModeDetach
 
-	execResult, err := c.ExecuteByKey(ctx, key, execInput, mode)
+	execResult, err := c.ExecuteByKeyOrTarget(ctx, key, target, execInput, mode)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,7 @@ package command
 var (
 	Neuron = "neuron"
 
-	Run = "run"
+	Run = "run [instance-id|system-key]"
 
 	Init = "init [Target]"
 
