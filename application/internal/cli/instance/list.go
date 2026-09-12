@@ -66,7 +66,6 @@ func resolveInstanceID(cmd *cobra.Command, args []string) (string, error) {
 	return utils.NormalizeInstanceTarget(target)
 }
 
-
 // listInstances lists instances, honoring the --all and --status filters.
 func listInstances(ctx context.Context, cmd *cobra.Command) error {
 	showAll, _ := cmd.Flags().GetBool("all")
