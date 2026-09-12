@@ -73,6 +73,11 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Distribution
 
+- [ ] **Build and publish frist executor**
+  ```
+  Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the executor should be written in .NET, and it should contain the typescript Service package in it repo,
+  ```
+
 - [ ] **Publish first official** `v0.1.0` **release.** `scripts/release.sh` and the tag-triggered
   ```
   workflow are ready; create the tag when CI is green.
