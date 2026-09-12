@@ -41,7 +41,7 @@ func instanceListCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	if instanceID != "" {
-		return listInstanceExecutions(ctx, cmd, instanceID)
+		return listInstanceExecutions(ctx, instanceID)
 	}
 
 	return listInstances(ctx, cmd)
@@ -107,7 +107,7 @@ func listInstances(ctx context.Context, cmd *cobra.Command) error {
 }
 
 // listInstanceExecutions lists all executions recorded for the given instance.
-func listInstanceExecutions(ctx context.Context, cmd *cobra.Command, instanceID string) error {
+func listInstanceExecutions(ctx context.Context, instanceID string) error {
 	cfg, ok := config.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("configuration not loaded")
