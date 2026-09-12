@@ -1,0 +1,37 @@
+name: Executor .NET
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+
+concurrency:
+  group: executor-dotnet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: .NET executor SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: packages/executor-dotnet/**/*.csproj
+
+      - name: Restore
+        run: dotnet restore packages/executor-dotnet/Neuron.Executor.slnx
+
+      - name: Build
+        run: dotnet build packages/executor-dotnet/Neuron.Executor.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test packages/executor-dotnet/Neuron.Executor.slnx -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack packages/executor-dotnet/src/Neuron.Executor/Neuron.Executor.csproj -c Release --no-build -o "${{ runner.temp }}/pack"

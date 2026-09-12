@@ -21,6 +21,7 @@ coverage.txt
 
 # Common build output directories
 bin/
+obj/
 dist/
 .neuron/
 **/.neuron/

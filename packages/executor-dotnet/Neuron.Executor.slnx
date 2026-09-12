@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Neuron.Executor/Neuron.Executor.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Neuron.Executor.Tests/Neuron.Executor.Tests.csproj" />
+  </Folder>
+</Solution>
