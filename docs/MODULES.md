@@ -337,6 +337,8 @@ func main() {
 
 The SDK supports both transports and handles marshalling, environment, and protocol details. See [packages/executor-go/README.md](../packages/executor-go/README.md).
 
+Authors with .NET can use the [.NET SDK](../packages/executor-dotnet/README.md) (`Neuron.Executor`). It implements the same `Handler` contract and the `neuron/executor-v1` gRPC transport with the same failure semantics (required `Initialize`/`Execute`, optional `Health`/`Shutdown`, controlled execution errors), and references the same canonical proto from `shared/protocol/executor/v1/executor.proto`.
+
 ### The reference module
 
 `examples/executors/echo` is a complete reference module — one Go source compiled for both the process runtime (a native binary) and the WASM runtime (a WASI module), packaged with `executor.json` and the canonical archive by `examples/executors/build.sh`:

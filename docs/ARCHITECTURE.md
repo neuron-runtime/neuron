@@ -79,6 +79,7 @@ The repository is a monorepo organized into strictly separated Go modules:
 | `shared/` | Canonical types, executor contract, version — agreed on by both Go modules |
 | `packages/sdk/` | `@neuron/sdk` — TypeScript system-definition language |
 | `packages/executor-go/` | Go SDK for authoring Neuron modules (executors) |
+| `packages/executor-dotnet/` | .NET SDK for authoring Neuron modules (`Neuron.Executor`) |
 | `examples/` | Runnable example systems and reference modules |
 | `docs/` | Architecture, getting started, installation, module, and runtime docs |
 | `scripts/` | Workspace development and release helpers |
@@ -339,7 +340,7 @@ The runtime never assumes an executor is written in Go, compiled to WASM, or lau
 
 The gRPC surface is defined in `shared/protocol/executor/v1`. It covers handshake, protocol version, identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. For a simple one-shot module, the JSON variant keeps the barrier to entry at "read a line, write a line."
 
-The transport detail lives behind the executor runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring an executor is covered by the Go SDK in `packages/executor-go`; a reference module is shipped in `examples/executors/echo`, compiled for both runtimes from the same source.
+The transport detail lives behind the executor runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring an executor is covered by the Go SDK in `packages/executor-go` and by the .NET SDK in `packages/executor-dotnet`; a reference module is shipped in `examples/executors/echo`, compiled for both runtimes from the same source.
 
 ---
 

@@ -73,9 +73,13 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Distribution
 
-- [ ] **Build and publish frist executor**
+- [x] **Build and publish first executor**
   ```
   Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the executor should be written in .NET, and it should contain the typescript Service package in it repo,
+  Not yet pushed to GitHub / not yet published to a registry:
+  - packages/executor-dotnet/Neuron.Executor: builds, 26 tests green, packs as NuGet. Referenced by ProjectReference from the content-extract repo.
+  - content-extract repo (Desktop/content-extract): .NET executor (neuron/executor-v1 gRPC), executor.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron register` + `neuron run` through the local catalog.
+  - Remaining for a public release: push content-extract to GitHub, create v1.0.0 tag, publish Neuron.Executor to NuGet, replace the sibling-checkout ProjectReference/file: dependency with versioned package references.
   ```
 
 - [ ] **Publish first official** `v0.1.0` **release.** `scripts/release.sh` and the tag-triggered

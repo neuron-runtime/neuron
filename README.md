@@ -343,6 +343,7 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 | **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
 | **TypeScript SDK**      | Define systems as typed, composable capabilities — [packages/sdk/README.md](./packages/sdk/README.md)      |
 | **Go executor SDK**     | Build production executors — [packages/executor-go/README.md](./packages/executor-go/README.md)            |
+| **.NET executor SDK**  | Build production executors with C#/.NET — [packages/executor-dotnet/README.md](./packages/executor-dotnet/README.md) |
 | **CLI reference**       | Every `neuron` command and flag — [application/README.md](./application/README.md)                         |
 | **N.O.R.E.**            | The runtime engine in depth (maintainer-focused) — [nore/README.md](./nore/README.md)                      |
 | **Status**              | What is available, experimental, and planned — [docs/STATUS.md](./docs/STATUS.md)                          |
@@ -361,7 +362,8 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 | `nore/`                 | N.O.R.E. — the Neuron Operational Runtime Engine                                    |
 | `shared/`               | Canonical types and protocol contracts agreed on by both Go modules                 |
 | `packages/sdk/`         | `@neuron/sdk` — TypeScript system-definition language                               |
-| `packages/executor-go/` | Go SDK for authoring Neuron modules (executors)                                     |
+| `packages/executor-go/`        | Go SDK for authoring Neuron modules (executors)                                                        |
+| `packages/executor-dotnet/`    | .NET SDK for authoring Neuron modules (`Neuron.Executor`)                                               |
 | `examples/`             | Runnable systems and reference executors                                            |
 | `docs/`                 | Architecture, getting started, installation, module, and runtime docs               |
 
@@ -398,11 +400,14 @@ See [docs/STATUS.md](./docs/STATUS.md) for the exact supported surface and [TODO
 The repository is a Go workspace plus a pnpm monorepo.
 
 ```bash
-# Prerequisites: Go 1.26.5+, pnpm 10.33.0 (10.x), Node.js
+# Prerequisites: Go 1.26.5+, pnpm 10.33.0 (10.x), Node.js, .NET SDK 10
 
 go test   ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
 go vet    ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
 go build  ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+
+dotnet build packages/executor-dotnet/Neuron.Executor.slnx -c Release   # .NET executor SDK
+dotnet test  packages/executor-dotnet/Neuron.Executor.slnx -c Release
 
 pnpm install
 pnpm build:sdk
