@@ -35,7 +35,12 @@ func New(eventType Type, executionID, correlationID, serviceID core.ID, payload 
 }
 
 type ExecutionStartedPayload struct{ Input map[string]any }
-type ExecutionCompletedPayload struct{}
+type ExecutionCompletedPayload struct {
+	// Outputs carries the aggregate service outputs at completion, keyed by
+	// service ID. It is populated at the terminal event so clients rendering
+	// the final result of a run do not need a second round-trip.
+	Outputs map[string]map[string]any
+}
 type ExecutionFailedPayload struct{ Message string }
 type ServiceReadyPayload struct{ Input map[string]any }
 type ServiceStartedPayload struct{}

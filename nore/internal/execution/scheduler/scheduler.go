@@ -155,7 +155,9 @@ func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event
 	if remaining != 0 || !execution.MarkCompleted() {
 		return nil
 	}
-	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{}))
+	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{
+		Outputs: execution.StringKeyedOutputs(),
+	}))
 }
 
 func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err error) {

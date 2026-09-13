@@ -49,3 +49,18 @@ func (e *Execution) Outputs() map[core.ID]map[string]any {
 	}
 	return result
 }
+
+// StringKeyedOutputs is Outputs with service IDs rendered as strings, the shape
+// used on the wire (execution results and the terminal execution.completed
+// event payload).
+func (e *Execution) StringKeyedOutputs() map[string]map[string]any {
+	outputs := e.Outputs()
+	if len(outputs) == 0 {
+		return nil
+	}
+	result := make(map[string]map[string]any, len(outputs))
+	for id, output := range outputs {
+		result[string(id)] = output
+	}
+	return result
+}

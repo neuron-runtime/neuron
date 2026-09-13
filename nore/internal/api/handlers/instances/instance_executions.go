@@ -153,19 +153,9 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			ExecutionID: execution.ID,
 			InstanceID:  i.ID,
 			Status:      string(execution.Status()),
-			Outputs:     stringKeyedOutputs(execution.Outputs()),
+			Outputs:     execution.StringKeyedOutputs(),
 		},
 	})
-}
-
-// stringKeyedOutputs converts a service-ID-keyed output map into the protocol's
-// string-keyed JSON shape.
-func stringKeyedOutputs(outputs map[core.ID]map[string]any) map[string]map[string]any {
-	result := make(map[string]map[string]any, len(outputs))
-	for id, output := range outputs {
-		result[string(id)] = output
-	}
-	return result
 }
 
 func (h *Handler) GetExecutionState(w http.ResponseWriter, r *http.Request) {
