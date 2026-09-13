@@ -22,7 +22,7 @@ var cfgFile string
 
 var RootCmd = &cobra.Command{
 	Use:     command.Neuron,
-	Short:   "Neuron workflow engine CLI",
+	Short:   "Neuron CLI",
 	Version: buildversion.String(),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
