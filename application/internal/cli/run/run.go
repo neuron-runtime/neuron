@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/config"
 	"github.com/Muhammad-Jay/neuron/application/connection"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/build"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/utils"
 	"github.com/Muhammad-Jay/neuron/application/project"
@@ -32,6 +34,7 @@ var (
 	verbose bool
 	input   string
 	detach  bool
+	rebuild bool
 )
 
 // New constructs and configures the Cobra command for executing Neuron systems.
@@ -46,24 +49,32 @@ func New() *cobra.Command {
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output to display event payloads")
 	cmd.Flags().StringVar(&input, "input", "", "JSON input payload for execution (e.g., '{\"key\":\"value\"}')")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Return execution handles immediately without streaming live events")
+	cmd.Flags().BoolVar(&rebuild, "build", false, "Rebuild the project before running (project directory required)")
 
 	return cmd
 }
 
-// runCmdHandler loads the registered system key and triggers execution. It
-// deliberately does not build or parse the project: that is the responsibility
-// of `neuron register`. Running requires a prior registration.
+// runCmdHandler addresses a registered system and triggers execution.
+//
+// With a target (`neuron run acme-api@1.0.0`) the command runs that system
+// from anywhere and never consults the project. Without a target it resolves
+// the key from the project's build record (.neuron/build.json): the project is
+// rebuilt automatically when its authoring fingerprint has changed, or when
+// --build forces it. A project that has never been built is an error naming
+// `neuron build`.
 func runCmdHandler(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	cfg, ok := config.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("configuration not loaded")
+	}
 
 	if verbose {
 		fmt.Println("Running in verbose mode.")
 	}
 
-	root, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get current directory: %w", err)
-	}
+	var key protocol.InstanceKey
 
 	if len(args) == 0 {
 		args = []string{""}
@@ -73,21 +84,15 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var key protocol.InstanceKey
-
 	if target == "" {
-
-		if err := project.LoadRegistrationKey(root, &key); err != nil {
-			if errors.Is(err, project.ErrNotRegistered) {
-				return fmt.Errorf("project is not registered; run `neuron register` first")
-			}
-			return fmt.Errorf("load registration: %w", err)
+		// No target: the build record in the current project answers.
+		key, err = ensureBuiltProject(cmd, cfg)
+		if err != nil {
+			return err
 		}
-	}
-
-	cfg, ok := config.FromContext(cmd.Context())
-	if !ok {
-		return fmt.Errorf("configuration not loaded")
+	} else {
+		// A target addresses the system directly; the key stays empty and the
+		// colon-encoded target carries the addressing through to the API.
 	}
 
 	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{
@@ -129,6 +134,56 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	printNode("  ", "status", execResult.Status)
 
 	return nil
+}
+
+// ensureBuiltProject resolves the registered system key for the current
+// project, rebuilding it when the authoring inputs changed since the last
+// build (or when --build forces a rebuild). A missing build record is an error
+// pointing at `neuron build`.
+func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.InstanceKey, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("get current directory: %w", err)
+	}
+
+	var record project.BuildRecord
+	err = project.LoadBuildRecord(root, &record)
+
+	switch {
+	case errors.Is(err, project.ErrNotBuilt):
+		if !rebuild {
+			return protocol.InstanceKey{}, fmt.Errorf(
+				"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
+			)
+		}
+	case err != nil:
+		return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
+	case !rebuild:
+		// A build record exists; only rebuild when the authoring inputs changed
+		// since it was recorded.
+		inputs, ferr := utils.AuthoringInputs(filepath.Clean(root), cfg)
+		if ferr == nil {
+			fp, cerr := project.ComputeFingerprint(inputs)
+			if cerr == nil && fp == record.Fingerprint {
+				return record.Key, nil
+			}
+		}
+	}
+
+	fmt.Fprintf(cmd.ErrOrStderr(), "neuron: project changed since the last build; rebuilding\n")
+	bopts := build.Options{Root: root}
+	if rebuild, _ := cmd.Flags().GetBool("force"); rebuild {
+		bopts.Force = true
+	}
+	if err := build.ExecuteWith(cmd, bopts); err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("rebuild project: %w", err)
+	}
+
+	var fresh project.BuildRecord
+	if err := project.LoadBuildRecord(root, &fresh); err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("load build record after rebuild: %w", err)
+	}
+	return fresh.Key, nil
 }
 
 // streamEventsAndWait streams execution events in real time until the
