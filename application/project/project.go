@@ -17,6 +17,11 @@ type Options struct {
 	// If empty, the current working directory is used.
 	ProjectRoot string
 
+	// Entry is the system source file for YAML projects. It may be an
+	// absolute path or one relative to the project root. An empty value
+	// selects the default <root>/system.yaml.
+	Entry string
+
 	// Validate controls basic source validation.
 	Validate bool
 
@@ -89,7 +94,7 @@ func Resolve(
 		return nil, err
 	}
 
-	resolved, err := resolver.ResolveProject()
+	resolved, err := resolver.ResolveSystem(opts.Entry)
 	if err != nil {
 		return nil, err
 	}

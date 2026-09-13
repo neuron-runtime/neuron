@@ -5,7 +5,7 @@
 //
 //  1. built-in defaults
 //  2. global user configuration  (~/.config/neuron/config.yaml)
-//  3. project configuration       (./neuron.yaml)
+//  3. project configuration       (neuron.config.json | neuron.config.yaml | neuron.config.yml)
 //  4. environment variables       (NEURON_*)
 //  5. command-line overrides      (Options.CLI)
 //
@@ -21,13 +21,25 @@ import (
 
 // Config is the effective Neuron configuration.
 type Config struct {
-	Version   int             `yaml:"version,omitempty"   mapstructure:"version"`
-	Lang      string          `yaml:"lang,omitempty"      mapstructure:"lang"`
-	Runtime   RuntimeConfig   `yaml:"runtime"             mapstructure:"runtime"`
-	Daemon    DaemonConfig    `yaml:"daemon"              mapstructure:"daemon"`
-	Storage   StorageConfig   `yaml:"storage"             mapstructure:"storage"`
-	Executors ExecutorsConfig `yaml:"executors"           mapstructure:"executors"`
-	Inspector InspectorConfig `yaml:"inspector"           mapstructure:"inspector"`
+	Version int `yaml:"version,omitempty" mapstructure:"version"`
+
+	// Lang is the canonical authoring language. It defaults to "typescript".
+	Lang string `yaml:"lang,omitempty" mapstructure:"lang"`
+
+	// Entry is the system source file relative to the project root
+	// (e.g. "system.ts" or "system.yaml"). When empty the default entry for
+	// the resolved language is used.
+	Entry string `yaml:"entry,omitempty" mapstructure:"entry"`
+
+	// Variables are project-level values passed into the compiled system
+	// manifest. They have no meaning to the runtime itself.
+	Variables map[string]any `yaml:"variables,omitempty" mapstructure:"variables"`
+
+	Runtime   RuntimeConfig   `yaml:"runtime" mapstructure:"runtime"`
+	Daemon    DaemonConfig    `yaml:"daemon" mapstructure:"daemon"`
+	Storage   StorageConfig   `yaml:"storage" mapstructure:"storage"`
+	Executors ExecutorsConfig `yaml:"executors" mapstructure:"executors"`
+	Inspector InspectorConfig `yaml:"inspector" mapstructure:"inspector"`
 }
 
 // RuntimeConfig holds N.O.R.E.-related runtime defaults.
@@ -69,6 +81,10 @@ type DaemonConfig struct {
 }
 
 // StorageConfig selects the storage provider and its root directory.
+//
+// Storage is internal: Neuron manages it and it cannot be set from a
+// configuration file. It remains on Config only so the daemon bootstrap can
+// derive its data directory and the CLI can test programmatically.
 type StorageConfig struct {
 	Provider string `yaml:"provider" mapstructure:"provider"`
 
@@ -86,11 +102,12 @@ type ExecutorsConfig struct {
 	Registries []ExecutorRegistry `yaml:"registries,omitempty" mapstructure:"registries"`
 
 	// StoreDir is the local installed-executor directory. Defaults to
-	// ~/.neuron/executors.
+	// ~/.neuron/executors. Like storage, it is internal and rejected from
+	// configuration files.
 	StoreDir string `yaml:"storeDir,omitempty" mapstructure:"storeDir"`
 
 	// DefaultRegistries is the ordered list of registry names a Requirement
-	// uses when it declares no registries of its own.
+	// uses when it declares no registries of its own. Defaults to ["local"].
 	DefaultRegistries []string `yaml:"defaultRegistries,omitempty" mapstructure:"defaultRegistries"`
 }
 

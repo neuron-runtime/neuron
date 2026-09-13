@@ -6,14 +6,17 @@ package manifest
 // persisted to .neuron/manifest.json and consumed by the compiler to
 // produce a core.System.
 type System struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   Metadata      `json:"metadata"`
-	Config     ProjectConfig `json:"config,omitempty"`
-	Inputs     []Port        `json:"inputs,omitempty"`
-	Services   []Service     `json:"services"`
-	Connectors []Connector   `json:"connectors"`
-	Definition SystemNode    `json:"definition"`
+	APIVersion string      `json:"apiVersion"`
+	Kind       string      `json:"kind"`
+	Metadata   Metadata    `json:"metadata"`
+	Inputs     []Port      `json:"inputs,omitempty"`
+	Services   []Service   `json:"services"`
+	Connectors []Connector `json:"connectors"`
+	Definition SystemNode  `json:"definition"`
+
+	// Variables are project-level values supplied by the project
+	// configuration. They have no meaning to the runtime itself.
+	Variables map[string]any `json:"variables,omitempty"`
 }
 
 // Metadata identifies a System in the manifest.
@@ -21,18 +24,6 @@ type Metadata struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	Description string `json:"description,omitempty"`
-}
-
-// ProjectConfig carries project-level configuration that was previously
-// only available via neuron.yaml. Including it in the manifest makes
-// .neuron/manifest.json fully self-contained so that later stages
-// (register, run) never need to read the original source files.
-type ProjectConfig struct {
-	ExecutorRegistries []ExecutorRegistry `json:"executorRegistries,omitempty"`
-	Runtime            RuntimeConfig      `json:"runtime,omitempty"`
-	Storage            StorageConfig      `json:"storage,omitempty"`
-	Inspector          InspectorConfig    `json:"inspector,omitempty"`
-	Variables          map[string]any     `json:"variables,omitempty"`
 }
 
 // Service describes one unit of computation.

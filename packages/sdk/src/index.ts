@@ -3,8 +3,6 @@ export { System, SystemDefinition } from "./system.js";
 export { Parallel } from "./composition.js";
 export { connect } from "./connection.js";
 
-export { defineConfig, type NeuronConfig } from "./cli/index.js";
-
 export {
   string,
   number,

@@ -62,8 +62,10 @@ func (c *Compiler) Compile(m *manifest.System) (*core.System, error) {
 
 // InstanceKey computes the protocol.InstanceKey for a manifest.
 // The key identity is (systemID, version, hash, env). The hash is
-// derived from the compiled core.System.
-func (c *Compiler) InstanceKey(m *manifest.System) (protocol.InstanceKey, error) {
+// derived from the compiled core.System. env is the execution
+// environment (e.g. "development", "detach") supplied by the caller
+// from the effective configuration.
+func (c *Compiler) InstanceKey(m *manifest.System, env string) (protocol.InstanceKey, error) {
 	sys, err := c.Compile(m)
 	if err != nil || sys == nil {
 		return protocol.InstanceKey{}, fmt.Errorf("compile manifest for instance key: %w", err)
@@ -74,11 +76,15 @@ func (c *Compiler) InstanceKey(m *manifest.System) (protocol.InstanceKey, error)
 		return protocol.InstanceKey{}, fmt.Errorf("hash system: %w", err)
 	}
 
+	if env == "" {
+		env = "development"
+	}
+
 	return protocol.InstanceKey{
 		SystemID: m.Metadata.Name,
 		Version:  m.Metadata.Version,
 		Hash:     hash,
-		Env:      environmentOf(m),
+		Env:      env,
 	}, nil
 }
 
@@ -115,7 +121,7 @@ func convertService(s manifest.Service) core.Service {
 			Description: s.Description,
 			Version:     s.Version,
 		},
-		Type:                  core.ServiceType(s.Executor.Name),
+		Type:                  core.ExecutorType(s.Executor.Name),
 		ServiceConfigurations: s.Config,
 		RuntimeConfigurations: rtConfig,
 		Inputs:                inputs,
@@ -163,11 +169,4 @@ func convertConnector(conn manifest.Connector, serviceMap map[string]core.Servic
 		Mappings:    mappings,
 		Validations: validations,
 	}, nil
-}
-
-func environmentOf(m *manifest.System) string {
-	if m.Config.Runtime.Execution.Mode != "" {
-		return m.Config.Runtime.Execution.Mode
-	}
-	return "development"
 }

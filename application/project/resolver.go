@@ -18,7 +18,6 @@ import (
 //
 // It knows:
 //
-//	neuron.yaml
 //	systems YAML
 //	service YAML
 //	entry references
@@ -77,13 +76,13 @@ func (r *Resolver) Root() string {
 	return r.root
 }
 
-// ResolveProject resolves the complete project.
+// ResolveSystem resolves the system source file at entry into a
+// ResolvedProject.
+//
+// entry is an absolute (or project-relative) path to a `kind: System` YAML
+// file. An empty entry selects the default <root>/system.yaml.
 //
 // This performs:
-//
-// neuron.yaml
-//
-//	↓
 //
 // System
 //
@@ -96,38 +95,14 @@ func (r *Resolver) Root() string {
 // # Service entry references
 //
 // and produces a ResolvedProject.
-func (r *Resolver) ResolveProject() (*ResolvedProject, error) {
-	projectPath := filepath.Join(r.root, "neuron.yaml")
-
-	if _, err := os.Stat(projectPath); err != nil {
-		// Also support neuron.yml.
-		projectPath = filepath.Join(r.root, "neuron.yml")
-
-		if _, err := os.Stat(projectPath); err != nil {
-			return nil, fmt.Errorf(
-				"%w: expected neuron.yaml or neuron.yml in %s",
-				ErrProjectNotFound,
-				r.root,
-			)
-		}
+func (r *Resolver) ResolveSystem(entry string) (*ResolvedProject, error) {
+	if strings.TrimSpace(entry) == "" {
+		entry = filepath.Join(r.root, "system.yaml")
 	}
 
-	var project ProjectFile
-
-	if err := r.readYAML(projectPath, &project); err != nil {
-		return nil, fmt.Errorf("load project definition: %w", err)
-	}
-
-	if err := validateProjectBasic(project); err != nil {
-		return nil, err
-	}
-
-	systemPath, err := r.resolvePath(
-		r.root,
-		project.System.Entry,
-	)
+	systemPath, err := r.resolvePath(r.root, entry)
 	if err != nil {
-		return nil, fmt.Errorf("resolve systems entry: %w", err)
+		return nil, fmt.Errorf("resolve system entry: %w", err)
 	}
 
 	system, err := r.resolveSystem(systemPath)
@@ -148,8 +123,6 @@ func (r *Resolver) ResolveProject() (*ResolvedProject, error) {
 	return &ResolvedProject{
 		FormatVersion: "v1",
 		ResolvedAt:    nowUTC(),
-
-		Project: project,
 
 		System: *system,
 

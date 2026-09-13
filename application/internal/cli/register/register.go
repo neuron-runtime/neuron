@@ -13,6 +13,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/executor"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/progress"
 	"github.com/Muhammad-Jay/neuron/application/internal/executorctl"
 	"github.com/Muhammad-Jay/neuron/application/language"
 	"github.com/Muhammad-Jay/neuron/application/project"
@@ -62,22 +63,30 @@ func registerCmdHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Progress output lives on stderr so stdout stays reserved for the
+	// registration record printed at the end.
+	rep := progress.New(cmd.ErrOrStderr())
+	defer rep.Stop()
+
 	// Build the project into the canonical .neuron/manifest.json for the
-	// resolved language.
+	// resolved language. Configuration is the single source of truth for the
+	// entry file and project variables.
 	if err := build.Build(ctx, lang, build.Options{
-		Root:    root,
-		Verbose: verbose,
-		Out:     cmd.ErrOrStderr(),
+		Root:      root,
+		Entry:     cfg.Entry,
+		Variables: cfg.Variables,
+		Verbose:   verbose,
+		Out:       cmd.ErrOrStderr(),
 	}); err != nil {
 		return fmt.Errorf("build project: %w", err)
 	}
 
-	return register(ctx, cfg, root, verbose, force)
+	return register(ctx, cfg, root, verbose, force, rep)
 }
 
 // register performs the compile + resolve + register flow against the manifest
 // already produced at root.
-func register(ctx context.Context, cfg config.Config, root string, verbose bool, force bool) error {
+func register(ctx context.Context, cfg config.Config, root string, verbose bool, force bool, rep executor.Observer) error {
 	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
 	if err != nil {
 		return err
@@ -97,18 +106,19 @@ func register(ctx context.Context, cfg config.Config, root string, verbose bool,
 		return fmt.Errorf("compile manifest: %w", err)
 	}
 
-	// Compute the instance key from the manifest + compiled system.
-	key, err := comp.InstanceKey(m)
+	// Compute the instance key from the manifest + compiled system. The execution
+	// environment comes from the effective config, not the manifest.
+	key, err := comp.InstanceKey(m, cfg.Runtime.Execution.Mode)
 	if err != nil {
 		return fmt.Errorf("compute instance key: %w", err)
 	}
 
-	configs := compiler.BuildExecutionConfigurations(m)
+	configs := buildExecutionConfigurations(cfg, m)
 
 	// Resolve the executor requirements declared by services and freeze the
 	// exact dependency set into the register payload, so N.O.R.E. can launch
 	// Instances without resolving or installing anything itself.
-	resolved, err := resolveFrozenExecutors(ctx, cfg, configs.ExecutorRequirements)
+	resolved, err := resolveFrozenExecutors(ctx, cfg, configs.ExecutorRequirements, rep)
 	if err != nil {
 		return err
 	}
@@ -152,6 +162,8 @@ func resolveRoot(flag string) (string, error) {
 	return abs, nil
 }
 
+// printRegistration writes the registration record (system, version, frozen
+// hash, environment) to stdout.
 func printRegistration(result protocol.RegisterResponse) {
 	line := fmt.Sprintf("%s@%s#%s:%s", result.Key.SystemID, result.Key.Version, result.Key.Hash, result.Key.Env)
 	if result.Status != "" {
@@ -160,16 +172,55 @@ func printRegistration(result protocol.RegisterResponse) {
 	fmt.Println(line)
 }
 
+// buildExecutionConfigurations assembles the N.O.R.E. payload from the
+// effective configuration and the compiled manifest. The configuration, not
+// the manifest, is the single source of truth for registries, runtime,
+// storage, and inspector settings; the manifest contributes the executor
+// requirements indexed from its services.
+func buildExecutionConfigurations(cfg config.Config, m *manifest.System) compiler.ExecutionConfigurations {
+	registries := make([]manifest.ExecutorRegistry, 0, len(cfg.Executors.Registries))
+	for _, reg := range cfg.Executors.Registries {
+		registries = append(registries, manifest.ExecutorRegistry{
+			Name: reg.Name,
+			URL:  reg.URL,
+		})
+	}
+
+	return compiler.ExecutionConfigurations{
+		ExecutorRegistries:   registries,
+		ExecutorRequirements: compiler.ExecutorRequirements(m.Services),
+		Runtime: manifest.RuntimeConfig{
+			Execution: manifest.RuntimeExecutionConfig{
+				Mode:    cfg.Runtime.Execution.Mode,
+				Timeout: cfg.Runtime.Execution.Timeout,
+			},
+			Workers: manifest.WorkerConfig{
+				Min: cfg.Runtime.Workers.Min,
+				Max: cfg.Runtime.Workers.Max,
+			},
+		},
+		Storage: manifest.StorageConfig{
+			Provider:  cfg.Storage.Provider,
+			Directory: cfg.Storage.Directory,
+		},
+		Inspector: manifest.InspectorConfig{
+			Enabled: cfg.Inspector.Enabled,
+			Address: cfg.Inspector.Address,
+		},
+	}
+}
+
 // resolveFrozenExecutors resolves each executor requirement through the wired
 // catalog and freezes the results into the wire format persisted in a
 // Deployment.
-func resolveFrozenExecutors(ctx context.Context, cfg config.Config, requirements []manifest.ExecutorRequirement) ([]shadexec.ResolvedExecutor, error) {
+func resolveFrozenExecutors(ctx context.Context, cfg config.Config, requirements []manifest.ExecutorRequirement, observer executor.Observer) ([]shadexec.ResolvedExecutor, error) {
 	if len(requirements) == 0 {
 		return nil, nil
 	}
 
 	catalog, err := executorctl.BuildCatalog(executorctl.CatalogConfig{
 		ExecutorsConfig: cfg.Executors,
+		Observer:        observer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build executor catalog: %w", err)
@@ -180,7 +231,7 @@ func resolveFrozenExecutors(ctx context.Context, cfg config.Config, requirements
 		// Core executors (neuron:core:*) run in-process inside N.O.R.E. and
 		// the legacy bare core names too; there is nothing to resolve or
 		// install for them.
-		if core.IsCoreServiceType(core.ServiceType(req.Name)) {
+		if core.IsCoreExecutorType(core.ExecutorType(req.Name)) {
 			continue
 		}
 		var registries []string

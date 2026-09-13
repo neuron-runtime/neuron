@@ -5,49 +5,6 @@ import (
 	"strings"
 )
 
-func validateProjectBasic(
-	project ProjectFile,
-) error {
-
-	var errors []string
-
-	if project.APIVersion == "" {
-		errors = append(errors, "apiVersion is required")
-	}
-
-	if project.Kind != "Project" {
-		errors = append(
-			errors,
-			fmt.Sprintf(
-				"kind must be Project, got %q",
-				project.Kind,
-			),
-		)
-	}
-
-	if strings.TrimSpace(project.Metadata.Name) == "" {
-		errors = append(errors, "metadata.name is required")
-	}
-
-	if strings.TrimSpace(project.Metadata.Version) == "" {
-		errors = append(errors, "metadata.version is required")
-	}
-
-	if strings.TrimSpace(project.System.Entry) == "" {
-		errors = append(errors, "systems.entry is required")
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf(
-			"%w:\n- %s",
-			ErrInvalidProject,
-			strings.Join(errors, "\n- "),
-		)
-	}
-
-	return nil
-}
-
 func validateSystemBasic(
 	system SystemFile,
 ) error {

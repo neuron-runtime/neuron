@@ -35,7 +35,7 @@ func Execute() error {
 }
 
 func init() {
-	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "project config file (defaults to ./neuron.yaml)")
+	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "project config file (defaults to neuron.config.json, then neuron.config.yaml/yml)")
 	RootCmd.PersistentFlags().String("log-level", "info", "Set the systems logging level")
 	RootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output (shows N.O.R.E. daemon logs)")
 	RootCmd.PersistentFlags().String("remote", "", "Remote N.O.R.E. endpoint (e.g., https://api.nore.example.com)")
@@ -76,7 +76,7 @@ func loadConfig(cmd *cobra.Command) (config.Config, error) {
 	}
 
 	// Subcommands may redirect the project root with --root. The config is
-	// then resolved from that directory so neuron.yaml follows the project.
+	// then resolved from that directory so it follows the project root.
 	if root, err := cmd.Flags().GetString("root"); err == nil && root != "" {
 		if filepath.IsAbs(root) {
 			projectDir = root

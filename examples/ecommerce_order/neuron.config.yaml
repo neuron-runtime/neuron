@@ -1,0 +1,20 @@
+lang: yaml
+entry: systems/order-processing/system.yaml
+
+variables:
+  environment: development
+  api:
+    base_url: https://api.example.com
+    timeout: 10s
+
+runtime:
+  execution:
+    mode: wait
+    timeout: 120s
+  workers:
+    min: 2
+    max: 8
+
+inspector:
+  enabled: true
+  address: 127.0.0.1:7433

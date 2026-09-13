@@ -10,7 +10,8 @@ async function main(): Promise<void> {
             // Extracts the path regardless of --path=/path or --path /path
             // Defaults to process.cwd() or undefined if not provided
             const pathValue = getFlagValue("--path");
-            await buildCmdHandler(pathValue);
+            const entryValue = getFlagValue("--entry");
+            await buildCmdHandler(pathValue, entryValue);
             return;
         }
         case "version":
@@ -62,7 +63,8 @@ Usage:
 Commands:
   build     Compile the project into a manifest (.neuron/manifest.json)
             Options:
-              --path <path>  Specify the target project directory
+              --path <path>   Specify the target project directory
+              --entry <file>  System entry file (defaults to index.ts)
   version   Print the SDK version
   help      Show this help message
 `);

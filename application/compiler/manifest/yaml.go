@@ -4,10 +4,11 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/project"
 )
 
-// FromResolvedProject converts a resolved YAML project into the canonical
-// System manifest. This is the bridge between the YAML frontend (project/)
-// and the source-language-neutral manifest boundary.
-func FromResolvedProject(rp *project.ResolvedProject) *System {
+// FromResolvedProject converts a resolved YAML system into the canonical
+// System manifest. variables come from the project configuration, not from
+// the YAML project file itself. This is the bridge between the YAML frontend
+// (project/) and the source-language-neutral manifest boundary.
+func FromResolvedProject(rp *project.ResolvedProject, variables map[string]any) *System {
 	if rp == nil {
 		return nil
 	}
@@ -20,8 +21,8 @@ func FromResolvedProject(rp *project.ResolvedProject) *System {
 			Version:     rp.System.Definition.Metadata.Version,
 			Description: rp.System.Definition.Metadata.Description,
 		},
-		Config: projectConfigFrom(rp),
-		Inputs: nil,
+		Inputs:    nil,
+		Variables: variables,
 	}
 
 	for _, rs := range rp.System.Services {
@@ -39,42 +40,6 @@ func FromResolvedProject(rp *project.ResolvedProject) *System {
 	s.Definition = buildDefinition(rp.System.Services, rp.System.Connectors)
 
 	return s
-}
-
-func projectConfigFrom(rp *project.ResolvedProject) ProjectConfig {
-	cfg := ProjectConfig{
-		Variables: rp.Project.Variables,
-	}
-
-	for _, reg := range rp.Project.Executors.Registries {
-		cfg.ExecutorRegistries = append(cfg.ExecutorRegistries, ExecutorRegistry{
-			Name: reg.Name,
-			URL:  reg.URL,
-		})
-	}
-
-	cfg.Runtime = RuntimeConfig{
-		Execution: RuntimeExecutionConfig{
-			Mode:    rp.Project.Runtime.Execution.Mode,
-			Timeout: rp.Project.Runtime.Execution.Timeout,
-		},
-		Workers: WorkerConfig{
-			Min: rp.Project.Runtime.Workers.Min,
-			Max: rp.Project.Runtime.Workers.Max,
-		},
-	}
-
-	cfg.Storage = StorageConfig{
-		Provider:  rp.Project.Storage.Provider,
-		Directory: rp.Project.Storage.Directory,
-	}
-
-	cfg.Inspector = InspectorConfig{
-		Enabled: rp.Project.Inspector.Enabled,
-		Address: rp.Project.Inspector.Address,
-	}
-
-	return cfg
 }
 
 func serviceFrom(rs project.ResolvedService) Service {

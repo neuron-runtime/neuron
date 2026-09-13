@@ -26,14 +26,7 @@ const (
 )
 
 // sentinel errors for language resolution.
-var (
-	// ErrLanguageRequired reports that no language could be determined from
-	// either the command line or the project configuration.
-	ErrLanguageRequired = fmt.Errorf("project language is required: pass --lang (yaml, yml, typescript, ts) or set `lang` in the project configuration")
-
-	// ErrLanguageUnknown reports an unrecognized language token.
-	ErrLanguageUnknown = fmt.Errorf("unknown project language")
-)
+var ErrLanguageUnknown = fmt.Errorf("unknown project language")
 
 // aliases maps every accepted authoring token to its canonical Language.
 var aliases = map[string]Language{
@@ -64,9 +57,9 @@ func Normalize(s string) (Language, error) {
 }
 
 // Resolve determines the effective project language. The CLI flag wins;
-// otherwise the project configuration value is used, then a heuristic project
-// sniff: TypeScript markers (neuron.config.ts, index.ts) select the SDK, and a
-// YAML project config file selects YAML. Neither present is an error.
+// otherwise the project configuration value is used, then a marker-file
+// heuristic (index.ts → TypeScript, system.yaml → YAML). If no marker is found
+// the language defaults to TypeScript.
 func Resolve(flagValue, configValue, projectDir string) (Language, error) {
 	if strings.TrimSpace(flagValue) != "" {
 		return Normalize(flagValue)
@@ -77,47 +70,20 @@ func Resolve(flagValue, configValue, projectDir string) (Language, error) {
 	if detected, ok := detectFromProjectDir(projectDir); ok {
 		return detected, nil
 	}
-	return "", ErrLanguageRequired
+	return TypeScript, nil
 }
 
-// detectFromProjectDir infers the authoring language from the project root.
-//
-// A TypeScript project is recognized by the neuron-sdk config file
-// (neuron.config.ts/js/mjs) or a conventional index.ts entry point and wins
-// when present. Otherwise a YAML project config file (neuron.yaml and its
-// aliases) selects YAML, so plain YAML projects work without --lang or a lang
-// declaration.
+// detectFromProjectDir infers the authoring language from a single marker file.
+// TypeScript is recognized by index.ts; YAML is recognized by system.yaml.
 func detectFromProjectDir(projectDir string) (Language, bool) {
 	if projectDir == "" {
 		return "", false
 	}
-
-	tsMarkers := []string{
-		"neuron.config.ts",
-		"neuron.config.js",
-		"neuron.config.mjs",
-		"index.ts",
+	if info, err := os.Stat(filepath.Join(projectDir, "index.ts")); err == nil && !info.IsDir() {
+		return TypeScript, true
 	}
-
-	for _, marker := range tsMarkers {
-		if info, err := os.Stat(filepath.Join(projectDir, marker)); err == nil && !info.IsDir() {
-			return TypeScript, true
-		}
+	if info, err := os.Stat(filepath.Join(projectDir, "system.yaml")); err == nil && !info.IsDir() {
+		return YAML, true
 	}
-
-	yamlMarkers := []string{
-		"neuron.yaml",
-		"neuron.yml",
-		"neuron.config.yaml",
-		"neuron.config.yml",
-		"neuron.config.json",
-	}
-
-	for _, marker := range yamlMarkers {
-		if info, err := os.Stat(filepath.Join(projectDir, marker)); err == nil && !info.IsDir() {
-			return YAML, true
-		}
-	}
-
 	return "", false
 }

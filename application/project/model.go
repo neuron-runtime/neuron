@@ -24,8 +24,6 @@ type ResolvedProject struct {
 
 	ResolvedAt time.Time `json:"resolvedAt"`
 
-	Project ProjectFile `json:"project"`
-
 	System ResolvedSystem `json:"systems"`
 
 	// ExecutorRequirements is an indexed view of the executors

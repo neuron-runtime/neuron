@@ -55,9 +55,14 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 		return err
 	}
 
+	args := []string{"build", "--path", root}
+	if opts.Entry != "" {
+		args = append(args, "--entry", opts.Entry)
+	}
+
 	cmd := process.Command{
 		Path: sdkPath,
-		Args: []string{"build", "--path", root},
+		Args: args,
 		Dir:  root,
 	}
 

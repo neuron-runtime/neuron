@@ -12,6 +12,10 @@ import (
 //
 // The structure is intentionally decoupled from both the manifest source
 // languages and N.O.R.E.'s internal model, so it can evolve independently.
+//
+// Assembly is the CLI's responsibility (register builds the payload from the
+// effective configuration, not from the manifest), so the manifest stays a
+// purely source-language-neutral description of a System.
 type ExecutionConfigurations struct {
 	// ExecutorRegistries lists the registries that can supply executor
 	// implementations for the system's services.
@@ -38,26 +42,11 @@ type ExecutionConfigurations struct {
 	Inspector manifest.InspectorConfig `json:"inspector,omitempty"`
 }
 
-// BuildExecutionConfigurations assembles the project/runtime configuration
-// payload from a manifest for registration with N.O.R.E.
-func BuildExecutionConfigurations(m *manifest.System) ExecutionConfigurations {
-	regs := m.Config.ExecutorRegistries
-
-	// Index executor requirements from services.
-	reqs := collectExecutorRequirements(m.Services)
-
-	return ExecutionConfigurations{
-		ExecutorRegistries:   regs,
-		ExecutorRequirements: reqs,
-		Runtime:              m.Config.Runtime,
-		Storage:              m.Config.Storage,
-		Inspector:            m.Config.Inspector,
-	}
-}
-
-// collectExecutorRequirements groups services by their executor key so
-// N.O.R.E. can see which executors are needed and which services use each.
-func collectExecutorRequirements(services []manifest.Service) []manifest.ExecutorRequirement {
+// ExecutorRequirements groups services by their executor key so the caller can
+// see which executors are needed and which services use each. It indexes the
+// manifest's service executor specifications without importing runtime or
+// config concerns.
+func ExecutorRequirements(services []manifest.Service) []manifest.ExecutorRequirement {
 	type key struct {
 		Name     string
 		Version  string

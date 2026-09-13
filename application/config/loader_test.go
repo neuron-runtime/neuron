@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,17 +24,20 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg.Lang != "typescript" {
+		t.Errorf("default lang = %q, want typescript", cfg.Lang)
+	}
 	if cfg.Runtime.Execution.Mode != "wait" {
 		t.Errorf("default mode = %q, want wait", cfg.Runtime.Execution.Mode)
 	}
 	if cfg.Runtime.Execution.Timeout != "30m" {
 		t.Errorf("default timeout = %q, want 30m", cfg.Runtime.Execution.Timeout)
 	}
-	if cfg.Storage.Provider != "file" {
-		t.Errorf("default provider = %q, want file", cfg.Storage.Provider)
+	if len(cfg.Executors.Registries) != 0 {
+		t.Errorf("default registries = %d, want 0 (none compiled in)", len(cfg.Executors.Registries))
 	}
-	if len(cfg.Executors.Registries) != 2 {
-		t.Errorf("default registries = %d, want 2", len(cfg.Executors.Registries))
+	if len(cfg.Executors.DefaultRegistries) != 1 || cfg.Executors.DefaultRegistries[0] != "local" {
+		t.Errorf("default defaultRegistries = %v, want [local]", cfg.Executors.DefaultRegistries)
 	}
 }
 
@@ -41,45 +45,51 @@ func TestProjectPartialOverridePreservesGlobal(t *testing.T) {
 	dir := t.TempDir()
 
 	global := write(t, dir, "global.yaml", `
-storage:
-  provider: file
-  directory: /data/global
+runtime:
+  workers:
+    min: 4
+    max: 8
 `)
-	write(t, dir, "neuron.yaml", `
-storage:
-  directory: /data/project
+	write(t, dir, "neuron.config.yaml", `
+runtime:
+  workers:
+    max: 16
 `)
 
 	cfg, err := Load(Options{
 		GlobalPath:  global,
-		ProjectPath: filepath.Join(dir, "neuron.yaml"),
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The project only overrode directory; provider must survive from global.
-	if cfg.Storage.Provider != "file" {
-		t.Errorf("provider = %q, want file (preserved from global)", cfg.Storage.Provider)
+	// The project only overrode max; min must survive from global.
+	if cfg.Runtime.Workers.Min != 4 {
+		t.Errorf("min = %d, want 4 (preserved from global)", cfg.Runtime.Workers.Min)
 	}
-	if cfg.Storage.Directory != "/data/project" {
-		t.Errorf("directory = %q, want /data/project", cfg.Storage.Directory)
+	if cfg.Runtime.Workers.Max != 16 {
+		t.Errorf("max = %d, want 16", cfg.Runtime.Workers.Max)
 	}
 }
 
 func TestCLIOverridesProject(t *testing.T) {
 	dir := t.TempDir()
 
-	write(t, dir, "neuron.yaml", `
-runtime:
-  execution:
-    mode: wait
-    timeout: 10m
+	write(t, dir, "neuron.config.json", `
+{
+  "runtime": {
+    "execution": {
+      "mode": "wait",
+      "timeout": "10m"
+    }
+  }
+}
 `)
 
 	cfg, err := Load(Options{
 		GlobalPath:  "/nonexistent/global.yaml",
-		ProjectPath: filepath.Join(dir, "neuron.yaml"),
+		ProjectPath: filepath.Join(dir, "neuron.config.json"),
 		CLI: map[string]any{
 			"runtime.execution.mode": "detach",
 		},
@@ -100,7 +110,7 @@ func TestDefaultTimeoutSurvivesProjectModeOverride(t *testing.T) {
 	dir := t.TempDir()
 
 	// Project only sets mode; timeout should fall back to the 30m default.
-	write(t, dir, "neuron.yaml", `
+	write(t, dir, "neuron.config.yaml", `
 runtime:
   execution:
     mode: detach
@@ -108,7 +118,7 @@ runtime:
 
 	cfg, err := Load(Options{
 		GlobalPath:  "/nonexistent/global.yaml",
-		ProjectPath: filepath.Join(dir, "neuron.yaml"),
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -119,5 +129,201 @@ runtime:
 	}
 	if cfg.Runtime.Execution.Timeout != "30m" {
 		t.Errorf("timeout = %q, want 30m default", cfg.Runtime.Execution.Timeout)
+	}
+}
+
+func TestEntryExpandsAgainstProjectRoot(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.config.yaml", `
+lang: typescript
+entry: system.ts
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectDir:  dir,
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(dir, "system.ts")
+	if cfg.Entry != want {
+		t.Errorf("entry = %q, want %q", cfg.Entry, want)
+	}
+}
+
+func TestDiscoveryPrefersJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.yaml", `
+runtime:
+  workers:
+    max: 8
+`)
+	write(t, dir, "neuron.config.json", `{"runtime": {"workers": {"max": 32}}}`)
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Runtime.Workers.Max != 32 {
+		t.Errorf("max = %d, want 32 (neuron.config.json wins over legacy neuron.yaml)", cfg.Runtime.Workers.Max)
+	}
+}
+
+func TestLegacyConfigRejected(t *testing.T) {
+	for _, name := range []string{"neuron.yaml", "neuron.yml"} {
+		dir := t.TempDir()
+		write(t, dir, name, "lang: yaml\n")
+
+		_, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+		if err == nil {
+			t.Errorf("%s: Load succeeded, want legacy name to be rejected", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: error = %v, want it to mention the removed name", name, err)
+		}
+	}
+}
+
+func TestExplicitLegacyConfigRejected(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.yaml", "lang: yaml\n")
+
+	_, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.yaml"),
+	})
+	if err == nil {
+		t.Fatal("Load succeeded, want explicit legacy name rejected")
+	}
+	if !strings.Contains(err.Error(), "neuron.yaml") {
+		t.Errorf("error = %v, want it to mention the removed name", err)
+	}
+}
+
+func TestVariablesFromConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.config.yaml", `
+lang: yaml
+variables:
+  environment: development
+  limits:
+    timeout: 10s
+    retries: 3
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Variables["environment"] != "development" {
+		t.Errorf("variables.environment = %v, want development", cfg.Variables["environment"])
+	}
+	limits, ok := cfg.Variables["limits"].(map[string]any)
+	if !ok {
+		t.Fatalf("variables.limits = %#v, want nested map", cfg.Variables["limits"])
+	}
+	if limits["timeout"] != "10s" {
+		t.Errorf("variables.limits.timeout = %v, want 10s", limits["timeout"])
+	}
+}
+
+func TestDefaultVariablesEmpty(t *testing.T) {
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Variables) != 0 {
+		t.Errorf("default variables = %#v, want empty", cfg.Variables)
+	}
+}
+
+func TestExecutorRegistriesFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.config.yaml", `
+executors:
+  registries:
+    - name: local
+      url: ./executors
+    - name: github
+      url: https://registry.neuron.dev
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Executors.Registries) != 2 {
+		t.Fatalf("registries = %d, want 2", len(cfg.Executors.Registries))
+	}
+	if cfg.Executors.Registries[0].Name != "local" || cfg.Executors.Registries[0].URL == "" {
+		t.Errorf("registries[0] = %#v, want named local", cfg.Executors.Registries[0])
+	}
+	if len(cfg.Executors.DefaultRegistries) != 1 || cfg.Executors.DefaultRegistries[0] != "local" {
+		t.Errorf("defaultRegistries = %v, want [local] preserved", cfg.Executors.DefaultRegistries)
+	}
+}
+
+func TestRejectStorageKey(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.config.yaml", `
+storage:
+  directory: ./data
+`)
+
+	_, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectPath: filepath.Join(dir, "neuron.config.yaml")})
+	if err == nil {
+		t.Fatal("Load succeeded, want error for `storage` in project config")
+	}
+	if !strings.Contains(err.Error(), "storage") {
+		t.Errorf("error = %v, want it to mention `storage`", err)
+	}
+}
+
+func TestRejectStoreDirKey(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, dir, "neuron.config.yaml", `
+executors:
+  storeDir: /somewhere
+`)
+
+	_, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectPath: filepath.Join(dir, "neuron.config.yaml")})
+	if err == nil {
+		t.Fatal("Load succeeded, want error for `executors.storeDir` in project config")
+	}
+	if !strings.Contains(err.Error(), "storeDir") {
+		t.Errorf("error = %v, want it to mention `storeDir`", err)
+	}
+}
+
+func TestGlobalStorageKeyRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	global := write(t, dir, "global.yaml", `
+storage:
+  provider: postgres
+`)
+
+	_, err := Load(Options{GlobalPath: global, ProjectDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Load succeeded, want error for `storage` in global config")
 	}
 }

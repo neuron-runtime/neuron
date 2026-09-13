@@ -1,19 +1,18 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path"
 import { discoverProject } from "./project";
-import { loadConfig } from "./config";
-import {createJiti} from "jiti";
-import {SystemManifest} from "@/manifest";
+import { createJiti } from "jiti";
+import { SystemManifest } from "@/manifest";
 import * as process from "node:process";
 
-export async function buildCmdHandler(projectDir: string = process.cwd()): Promise<void> {
+// buildCmdHandler produces .neuron/manifest.json from the system entry file.
+// The entry is provided by the neuron CLI (build --entry) which owns the
+// project configuration; when omitted it defaults to <root>/index.ts.
+export async function buildCmdHandler(projectDir: string = process.cwd(), entryFile?: string): Promise<void> {
   const project = discoverProject(projectDir)
-  const config = await loadConfig(project.configFile)
+  const entryFilePath = entryFile ? resolve(project.root, entryFile) : resolve(project.root, "index.ts")
 
   console.log("Building...")
-
-  const entryFilePath = resolve(project.root, config.entry ?? "index.ts")
-
   console.log("Entry: ", entryFilePath)
 
   const manifest = await loadManifest(entryFilePath);
@@ -21,24 +20,14 @@ export async function buildCmdHandler(projectDir: string = process.cwd()): Promi
     throw new Error(`Entry file ${entryFilePath} returned no default manifest export`);
   }
 
-  // Merge project-level config from neuron.config.ts into the manifest
-  // so .neuron/manifest.json is fully self-contained for later stages.
-  if (config?.config) {
-    manifest.config = {...(manifest.config ?? {}), ...config.config};
-  }
-
   await saveManifest(project.outputFile, manifest);
   console.log("Manifest written to:", project.outputFile);
 }
 
 export async function loadManifest(filePath: string): Promise<SystemManifest | undefined> {
-  try {
-    const jiti = createJiti(import.meta.url);
-    const module = await jiti.import<{default?: SystemManifest}>(filePath)
-    return module.default;
-  }catch (error) {
-    throw error
-  }
+  const jiti = createJiti(import.meta.url);
+  const module = await jiti.import<{ default?: SystemManifest }>(filePath)
+  return module.default;
 }
 
 export async function saveManifest(outputPath: string, manifest: SystemManifest | undefined): Promise<void> {

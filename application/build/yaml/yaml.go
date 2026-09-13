@@ -40,13 +40,14 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 	buildOpts := project.DefaultOptions()
 	buildOpts.Verbose = opts.Verbose
 	buildOpts.ProjectRoot = root
+	buildOpts.Entry = opts.Entry
 
 	result, err := project.Resolve(ctx, buildOpts)
 	if err != nil {
 		return fmt.Errorf("resolve project: %w", err)
 	}
 
-	sys := manifest.FromResolvedProject(result.Project)
+	sys := manifest.FromResolvedProject(result.Project, opts.Variables)
 	// Canonicalize is identity for YAML-authored manifests but keeps the
 	// canonicalization invariant (snake_case connector keys) uniform.
 	if err := manifest.SaveToProjectRoot(root, manifest.Canonicalize(sys)); err != nil {

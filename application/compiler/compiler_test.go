@@ -16,14 +16,6 @@ func testManifest() *manifest.System {
 			Version:     "1.0.0",
 			Description: "Order processing pipeline",
 		},
-		Config: manifest.ProjectConfig{
-			ExecutorRegistries: []manifest.ExecutorRegistry{
-				{Name: "local", URL: "http://localhost/executors"},
-			},
-			Runtime: manifest.RuntimeConfig{
-				Execution: manifest.RuntimeExecutionConfig{Mode: "wait"},
-			},
-		},
 		Services: []manifest.Service{
 			{
 				Name: "validate",
@@ -87,7 +79,7 @@ func TestCompileBasic(t *testing.T) {
 	if svc.Metadata.ID != core.ID("validate") {
 		t.Errorf("service ID = %q, want %q", svc.Metadata.ID, "validate")
 	}
-	if svc.Type != core.ServiceType("set") {
+	if svc.Type != core.ExecutorType("set") {
 		t.Errorf("service type = %q, want %q", svc.Type, "set")
 	}
 	if svc.ServiceConfigurations["foo"] != "bar" {
@@ -120,7 +112,7 @@ func TestCompileMissingService(t *testing.T) {
 
 func TestInstanceKey(t *testing.T) {
 	c := New()
-	key, err := c.InstanceKey(testManifest())
+	key, err := c.InstanceKey(testManifest(), "wait")
 	if err != nil {
 		t.Fatalf("instance key: %v", err)
 	}
@@ -139,20 +131,25 @@ func TestInstanceKey(t *testing.T) {
 	}
 }
 
-func TestBuildExecutionConfigurations(t *testing.T) {
-	ec := BuildExecutionConfigurations(testManifest())
+func TestInstanceKeyDefaultEnv(t *testing.T) {
+	c := New()
+	key, err := c.InstanceKey(testManifest(), "")
+	if err != nil {
+		t.Fatalf("instance key: %v", err)
+	}
+	if key.Env != "development" {
+		t.Errorf("env = %q, want development default", key.Env)
+	}
+}
 
-	if len(ec.ExecutorRegistries) != 1 {
-		t.Fatalf("registries = %d, want 1", len(ec.ExecutorRegistries))
-	}
-	if ec.Runtime.Execution.Mode != "wait" {
-		t.Errorf("runtime mode = %q", ec.Runtime.Execution.Mode)
-	}
+func TestExecutorRequirements(t *testing.T) {
+	reqs := ExecutorRequirements(testManifest().Services)
+
 	// Two services share the same executor -> one requirement with both services.
-	if len(ec.ExecutorRequirements) != 1 {
-		t.Fatalf("requirements = %d, want 1", len(ec.ExecutorRequirements))
+	if len(reqs) != 1 {
+		t.Fatalf("requirements = %d, want 1", len(reqs))
 	}
-	req := ec.ExecutorRequirements[0]
+	req := reqs[0]
 	if len(req.Services) != 2 {
 		t.Errorf("requirement services = %d, want 2", len(req.Services))
 	}

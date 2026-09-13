@@ -15,17 +15,6 @@ import (
 func writeProject(t *testing.T, dir string) {
 	t.Helper()
 
-	writeFile(t, filepath.Join(dir, "neuron.yaml"), `apiVersion: neuron/v1
-kind: Project
-
-metadata:
-  name: hello
-  version: 0.1.0
-
-systems:
-  entry: ./systems/hello/system.yaml
-`)
-
 	writeFile(t, filepath.Join(dir, "systems/hello/system.yaml"), `apiVersion: neuron/v1
 kind: System
 
@@ -71,7 +60,10 @@ func TestYAMLBBuilderBuildProducesManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeProject(t, dir)
 
-	if err := yamlpkg.New().Build(ctx, builder.Options{Root: dir}); err != nil {
+	if err := yamlpkg.New().Build(ctx, builder.Options{
+		Root:  dir,
+		Entry: filepath.Join("systems", "hello", "system.yaml"),
+	}); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
@@ -89,6 +81,32 @@ func TestYAMLBBuilderBuildProducesManifest(t *testing.T) {
 	}
 	if len(m.Services) == 0 {
 		t.Error("expected at least one service in the manifest")
+	}
+	// Project variables come from the config (Builder options), not the YAML.
+	if len(m.Variables) != 0 {
+		t.Errorf("variables = %#v, want none", m.Variables)
+	}
+}
+
+func TestYAMLBBuilderCarriesVariables(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	writeProject(t, dir)
+
+	if err := yamlpkg.New().Build(ctx, builder.Options{
+		Root:      dir,
+		Entry:     filepath.Join("systems", "hello", "system.yaml"),
+		Variables: map[string]any{"environment": "staging"},
+	}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	m, err := manifest.LoadFromProjectRoot(dir)
+	if err != nil {
+		t.Fatalf("LoadFromProjectRoot: %v", err)
+	}
+	if m.Variables["environment"] != "staging" {
+		t.Errorf("variables = %#v, want environment=staging", m.Variables)
 	}
 }
 

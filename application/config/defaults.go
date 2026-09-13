@@ -8,6 +8,7 @@ package config
 func Defaults() Config {
 	return Config{
 		Version: 1,
+		Lang:    "typescript",
 
 		Runtime: RuntimeConfig{
 			Execution: ExecutionConfig{
@@ -31,18 +32,12 @@ func Defaults() Config {
 			Directory: DefaultDataDir(),
 		},
 
+		// No registries are compiled in. A project that resolves external
+		// executors must declare them; the default registry list is only the
+		// fallback for Requirements that name no registry.
 		Executors: ExecutorsConfig{
-			StoreDir: DefaultStoreDir(),
-			Registries: []ExecutorRegistry{
-				{
-					Name: "github",
-					URL:  "https://api.github.com",
-				},
-				{
-					Name: "local",
-					URL:  "local://",
-				},
-			},
+			StoreDir:          DefaultStoreDir(),
+			DefaultRegistries: []string{"local"},
 		},
 
 		Inspector: InspectorConfig{
