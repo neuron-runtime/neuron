@@ -7,7 +7,8 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/daemon"
 )
 
-// connectionHealthAdapter adapts your Connection interface to daemon.HealthChecker
+// connectionHealthAdapter adapts the connection interface to the daemon health
+// checker.
 type connectionHealthAdapter struct {
 	conn connection.Connection
 }
@@ -16,18 +17,24 @@ func (c connectionHealthAdapter) Healthy(ctx context.Context) error {
 	return c.conn.Health(ctx)
 }
 
+// BinaryResolver returns the path to the nore daemon binary on demand. It is
+// consulted only when a local daemon must actually be started, so commands that
+// reuse an already-running daemon never require the binary to be discoverable.
+type BinaryResolver func() (string, error)
+
 type Manager struct {
-	Daemon *daemon.Manager
 	Conn   connection.Connection
+	cfg    daemon.Config
+	health daemon.HealthChecker
+	binary BinaryResolver
 }
 
-func NewManager(cfg daemon.Config, conn connection.Connection) *Manager {
+func NewManager(cfg daemon.Config, conn connection.Connection, binary BinaryResolver) *Manager {
 	return &Manager{
-		Conn: conn,
-		Daemon: daemon.NewManager(
-			cfg,
-			connectionHealthAdapter{conn: conn},
-		),
+		Conn:   conn,
+		cfg:    cfg,
+		health: connectionHealthAdapter{conn: conn},
+		binary: binary,
 	}
 }
 
@@ -44,6 +51,13 @@ func (m *Manager) Ensure(ctx context.Context, isRemote bool) error {
 		return m.Conn.Health(ctx) // Return the actual connection error
 	}
 
-	// It's local and down. Let the daemon manager start it and wait for health.
-	return m.Daemon.Start(ctx)
+	// It's local and down. Only now is the daemon binary required.
+	binaryPath, err := m.binary()
+	if err != nil {
+		return err
+	}
+	m.cfg.BinaryPath = binaryPath
+
+	// Let the daemon manager start it and wait for health.
+	return daemon.NewManager(m.cfg, m.health).Start(ctx)
 }

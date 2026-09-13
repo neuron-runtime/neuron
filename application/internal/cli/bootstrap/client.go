@@ -43,17 +43,15 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 
 	dCfg := daemon.ConfigFromEffective(cfg)
 
-	binaryPath, err := NoreBinaryPath(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	// MAGIC: AttachOutput controls whether the daemon prints to the console!
 	// If false, the daemon runs silently in the background.
 	dCfg.AttachOutput = opts.Verbose
-	dCfg.BinaryPath = binaryPath
 
-	rtManager := runtime.NewManager(dCfg, conn)
+	// The daemon binary path is resolved lazily by the runtime manager: it is
+	// needed only when a local daemon must be started. A daemon already running
+	// (started by a previous command) is reused as-is, so a source-tree checkout
+	// without --nore-path still works as long as the daemon is healthy.
+	rtManager := runtime.NewManager(dCfg, conn, func() (string, error) { return NoreBinaryPath(cfg) })
 
 	// Ensure N.O.R.E is running & accessible
 	// If daemon.Endpoint is set, we simply ping the remote server and skip the daemon!
