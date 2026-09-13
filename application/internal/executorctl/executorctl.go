@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Muhammad-Jay/neuron/application/config"
@@ -30,6 +31,11 @@ type Catalog struct {
 type CatalogConfig struct {
 	config.ExecutorsConfig
 
+	// ProjectRoot is the project root. The project's own ./neuron/executors
+	// directory is always an implicit local executor root. When empty the
+	// current working directory is used.
+	ProjectRoot string
+
 	// Observer receives resolution/installation progress events. When nil,
 	// the pipeline runs silently.
 	Observer executor.Observer
@@ -41,7 +47,7 @@ type CatalogConfig struct {
 	GitHubCatalog map[string]github.RepoRef
 }
 
-// BuildCatalog creates a fully wired executor pipeline.
+// buildCatalog creates a fully wired executor pipeline.
 func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 	storeDir := cfg.ExecutorsConfig.StoreDir
 	if storeDir == "" {
@@ -67,6 +73,35 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 		token = os.Getenv("NEURON_GITHUB_TOKEN")
 	}
 
+	// Register project-local executor roots as one "local" registry. The
+	// project's own ./neuron/executors directory is always an implicit root;
+	// configured localRoots and `local` registries add more. Roots that were
+	// explicitly configured but do not exist are a configuration error.
+	origins, err := collectLocalRoots(cfg.ExecutorsConfig, cfg.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
+	var roots []string
+	for _, origin := range origins {
+		if !dirExists(origin.dir) {
+			if origin.implicit {
+				// A pristine project may not have created the directory yet.
+				continue
+			}
+			return nil, fmt.Errorf("configured local executor root %q does not exist", origin.dir)
+		}
+		roots = append(roots, origin.dir)
+	}
+	if len(roots) > 0 {
+		loc, err := local.NewMulti(roots...)
+		if err != nil {
+			return nil, fmt.Errorf("open local executor roots: %w", err)
+		}
+		if err := reg.Add(loc); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, r := range cfg.Registries {
 		switch r.Name {
 		case "github":
@@ -78,14 +113,10 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 				return nil, err
 			}
 		case "local":
-			if r.URL != "" && r.URL != "local://" {
-				loc, err := local.New(r.URL)
-				if err == nil {
-					if err := reg.Add(loc); err != nil {
-						return nil, err
-					}
-				}
-			}
+			// Local roots are registered above; this keeps the switch
+			// explicit and leaves room for local://-style URLs later.
+		default:
+			return nil, fmt.Errorf("unknown executor registry %q (supported: github, local)", r.Name)
 		}
 	}
 
@@ -102,6 +133,83 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 		Downloader: downloader,
 		Resolver:   resolver,
 	}, nil
+}
+
+// localOrigin is one local executor search root. implicit roots (the project's
+// own ./neuron/executors) may legitimately not exist yet; explicitly
+// configured roots must.
+type localOrigin struct {
+	dir      string
+	implicit bool
+}
+
+// collectLocalRoots computes the deduplicated, absolute set of local executor
+// search roots: the implicit project root, configured localRoots, and any
+// `local` registry entries.
+func collectLocalRoots(ec config.ExecutorsConfig, projectRoot string) ([]localOrigin, error) {
+	base := projectRoot
+	if base == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve project root: %w", err)
+		}
+		base = cwd
+	}
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project root %q: %w", base, err)
+	}
+	absBase = filepath.Clean(absBase)
+
+	seen := make(map[string]bool)
+	var out []localOrigin
+
+	add := func(dir string, implicit bool) error {
+		if strings.TrimSpace(dir) == "" {
+			return nil
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return fmt.Errorf("resolve local executor root %q: %w", dir, err)
+		}
+		abs = filepath.Clean(abs)
+		if seen[abs] {
+			return nil
+		}
+		seen[abs] = true
+		out = append(out, localOrigin{dir: abs, implicit: implicit})
+		return nil
+	}
+
+	// The project's own ./neuron/executors is always a search root.
+	if err := add(filepath.Join(absBase, "neuron", "executors"), true); err != nil {
+		return nil, err
+	}
+
+	for _, root := range ec.LocalRoots {
+		if err := add(root, false); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, r := range ec.Registries {
+		if r.Name != "local" {
+			continue
+		}
+		if r.URL == "" || r.URL == "local://" {
+			continue
+		}
+		if err := add(r.URL, false); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // Require converts an explicit requirement into the resolver-facing value.

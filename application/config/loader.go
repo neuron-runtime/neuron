@@ -64,8 +64,14 @@ func Load(opts Options) (Config, error) {
 
 	// Project configuration.
 	projectPath := opts.ProjectPath
+	var extraCandidates []string
 	if projectPath == "" && opts.ProjectDir != "" {
-		projectPath = findProjectConfig(opts.ProjectDir)
+		projectPath, extraCandidates = findProjectConfig(opts.ProjectDir)
+		for _, p := range extraCandidates {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf(
+				"multiple neuron.config.* candidates found; using %s (also found: %s)", projectPath, p,
+			))
+		}
 	}
 	if projectPath != "" {
 		if !fileExists(projectPath) {
@@ -115,9 +121,44 @@ func Load(opts Options) (Config, error) {
 		return Config{}, fmt.Errorf("decode configuration: %w", err)
 	}
 
-	resolvePaths(&cfg, opts.ProjectDir)
+	// The project root is the directory that owns the project configuration
+	// (neuron.config.*). When --config selects a file, the root is that file's
+	// directory; otherwise it is the nearest ancestor of the working directory
+	// that holds a project config, falling back to the working directory. All
+	// project-relative paths (local executor roots, storage, entry) resolve
+	// against this root.
+	cfg.ProjectDir = projectRootFor(opts, projectPath)
+
+	resolvePaths(&cfg, cfg.ProjectDir)
 
 	return cfg, nil
+}
+
+// projectRootFor derives the effective project root from the loader options
+// and the discovered project-config path.
+func projectRootFor(opts Options, projectPath string) string {
+	switch {
+	case projectPath != "":
+		abs, err := filepath.Abs(filepath.Dir(projectPath))
+		if err == nil {
+			return abs
+		}
+		return filepath.Dir(projectPath)
+	case opts.ProjectPath != "":
+		abs, err := filepath.Abs(filepath.Dir(opts.ProjectPath))
+		if err == nil {
+			return abs
+		}
+		return filepath.Dir(opts.ProjectPath)
+	case opts.ProjectDir != "":
+		abs, err := filepath.Abs(opts.ProjectDir)
+		if err == nil {
+			return abs
+		}
+		return opts.ProjectDir
+	default:
+		return ""
+	}
 }
 
 // registerDefaults seeds every config key with its default so that partial
@@ -157,6 +198,10 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	if len(cfg.Executors.DefaultRegistries) > 0 {
 		v.SetDefault("executors.defaultRegistries", cfg.Executors.DefaultRegistries)
 	}
+	if len(cfg.Executors.LocalRoots) > 0 {
+		v.SetDefault("executors.localRoots", cfg.Executors.LocalRoots)
+	}
+	v.SetDefault("dev.maxWorkers", cfg.Dev.MaxWorkers)
 	v.SetDefault("entry", cfg.Entry)
 	v.SetDefault("variables", cfg.Variables)
 }
@@ -173,18 +218,63 @@ func resolvePaths(cfg *Config, projectDir string) {
 	if cfg.Daemon.NorePath != "" {
 		cfg.Daemon.NorePath = Expand(cfg.Daemon.NorePath, projectDir)
 	}
-}
 
-// findProjectConfig locates the project configuration file by its modern name.
-// The legacy neuron.yaml/neuron.yml names are deliberately not accepted.
-func findProjectConfig(projectDir string) string {
-	for _, name := range []string{"neuron.config.json", "neuron.config.yaml", "neuron.config.yml"} {
-		p := filepath.Join(projectDir, name)
-		if fileExists(p) {
-			return p
+	for i := range cfg.Executors.LocalRoots {
+		cfg.Executors.LocalRoots[i] = Expand(cfg.Executors.LocalRoots[i], projectDir)
+	}
+
+	for i := range cfg.Executors.Registries {
+		reg := &cfg.Executors.Registries[i]
+		if reg.Name == "local" && reg.URL != "" && reg.URL != "local://" {
+			reg.URL = Expand(reg.URL, projectDir)
 		}
 	}
-	return ""
+}
+
+// findProjectConfig locates the project configuration file by its modern name,
+// walking upward from projectDir until it finds one or reaches the user's home
+// directory or the filesystem root. The legacy neuron.yaml/neuron.yml names
+// are deliberately not accepted. It returns the chosen file and any other
+// candidates found in the same directory so callers can warn about ambiguity.
+func findProjectConfig(projectDir string) (string, []string) {
+	dir, err := filepath.Abs(projectDir)
+	if err != nil {
+		dir = projectDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	if home != "" {
+		home, _ = filepath.Abs(home)
+	}
+
+	var others []string
+	for {
+		found := ""
+		for _, name := range []string{"neuron.config.json", "neuron.config.yaml", "neuron.config.yml"} {
+			p := filepath.Join(dir, name)
+			if fileExists(p) {
+				if found == "" {
+					found = p
+				} else {
+					others = append(others, p)
+				}
+			}
+		}
+		if found != "" {
+			return found, others
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", others
+		}
+		if home != "" && filepath.Clean(dir) == filepath.Clean(home) {
+			return "", others
+		}
+		dir = parent
+	}
 }
 
 // legacyConfigName returns the removed legacy project-config name present in

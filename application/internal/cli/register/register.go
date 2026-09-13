@@ -220,6 +220,7 @@ func resolveFrozenExecutors(ctx context.Context, cfg config.Config, requirements
 
 	catalog, err := executorctl.BuildCatalog(executorctl.CatalogConfig{
 		ExecutorsConfig: cfg.Executors,
+		ProjectRoot:     cfg.ProjectDir,
 		Observer:        observer,
 	})
 	if err != nil {

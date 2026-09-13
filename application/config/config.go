@@ -40,6 +40,21 @@ type Config struct {
 	Storage   StorageConfig   `yaml:"storage" mapstructure:"storage"`
 	Executors ExecutorsConfig `yaml:"executors" mapstructure:"executors"`
 	Inspector InspectorConfig `yaml:"inspector" mapstructure:"inspector"`
+
+	// Dev controls developer-experience options.
+	Dev DevConfig `yaml:"dev,omitempty" mapstructure:"dev"`
+
+	// ProjectDir is the absolute path of the project root: the directory that
+	// owns the project configuration (neuron.config.*). It is computed during
+	// Load and never read from a configuration file. Downstream consumers use
+	// it to resolve project-relative paths (implicit executor roots, build
+	// artifacts).
+	ProjectDir string `yaml:"-" mapstructure:"-"`
+
+	// Warnings surfaces non-fatal configuration notices (for example multiple
+	// neuron.config.* candidates found during discovery). It is never loaded
+	// from a configuration file.
+	Warnings []string `yaml:"-" mapstructure:"-"`
 }
 
 // RuntimeConfig holds N.O.R.E.-related runtime defaults.
@@ -101,6 +116,12 @@ type ExecutorsConfig struct {
 	// against.
 	Registries []ExecutorRegistry `yaml:"registries,omitempty" mapstructure:"registries"`
 
+	// LocalRoots lists additional project-local executor search roots,
+	// resolved against the project root. The project's own ./neuron/executors
+	// directory is always an implicit local root and does not need to be
+	// listed here.
+	LocalRoots []string `yaml:"localRoots,omitempty" mapstructure:"localRoots"`
+
 	// StoreDir is the local installed-executor directory. Defaults to
 	// ~/.neuron/executors. Like storage, it is internal and rejected from
 	// configuration files.
@@ -130,4 +151,12 @@ type ExecutorRegistry struct {
 type InspectorConfig struct {
 	Enabled bool   `yaml:"enabled,omitempty" mapstructure:"enabled"`
 	Address string `yaml:"address,omitempty" mapstructure:"address"`
+}
+
+// DevConfig carries developer-experience options. Everything here has a
+// sensible default and is optional to author.
+type DevConfig struct {
+	// MaxWorkers bounds how many local executor build commands may run at
+	// once during `neuron build`. Defaults to 1 (sequential builds).
+	MaxWorkers int `yaml:"maxWorkers,omitempty" mapstructure:"maxWorkers"`
 }

@@ -8,6 +8,11 @@
 //	<root>/github/read/1.2.0/
 //	    executor.json
 //	    github-read-linux-amd64        <- optional platform binary/archive
+//
+// A Registry serves one or more roots. Multiple roots behave as one "local"
+// registry: types and versions are the union across roots, so the project's
+// own ./neuron/executors and any configured localRoots share a single
+// resolution space.
 package local
 
 import (
@@ -21,24 +26,37 @@ import (
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 )
 
-// Registry serves executor packages laid out under a local directory.
+// Registry serves executor packages laid out under one or more local roots.
 type Registry struct {
-	root string
+	roots []string
 }
 
 // New validates and returns a local registry rooted at root.
 func New(root string) (*Registry, error) {
-	if strings.TrimSpace(root) == "" {
-		return nil, executor.ErrNotFound // malformed config: no packages available
+	return NewMulti(root)
+}
+
+// NewMulti validates and returns a local registry serving every given root.
+// Roots must exist and be directories; an empty root list is an error.
+func NewMulti(roots ...string) (*Registry, error) {
+	valid := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			return nil, executor.ErrNotFound // malformed config: no packages available
+		}
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			return nil, err
+		}
+		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+			return nil, executor.ErrNotFound
+		}
+		valid = append(valid, abs)
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+	if len(valid) == 0 {
 		return nil, executor.ErrNotFound
 	}
-	return &Registry{root: abs}, nil
+	return &Registry{roots: valid}, nil
 }
 
 func (r *Registry) Name() string {
@@ -46,39 +64,60 @@ func (r *Registry) Name() string {
 }
 
 func (r *Registry) Types(ctx context.Context) ([]string, error) {
+	seen := make(map[string]bool)
 	var types []string
-	for _, manifestPath := range r.findManifests(r.root) {
-		rel, _ := filepath.Rel(r.root, manifestPath)
-		dir := filepath.Dir(rel)
-		segments := strings.Split(filepath.ToSlash(dir), "/")
-		if len(segments) < 2 {
-			continue
+	for _, root := range r.roots {
+		for _, manifestPath := range r.findManifests(root) {
+			rel, _ := filepath.Rel(root, manifestPath)
+			dir := filepath.Dir(rel)
+			segments := strings.Split(filepath.ToSlash(dir), "/")
+			if len(segments) < 2 {
+				continue
+			}
+			typ := strings.Join(segments[:len(segments)-1], ":")
+			if !seen[typ] {
+				seen[typ] = true
+				types = append(types, typ)
+			}
 		}
-		typ := strings.Join(segments[:len(segments)-1], ":")
-		types = append(types, typ)
 	}
 	sort.Strings(types)
-	return dedupe(types), nil
+	return types, nil
 }
 
 func (r *Registry) Versions(ctx context.Context, typ string) ([]string, error) {
-	dir, err := r.typeDir(typ)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, executor.ErrNotFound
-		}
-		return nil, err
-	}
+	seen := make(map[string]bool)
 	var versions []string
-	for _, e := range entries {
-		if e.IsDir() {
-			versions = append(versions, e.Name())
+	var firstErr error
+
+	for _, root := range r.roots {
+		dir, err := typeDirFor(root, typ)
+		if err != nil {
+			firstErr = err
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				firstErr = err
+			}
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() && !seen[e.Name()] {
+				seen[e.Name()] = true
+				versions = append(versions, e.Name())
+			}
 		}
 	}
+
+	if len(versions) == 0 {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		return nil, executor.ErrNotFound
+	}
+
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[i] > versions[j]
 	})
@@ -86,7 +125,21 @@ func (r *Registry) Versions(ctx context.Context, typ string) ([]string, error) {
 }
 
 func (r *Registry) Package(ctx context.Context, typ, version string) (*executor.Package, error) {
-	versionDir, err := r.versionDir(typ, version)
+	for _, root := range r.roots {
+		pkg, err := packageFromVersionDir(root, typ, version)
+		if err == nil {
+			return pkg, nil
+		}
+		if !isNotFound(err) {
+			return nil, err
+		}
+	}
+	return nil, executor.ErrNotFound
+}
+
+// packageFromVersionDir builds the Package for typ@version stored under root.
+func packageFromVersionDir(root, typ, version string) (*executor.Package, error) {
+	versionDir, err := versionDirFor(root, typ, version)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +159,7 @@ func (r *Registry) Package(ctx context.Context, typ, version string) (*executor.
 		return nil, err
 	}
 
-	pkg := &executor.Package{Type: typ, Version: version, Registry: r.Name()}
+	pkg := &executor.Package{Type: typ, Version: version, Registry: "local"}
 	if m != nil {
 		pkg.Manifest = data
 		pkg.Description = m.Metadata.Description
@@ -174,16 +227,16 @@ func archivePayload(dir, typ, version string) (string, bool) {
 	return "", false
 }
 
-func (r *Registry) typeDir(typ string) (string, error) {
+func typeDirFor(root, typ string) (string, error) {
 	path, err := executor.TypePath(typ)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(r.root, path), nil
+	return filepath.Join(root, path), nil
 }
 
-func (r *Registry) versionDir(typ, version string) (string, error) {
-	base, err := r.typeDir(typ)
+func versionDirFor(root, typ, version string) (string, error) {
+	base, err := typeDirFor(root, typ)
 	if err != nil {
 		return "", err
 	}
@@ -210,13 +263,16 @@ func (r *Registry) findManifests(root string) []string {
 	return out
 }
 
-func dedupe(in []string) []string {
-	var out []string
-	for i, v := range in {
-		if i > 0 && v == in[i-1] {
-			continue
-		}
-		out = append(out, v)
+// isNotFound reports whether err represents a missing executor path.
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
 	}
-	return out
+	if err == executor.ErrNotFound {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return true
+	}
+	return strings.Contains(err.Error(), executor.ErrNotFound.Error())
 }

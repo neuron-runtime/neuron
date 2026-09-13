@@ -39,6 +39,7 @@ func catalogFromConfigObserver(ctx context.Context, observer executor.Observer) 
 	}
 	return executorctl.BuildCatalog(executorctl.CatalogConfig{
 		ExecutorsConfig: cfg.Executors,
+		ProjectRoot:     cfg.ProjectDir,
 		Observer:        observer,
 	})
 }

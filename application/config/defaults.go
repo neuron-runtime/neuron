@@ -44,5 +44,9 @@ func Defaults() Config {
 			Enabled: true,
 			Address: "127.0.0.1:7433",
 		},
+
+		Dev: DevConfig{
+			MaxWorkers: 1,
+		},
 	}
 }

@@ -327,3 +327,120 @@ storage:
 		t.Fatal("Load succeeded, want error for `storage` in global config")
 	}
 }
+
+func TestDiscoveryWalksUpward(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "neuron.config.json", `{"lang":"typescript"}`)
+	subDir := filepath.Join(root, "services", "orders")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: subDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Lang != "typescript" {
+		t.Errorf("lang = %q, want typescript discovered from ancestor", cfg.Lang)
+	}
+	if cfg.ProjectDir != root {
+		t.Errorf("ProjectDir = %q, want %q (the config's directory)", cfg.ProjectDir, root)
+	}
+}
+
+func TestProjectDirUsesConfigDirectoryWhenFlagOnSubdir(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "neuron.config.json", `{}`)
+	subDir := filepath.Join(root, "nested")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: subDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ProjectDir != root {
+		t.Errorf("ProjectDir = %q, want %q", cfg.ProjectDir, root)
+	}
+}
+
+func TestMultipleConfigCandidatesWarned(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.json", `{"lang":"typescript"}`)
+	write(t, dir, "neuron.config.yaml", "lang: yaml\n")
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Lang != "typescript" {
+		t.Errorf("lang = %q, want typescript (json preferred)", cfg.Lang)
+	}
+	if len(cfg.Warnings) == 0 {
+		t.Fatal("expected a warning about multiple config candidates")
+	}
+}
+
+func TestLocalRootsExpandedAgainstProjectDir(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.json", `{
+  "executors": { "localRoots": ["./custom", "./myown"] }
+}`)
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Executors.LocalRoots) != 2 {
+		t.Fatalf("localRoots = %d, want 2", len(cfg.Executors.LocalRoots))
+	}
+	if cfg.Executors.LocalRoots[0] != filepath.Join(dir, "custom") {
+		t.Errorf("localRoots[0] = %q, want %q", cfg.Executors.LocalRoots[0], filepath.Join(dir, "custom"))
+	}
+}
+
+func TestLocalRegistryURLExpandedAgainstProjectDir(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", `
+executors:
+  registries:
+    - name: local
+      url: ./executors
+`)
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Executors.Registries) != 1 {
+		t.Fatalf("registries = %d, want 1", len(cfg.Executors.Registries))
+	}
+	if cfg.Executors.Registries[0].URL != filepath.Join(dir, "executors") {
+		t.Errorf("local registry url = %q, want %q", cfg.Executors.Registries[0].URL, filepath.Join(dir, "executors"))
+	}
+}
+
+func TestDevMaxWorkersDefaultsToOne(t *testing.T) {
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dev.MaxWorkers != 1 {
+		t.Errorf("default dev.maxWorkers = %d, want 1", cfg.Dev.MaxWorkers)
+	}
+}
+
+func TestDevMaxWorkersFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.json", `{"dev":{"maxWorkers":4}}`)
+
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dev.MaxWorkers != 4 {
+		t.Errorf("dev.maxWorkers = %d, want 4", cfg.Dev.MaxWorkers)
+	}
+}
