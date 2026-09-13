@@ -426,25 +426,17 @@ The SDK ships a small CLI to build your project into a manifest:
 npx neuron-sdk build
 ```
 
-This compiles the entry file (default `index.ts`, configurable in `neuron.config.ts`) and writes the manifest to `.neuron/manifest.json`.
+This compiles the entry file (default `index.ts`) and writes the manifest to `.neuron/manifest.json`.
 
 ```bash
-npx neuron-sdk version   # print the SDK version
-npx neuron-sdk help      # show usage
+npx neuron-sdk build --entry system.ts   # build a specific entry file
+npx neuron-sdk version                   # print the SDK version
+npx neuron-sdk help                      # show usage
 ```
 
-### Configuration
+### Entry selection
 
-```ts
-// neuron.config.ts
-import { defineConfig } from "@neuron/sdk";
-
-export default defineConfig({
-  entry: "./system.ts",
-});
-```
-
-The `entry` must default-export the compiled manifest from `System(...).toManifest()`.
+The entry file default-exporting the manifest (`System(...).toManifest()`) is selected by passing `--entry` to `neuron-sdk build`. When the SDK is driven through the `neuron` CLI (the normal path for a project), the entry is taken from the project's `neuron.config.*` `entry` field and forwarded as `--entry`; no SDK-side configuration file exists.
 
 ---
 
@@ -456,7 +448,6 @@ The `entry` must default-export the compiled manifest from `System(...).toManife
 | `System` | Define a system identity, input schema, and composition tree |
 | `Parallel` | Declare concurrent service branches |
 | `connect` | Explicit field mappings between source output and target input |
-| `defineConfig` | SDK CLI configuration |
 | `string`, `number`, `boolean`, `list`, `record` | Runtime schema builders with validation rules |
 | `Expression` | Typed proxy representing a service output field |
 | `ServiceDefinition`, `ServiceReference` | Service identity and reference types |

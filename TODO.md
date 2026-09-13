@@ -27,24 +27,39 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   `./.neuron/data`) that are resolved against the daemon's working directory; resolve them
   against the project root and pass an absolute path to `--data-dir`.
   ```
-- [ ] **Two-config-file problem for TS projects with external executors.** TS authoring is
+- [x] **Two-config-file problem for TS projects with external executors.** TS authoring is
   ```
   `neuron.config.ts` but executor resolution reads `neuron.yaml`; `config.executorRegistries`
   is compiled into the manifest (`application/compiler/config.go`) and never consulted at
   resolution time (`executorctl.BuildCatalog`). Decide: make one the single source, or make
   the manifest path fully functional. (docs/FIRST_EXECUTOR.md A1)
+  RESOLVED (UX convergence, 2026-09-13): the SDK config surface (`neuron.config.ts`,
+  `defineConfig`) was removed; `neuron.config.*` is the single source of truth; the
+  manifest no longer transports a `config`/`ProjectConfig` block (system `variables` come
+  from config); resolution reads `cfg.Executors.Registries`.
   ```
-- [ ] **`local://` dead default registry.** `defaults.go` ships `{name: local, url: local://}`
+- [x] **`local://` dead default registry.** `defaults.go` ships `{name: local, url: local://}`
   ```
   but `BuildCatalog` silently filters entries with URL `local://`. Fresh projects are
   pre-broken for external executors from `local`. Remove the default or make it functional;
   explode loudly on unknown registry names instead of dropping them. (A2/A4)
+  RESOLVED (UX convergence, 2026-09-13): the bundled `local://` default was removed from
+  `Defaults()`; only registries declared in `neuron.config.*` are consulted. The remaining
+  half — erroring loudly on unknown registry names — is tracked below.
+  ```
+- [ ] **Unknown registry names silently dropped in `BuildCatalog`.** Only `github` and
+  ```
+  `local` are recognized; anything else is ignored without a warning, surfacing later as
+  "executor registry not configured". (A4)
   ```
 - [ ] **`defaultRegistries` never populated.** Declared in `config.go` and used as the
   ```
   requirement fallback but `Defaults()` never sets it; requirements without an explicit
   `registry` get no fallback and a confusing "no executor registries" error. Ship
   `["local", "github"]` defaults and make the error state the exact fix. (A3)
+  PARTIAL (UX convergence, 2026-09-13): `Defaults()` ships `["local"]`; `github` is
+  deliberately opt-in. Confirm the fallback path resolves correctly for the shipped
+  value and tighten the error to name the exact fix.
   ```
 - [ ] **SDK default executor name = service name.** Services without `.executor()` get an
   ```
@@ -81,16 +96,20 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   implement websocket connection 
   with room subscribtions and structure json data.
   ```
-- [ ] **Single config surface decision.** Pick one source of truth for executor-registry
+- [x] **Single config surface decision.** Pick one source of truth for executor-registry
   ```
   config: either consume the manifest's `executorRegistries` at resolution time, or make
   `neuron.yaml` the documented single source and drop the misleading TS path. "Both, with
   one ignored" is the current trap. (docs/FIRST_EXECUTOR.md A1)
+  RESOLVED (UX convergence, 2026-09-13): `neuron.config.*` is the sole source; SDK
+  config surface (`neuron.config.ts`, `defineConfig`) removed; manifest `config` block
+  removed; resolution reads `cfg.Executors.Registries`.
   ```
 - [ ] **`neuron init --lang ts` scaffolding.** Generate a runnable TS project (package.json,
   ```
-  `neuron.config.ts`, `system.ts`, `neuron.yaml` with a `local` registry block) so fresh
-  projects are not pre-broken for external executors. (F4)
+  `system.ts`, `neuron.config.json` with `lang: typescript`, `entry: system.ts`, and a
+  `local` registry block) so fresh projects are not pre-broken for external executors.
+  (F4)
   ```
 - [ ] **`neuron daemon status` command.** Show running/stopped, PID, data dir, socket path,
   ```

@@ -179,7 +179,7 @@ Execution flows along the connectors. Each connector defines what data flows bet
 
 ### YAML
 
-The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.yaml`, `systems/`, `services/`, and `connectors/`. `neuron init` scaffolds it, and `neuron register` consumes it. See `examples/ecommerce_order` for a complete project.
+The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: System` entry file (`system.yaml` by default). `neuron init` scaffolds it, and `neuron register` consumes it. See `examples/ecommerce_order` for a complete project.
 
 ### TypeScript — the SDK
 
@@ -221,7 +221,7 @@ The pipeline in `neuron register`:
 
 ```mermaid
 flowchart TB
-    A[project<br/>neuron.yaml] --> B[loader<br/>per authoring language]
+    A[project<br/>neuron.config.*] --> B[loader<br/>per authoring language]
     B --> C[canonical manifest<br/>.neuron/manifest.json]
     C --> D[validator]
     D --> E[compiler<br/>core.System]
@@ -231,7 +231,7 @@ flowchart TB
 
 The validator and compiler are language-agnostic: they consume and emit canonical structures. YAML-specific quirks stay inside the YAML loader; TypeScript-specific quirks stay inside the TS loader.
 
-The TypeScript loader delegates the actual build to the SDK CLI (`neuron-sdk build --path <root>`), which resolves the project config (`neuron.config.ts`), executes the entry module, and writes `.neuron/manifest.json` — then the same canonical path continues.
+The TypeScript loader delegates the actual build to the SDK CLI (`neuron-sdk build --path <root> --entry <file>`), which executes the entry module (default `index.ts`) and writes `.neuron/manifest.json` — then the same canonical path continues. The entry file is selected the same way for both authors: the project's `neuron.config.*` `entry` field.
 
 ---
 

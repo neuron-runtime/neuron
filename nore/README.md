@@ -238,7 +238,7 @@ A backend owns starting the executor, connecting to it, health checking, executi
 
 ### Built-in modules
 
-N.O.R.E. ships a small set of in-process modules for common operations. They run inside the runtime engine and require no installation or resolution. Referencing one in a `neuron.yaml`/TS system is a plain module reference; N.O.R.E. dispatches it directly to the in-process implementation.
+N.O.R.E. ships a small set of in-process modules for common operations. They run inside the runtime engine and require no installation or resolution. Referencing one in a system (YAML entry file or TS via the SDK) is a plain module reference; N.O.R.E. dispatches it directly to the in-process implementation.
 
 ### External modules (executors)
 

@@ -190,7 +190,7 @@ The `local` registry serves a directory laid out exactly like the installed stor
 
 It exists so the full resolution → selection → packaging → installation pipeline works offline and in tests, and it demonstrates that registries are pluggable — "local" is just another provider.
 
-Configure registries per project in `neuron.yaml`:
+Configure registries per project in `neuron.config.yaml` (or `neuron.config.json` / `neuron.config.yml`):
 
 ```yaml
 executors:
@@ -200,6 +200,8 @@ executors:
     - name: github
       url: https://api.github.com
 ```
+
+With no `executors.registries` block, only built-in executors are available. Requirements without an explicit `registry` fall back to the default local registry automatically; `github` and any other registry must be declared here to be used.
 
 ---
 

@@ -67,10 +67,10 @@ neuron run --input '{"order":{"id":"ord_1001","customerId":"cus_42","customerEma
 The CLI asks N.O.R.E. to create an instance and execute the system, streaming live execution events:
 
 ```text
-execution.events        instance started
-service.evaluating      validate-order
+execution.started       instance created
+service.started         validate-order
 service.completed       validate-order
-service.evaluating      parse-order
+service.started         parse-order
 service.completed       parse-order
 ...
 execution.completed     status: completed
@@ -100,18 +100,20 @@ The whole definition is plain TypeScript — types are checked, mappings are ver
 neuron init my-first-system
 ```
 
-`neuron init` creates the directory and a starter `neuron.yaml`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
+`neuron init` creates the directory and a starter `neuron.config.yaml`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
 
 ```bash
 mv my-first-system examples/my-first-system
 cd examples/my-first-system
 ```
 
-Open `neuron.yaml` and switch the authoring language to TypeScript:
+Open `neuron.config.yaml` and switch the authoring language to TypeScript:
 
 ```yaml
 lang: typescript
 ```
+
+The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run. `init` defaults to the YAML authoring surface; setting `lang: typescript` and pointing `entry` at a `.ts` file selects the SDK.
 
 ### Add the TypeScript layout
 
@@ -119,10 +121,9 @@ Create the SDK project files:
 
 ```text
 examples/my-first-system/
-├── neuron.yaml          ← lang: typescript
+├── neuron.config.yaml     ← config: lang, entry, runtime
 ├── package.json         ← declares @neuron/sdk
-├── neuron.config.ts     ← SDK CLI config (entry file)
-├── system.ts            ← the System definition
+├── system.ts            ← the System definition (the entry)
 └── types.ts             ← domain types
 ```
 
@@ -205,15 +206,12 @@ const manifest = System({
 export default manifest;
 ```
 
-Tell the SDK CLI which file is the entry (it must default-export the manifest):
+Point the project configuration at the entry file (it must default-export the manifest):
 
-```ts
-// neuron.config.ts
-import { defineConfig } from "@neuron/sdk";
-
-export default defineConfig({
-  entry: "./system.ts",
-});
+```yaml
+# neuron.config.yaml
+lang: typescript
+entry: system.ts
 ```
 
 > [!NOTE]
@@ -234,10 +232,10 @@ neuron run --input '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmai
 Watch the events stream:
 
 ```text
-execution.events        instance started
-service.evaluating      order.validate
+execution.started       instance created
+service.started         order.validate
 service.completed       order.validate
-service.evaluating      payment.authorize
+service.started         payment.authorize
 service.completed       payment.authorize
 execution.completed     status: completed
 ```
@@ -281,7 +279,7 @@ catalog/example/echo/1.0.0/
 
 ### Register the catalog as a local registry
 
-Add a `local` registry in your project's `neuron.yaml`:
+Add a `local` registry in your project's `neuron.config.yaml`:
 
 ```yaml
 executors:
@@ -290,7 +288,7 @@ executors:
       url: /absolute/path/to/neuron/examples/executors/catalog
 ```
 
-The `local` registry is directory-backed and served offline. The default `github` registry serves the same kind of packages from GitHub Releases over the network.
+The `local` registry is directory-backed and served offline. Additional registries (such as `github`) are declared the same way and are opted in explicitly — with no `executors.registries` block, only built-in executors are available.
 
 ### Require the module from a service
 

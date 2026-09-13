@@ -91,7 +91,7 @@ The following flags are available on every `neuron` command.
 
 | Flag                 | Description                                                      |
 | -------------------- | ---------------------------------------------------------------- |
-| `--config string`    | Project config file (defaults to `./neuron.yaml`)                |
+| `--config string`    | Project config file (one of `neuron.config.json` / `.yaml` / `.yml`; auto-discovered) |
 | `--log-level string` | Logging level (default `"info"`)                                 |
 | `-v, --verbose`      | Enable verbose output (shows N.O.R.E. daemon logs)               |
 | `--remote string`    | Remote N.O.R.E. endpoint (e.g., `https://api.nore.example.com`)  |
@@ -127,15 +127,15 @@ Usage:
   neuron init [Target] [flags]
 ```
 
-`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and writes a starter `neuron.yaml` into it.
+`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and writes a starter `neuron.config.yaml` into it.
 
 ```bash
-# Create ./my-system with a starter neuron.yaml
+# Create ./my-system with a starter neuron.config.yaml
 neuron init my-system
 cd my-system
 ```
 
-The scaffolded config selects the YAML authoring language. To author in TypeScript, set `lang: typescript` and add the SDK project files — see [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md).
+The scaffolded config selects the YAML authoring language. To author in TypeScript, set `lang: typescript`, point `entry` at your `.ts` file, and add the SDK project files — see [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md).
 
 ### `neuron register`
 
@@ -437,25 +437,20 @@ source <(neuron completion bash)
 The CLI resolves configuration from several layers, later layers overriding earlier ones:
 
 1. Built-in defaults (compiled in).
-2. The project's `neuron.yaml` (or the file passed with `--config`).
+2. The project's `neuron.config.json` / `neuron.config.yaml` / `neuron.config.yml` (or the file passed with `--config`).
 3. Environment variables.
 4. Command-line flags.
 
-**The scaffolded** `neuron.yaml` **produced by** `neuron init`
+**The scaffolded** `neuron.config.yaml` **produced by** `neuron init`
 
 ```yaml
-apiVersion: neuron/v1
-kind: Project
-
-metadata:
-  name: my-system
-  version: 0.1.0
-  description: A Neuron system
+#
+# Neuron project configuration. neuron.config.json | .yaml | .yml is the single
+# source of truth for how this project is authored and runs.
+#
 
 lang: yaml
-
-systems:
-  entry: ./systems/my-system/system.yaml
+entry: system.yaml
 
 runtime:
   execution:
@@ -465,16 +460,10 @@ runtime:
     min: 1
     max: 8
 
-storage:
-  provider: local
-  directory: ./.neuron/data
-
 executors:
   registries:
-    - name: github
-      url: https://api.github.com
     - name: local
-      url: local://
+      url: ./executors
 
 inspector:
   enabled: true
@@ -488,21 +477,23 @@ inspector:
 
 | Key                         | Default               | Meaning                                                                                                    |
 | --------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `lang`                      | auto-detected         | Project authoring language (`yaml`, `yml`, `typescript`, `ts`); detected from the project files when unset |
-| `systems.entry`             | —                     | Path to the project's entry system definition                                                              |
+| `lang`                      | `typescript`          | Project authoring language (`yaml`, `yml`, `typescript`, `ts`)                                             |
+| `entry`                     | `index.ts` / `system.yaml` | Path to the project's entry system definition (defaults: `index.ts` for TypeScript, `system.yaml` for YAML) |
+| `variables`                 | —                     | Free-form variables carried into the compiled system manifest (e.g. environment-specific settings)          |
 | `runtime.execution.mode`    | `wait`                | Execution mode (`wait` for a blocking result, `detach` for asynchronous)                                   |
 | `runtime.execution.timeout` | `30m`                 | Execution timeout                                                                                          |
 | `runtime.workers.min`       | `1`                   | Minimum executor workers                                                                                   |
 | `runtime.workers.max`       | `8`                   | Maximum executor workers                                                                                   |
-| `storage.provider`          | `local`               | Storage provider                                                                                           |
-| `storage.directory`         | `~/.neuron/nore`      | Persistent data directory                                                                                  |
 | `daemon.socket`             | `~/.neuron/nore.sock` | Local Unix socket for the daemon                                                                           |
 | `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                                                    |
 | `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                                                           |
 | `executors.storeDir`        | `~/.neuron/executors` | Where resolved modules are installed                                                                       |
-| `executors.registries`      | `github`, `local`     | Registries used to resolve modules                                                                         |
+| `executors.registries`      | none                  | Registries used to resolve external modules; with no block, only built-in executors are available          |
 | `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
 | `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
+
+> [!NOTE]
+> Runtime internals — `storage.provider`, `storage.directory`, and `executors.storeDir` — are managed by Neuron and rejected from project configuration files. The daemon data directory is controlled with `NEURON_DATA_DIR`.
 
 
 
@@ -520,17 +511,15 @@ Environment variables can also be used for any configuration value with the `NEU
 
 ### Project layout
 
-`neuron init <project>` creates the project directory and a starter `neuron.yaml` (project configuration with `lang: yaml`). From there you add the system and service definitions by hand. The canonical YAML layout (as shipped in `examples/ecommerce_order`) is:
+`neuron init <project>` creates the project directory and a starter `neuron.config.yaml` (project configuration with `lang: yaml`, `entry: system.yaml`). From there you add the system definition by hand. The canonical YAML layout (as shipped in `examples/ecommerce_order`) is:
 
 ```text
 <project>
-├── neuron.yaml              project configuration + systems entry
-├── systems/
-│   └── <name>/system.yaml   system definition
-└── services/                service (module) definitions
+├── neuron.config.yaml   project configuration (lang, entry, runtime)
+└── system.yaml          system definition (the entry file)
 ```
 
-The `neuron.yaml` template wires `systems.entry` to `./systems/<name>/system.yaml`. The system file lists its services either by `entry:` reference or inline, and connectors are declared **inline** in the system file (mappings and validations) — there is no separate `connectors/` directory.
+The system file lists its services either by `entry:` reference or inline, and connectors are declared **inline** in the system file (mappings and validations) — there is no separate `connectors/` directory.
 
 `neuron register` resolves this layout, builds the canonical manifest into `.neuron/manifest.json`, compiles it, and registers the result. The TypeScript authoring surface produces the same canonical manifest from SDK definitions.
 

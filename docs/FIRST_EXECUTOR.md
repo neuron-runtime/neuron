@@ -327,3 +327,48 @@ Every actionable item above is recorded as a checkbox in
 This document is the narrative; the TODO list is the tracker. As items are fixed, tick
 them in TODO.md and update the corresponding claim here only if the *behavior*
 changed — this document is a living audit, not a changelog.
+
+## 5. Resolution status (2026-09-13)
+
+Phase 2 of the UX convergence (see `docs/UX.md` when it lands) established the
+`neuron.config.*` surface as the single source of truth and removed the project
+wrapper from the YAML surface. Status of the findings above:
+
+**Resolved**
+
+- **A1 — config single source.** `neuron.config.ts`/`defineConfig` is gone. The SDK is
+  invoked with an `--entry` flag, never a config file; executor-registry configuration
+  lives only in `neuron.config.*`, and resolution consumes it (`BuildCatalog` reads
+  `cfg.Executors.Registries`). The manifest no longer carries a `config`/`ProjectConfig`
+  transport; system-level `variables` come from config directly.
+- **A2 — dead `local://` default.** The bundled `{name: local, url: local://}` default
+  registry was removed; only registries declared in `neuron.config.*` are consulted.
+- **A3 — `defaultRegistries`.** `Defaults()` now ships `["local"]`, so requirements
+  without an explicit `registry` fall back to the local registry by default.
+- **C2/C3 — dead SDK config.** `script.build` and `Project.entryFile` were never real;
+  the whole SDK config surface (`neuron.config.ts`, `defineConfig`) is removed.
+- **D4's premise — data-dir coupling.** `storage.directory` is now rejected from project
+  config files (runtime-managed); the daemon data directory is set via `NEURON_DATA_DIR`.
+- **E2 — example config.** Both shipped examples use a single `neuron.config.*`
+  (`examples/ecommerce_order/neuron.config.yaml`,
+  `examples/ecommerce_order_ts/neuron.config.json`) with functional values.
+- **F1 — `neuron.yaml` overload.** The YAML surface no longer doubles as the CLI
+  config; a project config is `neuron.config.yaml` (or `.json`/`.yml`). Legacy
+  `neuron.yaml`/`neuron.yml` config names are rejected with a rename hint.
+- **F4 — init scaffold.** `neuron init` writes `neuron.config.yaml` including a
+  functional `local ./executors` registry block.
+
+**Still open**
+
+- **A4 — unknown registry names silently dropped.** `BuildCatalog` still ignores names
+  other than `github`/`local`; tick TODO.md when it errors loudly instead.
+- **B1–B4, D1–D8, E1, E3, E5, E6, F2, F3** — unchanged; tracked in TODO.md.
+
+---
+
+## 6. Relationship note for future readers
+
+Items above that reference removed source lines (`config.go`, `loader.go`, the SDK
+`cli/config.ts`, `examples/ecommerce_order_ts/neuron.config.ts`) are historical
+artifacts of the moment they were written. Before re-triaging them, verify the current
+line against the repository — the referenced files have since moved or been deleted.
