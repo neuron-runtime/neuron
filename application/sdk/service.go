@@ -8,14 +8,14 @@ import "github.com/Muhammad-Jay/neuron/shared/types/core"
 // that keeps application code readable.
 func Service(
 	id string,
-	serviceType core.ServiceType,
+	executorType core.ExecutorType,
 ) core.Service {
 	return core.Service{
 		Metadata: core.Metadata{
 			ID:   core.ID(id),
 			Name: id,
 		},
-		Type:    serviceType,
+		Type:    executorType,
 		Inputs:  make([]core.Port, 0),
 		Outputs: make([]core.Port, 0),
 		ServiceConfigurations: make(
@@ -28,9 +28,9 @@ func Service(
 func NamedService(
 	id string,
 	name string,
-	serviceType core.ServiceType,
+	executorType core.ExecutorType,
 ) core.Service {
-	service := Service(id, serviceType)
+	service := Service(id, executorType)
 	service.Metadata.Name = name
 	return service
 }

@@ -1,6 +1,6 @@
 package core
 
-type ServiceType string
+type ExecutorType string
 type ResourceType string
 type ValueType string
 

@@ -30,6 +30,10 @@ type Catalog struct {
 type CatalogConfig struct {
 	config.ExecutorsConfig
 
+	// Observer receives resolution/installation progress events. When nil,
+	// the pipeline runs silently.
+	Observer executor.Observer
+
 	// GitHubToken overrides the token discovered from the environment.
 	GitHubToken string
 
@@ -63,7 +67,6 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 		token = os.Getenv("NEURON_GITHUB_TOKEN")
 	}
 
-	localRoot := ""
 	for _, r := range cfg.Registries {
 		switch r.Name {
 		case "github":
@@ -83,14 +86,13 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 					}
 				}
 			}
-			localRoot = r.URL
 		}
 	}
-	_ = localRoot
 
 	downloader := executor.NewHTTPDownloader()
-	installer := &executor.Installer{Store: fsStore, Downloader: downloader}
+	installer := &executor.Installer{Store: fsStore, Downloader: downloader, Observer: cfg.Observer}
 	resolver := executor.NewResolver(reg, fsStore, installer)
+	resolver.Observer = cfg.Observer
 
 	return &Catalog{
 		cfg:        cfg.ExecutorsConfig,

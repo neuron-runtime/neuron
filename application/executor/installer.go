@@ -22,6 +22,10 @@ import (
 type Installer struct {
 	Store      Store
 	Downloader Downloader
+
+	// Observer receives installation progress events. A nil observer keeps
+	// installation silent.
+	Observer Observer
 }
 
 // InstallResult reports what happened.
@@ -40,8 +44,13 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	}
 
 	if existing, err := i.Store.Get(ctx, pkg.Type, pkg.Version); err == nil && existing != nil {
+		notify(i.Observer, func(o Observer) {
+			o.Installed(InstallResult{Installed: existing, AlreadyPresent: true})
+		})
 		return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
 	}
+
+	notify(i.Observer, func(o Observer) { o.Installing(*pkg) })
 
 	stage, err := i.Store.Stage()
 	if err != nil {
@@ -127,7 +136,19 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	}
 	installed.Runtime.Entrypoint = entrypoint
 
+	notify(i.Observer, func(o Observer) {
+		o.Installed(InstallResult{Installed: installed})
+	})
+
 	return &InstallResult{Installed: installed}, nil
+}
+
+// notify invokes f against the observer, if any. It lives here as a package
+// helper so both Installer and Resolver can stay readable.
+func notify(o Observer, f func(Observer)) {
+	if o != nil {
+		f(o)
+	}
 }
 
 // materialize downloads (or copies) the artifact and lays it into stage.

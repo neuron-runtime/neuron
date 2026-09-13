@@ -13,32 +13,32 @@ import (
 
 type Registry struct {
 	mu        sync.RWMutex
-	executors map[core.ServiceType]contracts.Executor
+	executors map[core.ExecutorType]contracts.Executor
 }
 
 func New() *Registry {
-	return &Registry{executors: make(map[core.ServiceType]contracts.Executor)}
+	return &Registry{executors: make(map[core.ExecutorType]contracts.Executor)}
 }
 
-func (r *Registry) Register(serviceType core.ServiceType, executor contracts.Executor) error {
-	if serviceType == "" || executor == nil {
-		return fmt.Errorf("service type and executor are required")
+func (r *Registry) Register(executorType core.ExecutorType, executor contracts.Executor) error {
+	if executorType == "" || executor == nil {
+		return fmt.Errorf("executor type and executor are required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.executors[serviceType]; exists {
-		return fmt.Errorf("executor for service type %q is already registered", serviceType)
+	if _, exists := r.executors[executorType]; exists {
+		return fmt.Errorf("executor for executor type %q is already registered", executorType)
 	}
-	r.executors[serviceType] = executor
+	r.executors[executorType] = executor
 	return nil
 }
 
-func (r *Registry) Resolve(serviceType core.ServiceType) (contracts.Executor, error) {
+func (r *Registry) Resolve(executorType core.ExecutorType) (contracts.Executor, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	executor, exists := r.executors[serviceType]
+	executor, exists := r.executors[executorType]
 	if !exists {
-		return nil, fmt.Errorf("executor for service type %q was not found", serviceType)
+		return nil, fmt.Errorf("executor for executor type %q was not found", executorType)
 	}
 	return executor, nil
 }
@@ -58,7 +58,7 @@ func (r *Registry) RegisterCoreServiceExecutors() {
 	// before the namespace existed still resolve.
 	for name, executor := range builtins {
 		must(r.Register(core.CoreName(name), executor))
-		must(r.Register(core.ServiceType(name), executor))
+		must(r.Register(core.ExecutorType(name), executor))
 	}
 }
 
@@ -71,13 +71,13 @@ func (r *Registry) Close() error {
 
 	var failures []string
 	types := make([]string, 0, len(r.executors))
-	for serviceType := range r.executors {
-		types = append(types, string(serviceType))
+	for executorType := range r.executors {
+		types = append(types, string(executorType))
 	}
 	sort.Strings(types)
 
 	for _, serviceType := range types {
-		closer, ok := r.executors[core.ServiceType(serviceType)].(contracts.ExecutorCloser)
+		closer, ok := r.executors[core.ExecutorType(serviceType)].(contracts.ExecutorCloser)
 		if !ok {
 			continue
 		}

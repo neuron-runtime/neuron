@@ -60,7 +60,7 @@ type normalizedMetadata struct {
 
 type normalizedService struct {
 	ID          string           `json:"id"`
-	Type        core.ServiceType `json:"type"`
+	Type        core.ExecutorType `json:"type"`
 	Config      map[string]any   `json:"config"`
 	Inputs      []core.Port      `json:"inputs,omitempty"`
 	Outputs     []core.Port      `json:"outputs,omitempty"`

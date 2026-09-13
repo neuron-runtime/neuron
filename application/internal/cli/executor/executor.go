@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/Muhammad-Jay/neuron/application/executor"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/progress"
 	"github.com/Muhammad-Jay/neuron/application/internal/executorctl"
 	"github.com/spf13/cobra"
 )
@@ -24,12 +26,20 @@ func splitRef(ref string) (typ, version string, err error) {
 
 // catalogFromConfig builds the executorctl.Catalog from the loaded config.
 func catalogFromConfig(ctx context.Context) (*executorctl.Catalog, error) {
+	return catalogFromConfigObserver(ctx, nil)
+}
+
+// catalogFromConfigObserver builds the executorctl.Catalog from the loaded
+// config, attaching an observer that receives resolution/installation
+// progress events (may be nil).
+func catalogFromConfigObserver(ctx context.Context, observer executor.Observer) (*executorctl.Catalog, error) {
 	cfg, ok := config.FromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("configuration not loaded")
 	}
 	return executorctl.BuildCatalog(executorctl.CatalogConfig{
 		ExecutorsConfig: cfg.Executors,
+		Observer:        observer,
 	})
 }
 
@@ -71,7 +81,10 @@ func NewAddCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			catalog, err := catalogFromConfig(ctx)
+			rep := progress.New(cmd.ErrOrStderr())
+			defer rep.Stop()
+
+			catalog, err := catalogFromConfigObserver(ctx, rep)
 			if err != nil {
 				return err
 			}

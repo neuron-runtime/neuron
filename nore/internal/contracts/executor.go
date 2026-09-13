@@ -56,6 +56,6 @@ type ExecutorCloser interface {
 }
 
 type ExecutorRegistry interface {
-	Register(serviceType core2.ServiceType, executor Executor) error
-	Resolve(serviceType core2.ServiceType) (Executor, error)
+	Register(executorType core2.ExecutorType, executor Executor) error
+	Resolve(executorType core2.ExecutorType) (Executor, error)
 }

@@ -3,7 +3,7 @@ package core
 import "testing"
 
 func TestCoreName(t *testing.T) {
-	cases := map[string]ServiceType{
+	cases := map[string]ExecutorType{
 		"set":     "neuron:core:set",
 		"ai":      "neuron:core:ai",
 		"command": "neuron:core:command",
@@ -15,8 +15,8 @@ func TestCoreName(t *testing.T) {
 	}
 }
 
-func TestIsCoreServiceType(t *testing.T) {
-	core := []ServiceType{
+func TestIsCoreExecutorType(t *testing.T) {
+	core := []ExecutorType{
 		"neuron:core:set",
 		"neuron:core:ai",
 		"neuron:core:log",
@@ -29,12 +29,12 @@ func TestIsCoreServiceType(t *testing.T) {
 		"command",
 	}
 	for _, tt := range core {
-		if !IsCoreServiceType(tt) {
-			t.Errorf("IsCoreServiceType(%q) = false, want true", tt)
+		if !IsCoreExecutorType(tt) {
+			t.Errorf("IsCoreExecutorType(%q) = false, want true", tt)
 		}
 	}
 
-	notCore := []ServiceType{
+	notCore := []ExecutorType{
 		"neuron:set",
 		"neuron:ai",
 		"github:read",
@@ -46,8 +46,8 @@ func TestIsCoreServiceType(t *testing.T) {
 		"neuron:core",
 	}
 	for _, tt := range notCore {
-		if IsCoreServiceType(tt) {
-			t.Errorf("IsCoreServiceType(%q) = true, want false", tt)
+		if IsCoreExecutorType(tt) {
+			t.Errorf("IsCoreExecutorType(%q) = true, want false", tt)
 		}
 	}
 }

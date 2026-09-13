@@ -15,15 +15,15 @@ var CoreTypes = []string{"set", "ai", "command", "delay", "http", "log"}
 
 // CoreName returns the canonical namespaced name for a core executor, e.g.
 // CoreName("set") == "neuron:core:set".
-func CoreName(name string) ServiceType {
-	return ServiceType(CoreOwner + ":" + CoreNamespace + ":" + name)
+func CoreName(name string) ExecutorType {
+	return ExecutorType(CoreOwner + ":" + CoreNamespace + ":" + name)
 }
 
-// IsCoreServiceType reports whether t denotes an in-process (core) executor:
+// IsCoreExecutorType reports whether t denotes an in-process (core) executor:
 // the canonical neuron:core:<name> namespace or a legacy bare core name such
 // as "set". "neuron:set" is NOT core; it is a regular package under the
 // neuron owner.
-func IsCoreServiceType(t ServiceType) bool {
+func IsCoreExecutorType(t ExecutorType) bool {
 	s := string(t)
 
 	for _, n := range CoreTypes {

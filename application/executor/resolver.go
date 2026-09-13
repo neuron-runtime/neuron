@@ -17,6 +17,10 @@ type Resolver struct {
 	registries *Registry
 	store      Store
 	installer  *Installer
+
+	// Observer receives resolution progress events. A nil observer keeps
+	// resolution silent.
+	Observer Observer
 }
 
 // NewResolver wires resolution against a registry catalog, an installed
@@ -46,11 +50,14 @@ func (r *Resolver) Resolve(ctx context.Context, req Requirement) (*Installed, er
 		return nil, err
 	}
 
+	notify(r.Observer, func(o Observer) { o.Resolving(req) })
+
 	// 1 & 2: prefer the local store whenever an installed version satisfies
 	// the requirement. This keeps Instances independent of the network.
 	if installed, ok, err := r.installedSatisfying(ctx, req); err != nil {
 		return nil, err
 	} else if ok {
+		notify(r.Observer, func(o Observer) { o.AlreadyInstalled(req, *installed) })
 		return installed, nil
 	}
 

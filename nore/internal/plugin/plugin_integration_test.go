@@ -150,7 +150,7 @@ func TestRegisterResolvedExecutorsDispatch(t *testing.T) {
 			if err := RegisterResolvedExecutors(reg, []shadexec.ResolvedExecutor{tc.res}); err != nil {
 				t.Fatalf("RegisterResolvedExecutors: %v", err)
 			}
-			ex, err := reg.Resolve(core.ServiceType(tc.res.Type))
+			ex, err := reg.Resolve(core.ExecutorType(tc.res.Type))
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}

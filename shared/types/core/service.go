@@ -19,7 +19,7 @@ type RetryPolicy struct {
 
 type Service struct {
 	Metadata Metadata
-	Type     ServiceType
+	Type     ExecutorType
 
 	ServiceConfigurations ServiceConfigurations
 	RuntimeConfigurations RuntimeConfigurations

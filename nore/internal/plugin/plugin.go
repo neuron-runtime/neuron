@@ -77,7 +77,7 @@ var sharedRuntimes = sync.OnceValues(func() (*runtime.Registry, error) {
 // The adapter is chosen by the executor's runtime kind.
 func RegisterResolvedExecutors(reg contracts.ExecutorRegistry, resolved []shadexec.ResolvedExecutor) error {
 	for _, r := range resolved {
-		if _, err := reg.Resolve(core.ServiceType(r.Type)); err == nil {
+		if _, err := reg.Resolve(core.ExecutorType(r.Type)); err == nil {
 			// Core in-process executor already registered; prefer it.
 			continue
 		}
@@ -85,7 +85,7 @@ func RegisterResolvedExecutors(reg contracts.ExecutorRegistry, resolved []shadex
 		if err != nil {
 			return fmt.Errorf("create executor for %s: %w", r.Type, err)
 		}
-		if err := reg.Register(core.ServiceType(r.Type), adapter); err != nil {
+		if err := reg.Register(core.ExecutorType(r.Type), adapter); err != nil {
 			return fmt.Errorf("register executor for %s: %w", r.Type, err)
 		}
 	}
