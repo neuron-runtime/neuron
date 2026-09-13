@@ -164,7 +164,7 @@ The digest shown must match the published value exactly.
 
 ```bash
 cd examples/ecommerce_order_ts
-neuron register
+neuron build
 neuron run
 ```
 

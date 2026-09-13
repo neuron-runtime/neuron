@@ -15,7 +15,7 @@ This document records:
 2. every issue found while building and shipping the first real executor
    (`content-extract`) through the local registry;
 3. a prioritized fix plan;
-4. pointers to concrete TODO items in [`/TODO.md`](../TODO.md).
+4. pointers to concrete TODO items in [`/TODO.md`](../../TODO.md).
 
 Every claim below points at the source location that establishes it. Where the current
 behavior is "dead config" or "silently ignored", that is stated explicitly rather than
@@ -70,7 +70,7 @@ registered and executed against the local registry:
 go build -o /tmp/neuron ./application/cmd/neuron
 go build -o /tmp/nore-daemon ./nore/cmd/nore
 
-/tmp/neuron register --lang ts --root . --nore-path /tmp/nore-daemon -v
+/tmp/neuron build --lang ts --root . --nore-path /tmp/nore-daemon -v
 # → content-metadata-extraction@1.0.0#<sha>:development (registered)
 
 /tmp/neuron run "content-metadata-extraction@1.0.0" \
@@ -233,27 +233,30 @@ plain source-tree build gives "nore runtime not found: set daemon.norePath (or
 ### E. Documentation gaps
 
 **E1 — Shipped examples use stale event names.**
-`docs/GETTING_STARTED.md` shows `service.evaluating` (lines 71, 238), but the real
-events are `service.started`/`service.completed`/`execution.completed`
-(`nore/internal/event/event_types.go:33-35`).
+RESOLVED (2026-09-13): `docs/GETTING_STARTED.md` transcripts use the real events
+`service.started`/`service.completed`/`execution.completed`
+(`nore/internal/event/event_types.go`).
 
 **E2 — Example config carries dead/placeholder values.**
-`examples/ecommerce_order_ts/neuron.config.ts` sets a dead `script.build`,
-`storage.directory: "./home"`, and `storage.provider: "postgres"` (the runtime
-persistence is file-based today).
+RESOLVED (2026-09-13): `examples/ecommerce_order_ts/neuron.config.ts` is gone; both
+examples ship clean `neuron.config.*` files with no `script.build`/`storage.*` blocks,
+and the `official` registry block is removed from the YAML example.
 
 **E3 — Root help text calls Neuron a "workflow engine".**
-`application/internal/cli/cli.go:25` — `"Neuron workflow engine CLI"`. Neuron explicitly
-is *not* a workflow engine (see README).
+RESOLVED (2026-09-13): `application/internal/cli/cli.go` now declares `neuron` as
+"Neuron CLI".
 
 **E4 — `application/README.md` misdescribes the daemon lifecycle.**
-It claims daemon stop on process exit; the daemon persists.
+RESOLVED (2026-09-13): the CLI reference states the daemon persists until
+`neuron daemon stop`.
 
 **E5 — TODO.md references a nonexistent design-notes dir.**
-`docs/executors/2026-09-05-*.md` does not exist; the Documentation item dangles.
+RESOLVED (2026-09-13): `docs/executors/2026-09-05-first-executor.md` (this document)
+now lives in the referenced directory.
 
 **E6 — `neuron instance` with no subcommand exits silently.**
-No help, no error — nothing to teach the user what it does.
+RESOLVED (2026-09-13): the root command renders its help, and the dead commented
+lookup code was removed.
 
 ### F. Structural constraints
 
@@ -323,7 +326,7 @@ first encounter with external modules is a resolution failure.
 ## 4. Relationship to TODO.md
 
 Every actionable item above is recorded as a checkbox in
-[`/TODO.md`](../TODO.md) under **Fixes**, **Improvements**, or **Documentation**.
+[`/TODO.md`](../../TODO.md) under **Fixes**, **Improvements**, or **Documentation**.
 This document is the narrative; the TODO list is the tracker. As items are fixed, tick
 them in TODO.md and update the corresponding claim here only if the *behavior*
 changed — this document is a living audit, not a changelog.
@@ -355,14 +358,23 @@ wrapper from the YAML surface. Status of the findings above:
 - **F1 — `neuron.yaml` overload.** The YAML surface no longer doubles as the CLI
   config; a project config is `neuron.config.yaml` (or `.json`/`.yml`). Legacy
   `neuron.yaml`/`neuron.yml` config names are rejected with a rename hint.
-- **F4 — init scaffold.** `neuron init` writes `neuron.config.yaml` including a
-  functional `local ./executors` registry block.
+- **F4 — init scaffold.** `neuron init` scaffolds a runnable TypeScript project by
+  default (`neuron.config.json` with `lang: typescript`, `entry: system.ts`, and the
+  implicit executor root via `executors.localRoots`); `--lang yaml` produces the YAML
+  layout.
+- **B1 — SDK default executor.** A service without `.executor()`
+  defaults to the built-in `neuron:core:set` and runs in-process; the
+  `owner:capability:sub` convention is documented in the SDK README.
+- **E1, E3 — docs/help.** GETTING_STARTED transcripts use live event names; the root
+  help says "Neuron CLI".
+- **E5 — design-notes dir.** This document now lives at `docs/executors/`.
+- **E6 — `neuron instance`.** The root command prints its help.
 
 **Still open**
 
 - **A4 — unknown registry names silently dropped.** `BuildCatalog` still ignores names
   other than `github`/`local`; tick TODO.md when it errors loudly instead.
-- **B1–B4, D1–D8, E1, E3, E5, E6, F2, F3** — unchanged; tracked in TODO.md.
+- **B2–B4, D1–D8, F2, F3** — unchanged; tracked in TODO.md.
 
 ---
 

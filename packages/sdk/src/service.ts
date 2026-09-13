@@ -233,7 +233,7 @@ export class ServiceDefinition<TInput extends object = object, TOutput extends o
   constructor(ref: string, state?: Partial<ServiceState>, executionConfig?: ExecutionConfig) {
     this.ref = ref;
     this._state = {
-      executor: state?.executor ?? { name: ref, version: "latest", registry: "local" },
+      executor: state?.executor ?? { name: "neuron:core:set", version: "latest", registry: "local" },
       version: state?.version,
       description: state?.description,
       inputPorts: state?.inputPorts ?? [],
@@ -379,7 +379,7 @@ export function Service<TInput extends object = object, TOutput extends object =
   return new ServiceDefinition<TInput, TOutput>(config.name, {
     version: config.version,
     description: config.description,
-    executor: { name: config.name, version: config.version ?? "latest", registry: "local" },
+    executor: { name: "neuron:core:set", version: "latest", registry: "local" },
   });
 }
 

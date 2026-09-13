@@ -1,10 +1,10 @@
 # Getting Started with Neuron
 
-This guide takes you from a fresh checkout to a running system in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, registered with the runtime, and executed with live event streaming. No prior Neuron knowledge is assumed: building, validation, compilation, module resolution, and starting the runtime engine are all automatic.
+This guide takes you from a fresh checkout to a running system in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, built with the runtime, and executed with live event streaming. No prior Neuron knowledge is assumed: building, validation, compilation, module resolution, and starting the runtime engine are all automatic.
 
 ```mermaid
 flowchart LR
-    A[Define a System<br/>in TypeScript] --> B[neuron register<br/>build → compile → resolve → freeze]
+    A[Define a System<br/>in TypeScript] --> B[neuron build<br/>build → compile → resolve → freeze]
     B --> C[N.O.R.E. stores the compiled system]
     C --> D[neuron run<br/>create an instance]
     D --> E[Execution events streamed live]
@@ -38,10 +38,10 @@ The repository ships an order-processing pipeline defined entirely in TypeScript
 
 ```bash
 cd examples/ecommerce_order_ts
-neuron register
+neuron build
 ```
 
-`neuron register` runs the whole authoring pipeline in one step:
+`neuron build` runs the whole authoring pipeline in one step:
 
 | Step | What happens |
 | --- | --- |
@@ -100,34 +100,43 @@ The whole definition is plain TypeScript — types are checked, mappings are ver
 neuron init my-first-system
 ```
 
-`neuron init` creates the directory and a starter `neuron.config.yaml`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
+`neuron init` creates the directory and scaffolds a **TypeScript** project by default: a `neuron.config.json` with `lang: typescript`, a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a runnable `system.ts`, and the canonical local executor root `neuron/executors/`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
 
 ```bash
 mv my-first-system examples/my-first-system
 cd examples/my-first-system
+npm install
 ```
 
-Open `neuron.config.yaml` and switch the authoring language to TypeScript:
+> `neuron init --lang yaml` scaffolds the YAML authoring surface instead (`system.yaml` + `services/`, no Node toolchain required).
+
+The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run. The TypeScript scaffold writes:
 
 ```yaml
+# neuron.config.json (abridged: the generated file is the same structure as JSON)
 lang: typescript
+entry: system.ts
+runtime:
+  execution:
+    mode: wait
+    timeout: 30m
+executors:
+  localRoots:
+    - ./neuron/executors
 ```
 
-The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run. `init` defaults to the YAML authoring surface; setting `lang: typescript` and pointing `entry` at a `.ts` file selects the SDK.
-
-### Add the TypeScript layout
-
-Create the SDK project files:
+### The scaffolded layout
 
 ```text
 examples/my-first-system/
-├── neuron.config.yaml     ← config: lang, entry, runtime
-├── package.json         ← declares @neuron/sdk
-├── system.ts            ← the System definition (the entry)
-└── types.ts             ← domain types
+├── neuron.config.json  ← config: lang, entry, runtime
+├── package.json       ← declares @neuron/sdk
+├── tsconfig.json      ← strict TypeScript, noEmit
+├── system.ts          ← the System definition (the entry)
+└── neuron/executors/  ← home for locally-authored executors
 ```
 
-`package.json`:
+`package.json`: the scaffold declares `@neuron/sdk` (`^0.1.0`). Because this walkthrough lives inside the repository workspace, pin it to `workspace:*` so pnpm links the local SDK build:
 
 ```json
 {
@@ -217,7 +226,7 @@ entry: system.ts
 > [!NOTE]
 > `withParams(input => ...)` binds the system's execution input (typed by `inputSchema`) into the first service. `.next()` wires one service to the next; `.withInput()` maps fields — every binding is type-checked against the target's input contract.
 
-### Register and run
+### Build and run
 
 ```bash
 # from the repository root, link the workspace packages
@@ -225,7 +234,7 @@ pnpm install
 pnpm build:sdk
 
 cd examples/my-first-system
-neuron register
+neuron build
 neuron run --input '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmail":"grace@acme.io","currency":"EUR","total":2250,"items":[{"sku":"SKU-RG-2","name":"Keyboard","qty":1,"priceCents":2250}],"shippingAddress":{"street":"2 Rue de Paris","city":"Lyon","zip":"69002"}}}'
 ```
 
@@ -332,23 +341,23 @@ withParams((input) =>
 
 ```bash
 cd examples/my-first-system
-neuron register
+neuron build
 ```
 
-During registration Neuron resolves `example:echo@^1.0.0`:
+During the build Neuron resolves `example:echo@^1.0.0`:
 
 ```mermaid
 flowchart LR
     A[Requirement example:echo @ ^1.0.0] --> B[Registry queries available versions]
     B --> C[best semver-compatible version selected: 1.0.0]
     C --> D[package archive verified + installed immutably]
-    D --> E[exact version frozen into the registration]
+    D --> E[exact version frozen into the build record]
 ```
 
 1. the registry is queried for available versions (here: `1.0.0`);
 2. the best satisfying version is selected with semantic versioning;
 3. the canonical package archive is downloaded, verified, and installed immutably into the executor store (`~/.neuron/executors`);
-4. the exact version is frozen into your registration — running an instance needs no further resolution, and works offline.
+4. the exact version is frozen into the build record — running an instance needs no further resolution, and works offline.
 
 You can manage the module directly:
 

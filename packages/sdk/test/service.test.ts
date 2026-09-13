@@ -4,14 +4,14 @@ import { string, number, boolean, list, record } from "../src/schema.js";
 import { createExecutionContext, createSourceContext } from "../src/expression.js";
 
 describe("Service", () => {
-  it("creates a service with default executor matching service name", () => {
+  it("defaults the executor to the built-in neuron:core:set", () => {
     const svc = Service({ name: "validate-order" });
     expect(svc.ref).toBe("validate-order");
     expect(svc.toManifest()).toEqual({
       name: "validate-order",
       version: undefined,
       description: undefined,
-      executor: { name: "validate-order", version: "latest", registry: "local" },
+      executor: { name: "neuron:core:set", version: "latest", registry: "local" },
       inputs: [],
       outputs: [],
     });
@@ -29,11 +29,11 @@ describe("Service", () => {
     expect(svc.toManifest().description).toBe("A test service");
   });
 
-  it("defaults executor version to the service version", () => {
+  it("defaults the executor version to latest", () => {
     const svc = Service({ name: "my-service", version: "1.5.0" });
     expect(svc.toManifest().executor).toEqual({
-      name: "my-service",
-      version: "1.5.0",
+      name: "neuron:core:set",
+      version: "latest",
       registry: "local",
     });
   });

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the example echo executors into the local registry catalog layout
-# consumed by `neuron executor install` and `neuron register`:
+# consumed by `neuron add` and `neuron build`:
 #
 #   catalog/example/echo/1.0.0/         process-runtime executor
 #   catalog/example/echo-wasm/1.0.0/    wasm-runtime executor

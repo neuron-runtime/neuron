@@ -207,7 +207,7 @@ With no `executors.registries` block, only built-in executors are available. Req
 
 ## Resolution & installation
 
-Resolution is performed by the CLI during `neuron add` and `neuron register`:
+Resolution is performed by the CLI during `neuron add` and `neuron build`:
 
 ```mermaid
 flowchart TB
@@ -244,7 +244,7 @@ neuron remove example:echo@1.0.0            # uninstall
 
 ## Freezing into registered systems
 
-When you `neuron register` a system that references external modules, the CLI resolves every requirement and records the **exact** resolved version, artifact digest, and launch details into the registration payload handed to N.O.R.E.
+When you `neuron build` a system that references external modules, the CLI resolves every requirement and records the **exact** resolved version, artifact digest, and launch details into the registration payload handed to N.O.R.E.
 
 The runtime therefore never resolves anything — it receives a closed set of frozen executors and launches instances from them. This gives three guarantees:
 

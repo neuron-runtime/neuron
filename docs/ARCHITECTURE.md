@@ -179,7 +179,7 @@ Execution flows along the connectors. Each connector defines what data flows bet
 
 ### YAML
 
-The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: System` entry file (`system.yaml` by default). `neuron init` scaffolds it, and `neuron register` consumes it. See `examples/ecommerce_order` for a complete project.
+The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: System` entry file (`system.yaml` by default). `neuron init --lang yaml` scaffolds it, and `neuron build` consumes it. See `examples/ecommerce_order` for a complete project.
 
 ### TypeScript — the SDK
 
@@ -217,7 +217,7 @@ The SDK is a **definition tool**. It describes systems; it does not execute them
 
 Each authoring surface has a dedicated loader in `application` (`application/build/yaml`, `application/build/typescript`). A loader's only job is to translate its source language into the **canonical manifest** — plus project-level concerns (paths, variables, entry points).
 
-The pipeline in `neuron register`:
+The pipeline in `neuron build`:
 
 ```mermaid
 flowchart TB
@@ -272,7 +272,7 @@ No two steps merge:
 | **Store** | *Where it lives* | The immutable installed artifact, keyed by name and exact version, under `~/.neuron/executors` |
 | **Runtime** | *How it executes* | Spawning, supervising, and terminating executor workers |
 
-The CLI runs this pipeline during `neuron register` and then **freezes** the exact resolved versions into the registration. N.O.R.E. therefore never resolves modules itself — it receives a closed set of resolved executors and launches instances from them.
+The CLI runs this pipeline during `neuron build` and then **freezes** the exact resolved versions into the build record. N.O.R.E. therefore never resolves modules itself — it receives a closed set of resolved executors and launches instances from them.
 
 Built-in modules are the exception that proves the rule: they run in-process inside N.O.R.E., so resolution skips them and the runtime dispatches them directly. See [docs/MODULES.md](./MODULES.md) for the full model.
 

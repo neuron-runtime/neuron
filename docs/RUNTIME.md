@@ -129,13 +129,13 @@ The flow from registration to execution:
 
 ```mermaid
 flowchart LR
-    A[neuron register<br/>build → compile → resolve → freeze] --> B[N.O.R.E.]
+    A[neuron build<br/>build → compile → resolve → freeze] --> B[N.O.R.E.]
     B --> C[Instance created on demand]
     C --> D[Start<br/>parallel loops]
     D --> E[Execute services<br/>through executor engine]
 ```
 
-**Register.** `neuron register` builds the project, compiles it to a system, resolves every executor requirement against the configured catalogs, installs what is missing, and freezes the exact resolutions into the deployment. The deployment never resolves or installs again. Frozen records are `ResolvedExecutor` values: type, requested constraint, exact resolved version, registry, digest, runtime info, and the absolute install root.
+**Register.** `neuron build` builds the project, compiles it to a system, resolves every executor requirement against the configured catalogs, installs what is missing, and freezes the exact resolutions into the deployment. The deployment never resolves or installs again. Frozen records are `ResolvedExecutor` values: type, requested constraint, exact resolved version, registry, digest, runtime info, and the absolute install root.
 
 **Instance creation.** An instance of the system is created on demand through `Manager.GetOrCreate` (`nore/internal/instance`). The manager reads the durable registered system, decodes the frozen executor set from the opaque `ExecutionConfigurations` payload, and constructs the instance. Construction:
 

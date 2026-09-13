@@ -262,8 +262,8 @@ flowchart LR
 git clone https://github.com/Muhammad-Jay/neuron.git
 cd neuron/examples/ecommerce_order_ts
 pnpm install
-neuron register          # build the TS project, compile, register with the runtime
-neuron run               # create an instance and stream live execution events
+neuron build            # build the TS project, compile, register with the runtime
+neuron run              # create an instance and stream live execution events
 ```
 
 Walk through it in detail in [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md).
@@ -422,7 +422,7 @@ A local smoke test of the full product flow:
 ```bash
 go build -o /tmp/neuron ./application/cmd/neuron
 /tmp/neuron version
-cd examples/ecommerce_order_ts && /tmp/neuron register && /tmp/neuron run
+cd examples/ecommerce_order_ts && /tmp/neuron build && /tmp/neuron run
 ```
 
 Contributions follow the repository's engineering contract: preserve architectural boundaries, avoid duplication, remove dead code, and test at the correct boundary.

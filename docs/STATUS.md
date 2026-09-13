@@ -22,7 +22,7 @@ The following surface is implemented, tested, and intended to work in 0.1.0.
 | Command | Purpose |
 | --- | --- |
 | `neuron init` | Scaffold a project |
-| `neuron register` | Build, compile, resolve modules, and register with N.O.R.E. |
+| `neuron build` | Build, compile, resolve modules, and register with N.O.R.E. |
 | `neuron run` | Create an instance and execute, streaming live events (WebSocket, with an SSE fallback) |
 | `neuron add` / `neuron remove` | Install / uninstall external module packages |
 | `neuron executor list` / `neuron executor inspect [name@version]` | Manage installed modules |

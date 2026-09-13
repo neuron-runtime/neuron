@@ -14,7 +14,7 @@ sequenceDiagram
     participant D as N.O.R.E. daemon
     participant S as Executor Store
 
-    U->>C: neuron register
+    U->>C: neuron build
     C->>C: build project → canonical manifest
     C->>C: compile → resolve modules → freeze versions
     C->>D: daemon healthy?
@@ -23,7 +23,7 @@ sequenceDiagram
     end
     C->>D: POST /v1/register (compiled system + frozen executors)
     D-->>C: system key
-    C-->>U: registered with key
+    C-->>U: built and registered with key
 
     U->>C: neuron run --input '{...}'
     C->>D: POST /v1/instances
@@ -70,9 +70,8 @@ The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. W
 1. Checks whether the daemon is already healthy.
 2. If not, starts it from the bundled `nore` binary with the effective configuration (socket path, data directory, worker count).
 3. Talks to it over the socket.
-4. Stops it again on `neuron daemon stop` or when the process exits.
 
-The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
+The daemon runs as a persistent background process: it survives the CLI process and keeps serving instances until you stop it with `neuron daemon stop`. The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
 
 
 | Transport            | Purpose                                                            |
@@ -125,60 +124,75 @@ Initialize a new Neuron workspace.
 ```
 Usage:
   neuron init [Target] [flags]
+
+Flags:
+  -l, --lang string   project authoring language (ts, typescript, yaml, yml) (default "ts")
 ```
 
-`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and writes a starter `neuron.config.yaml` into it.
+`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and scaffolds a runnable project: a `neuron.config.json`, and — for the default TypeScript authoring surface — a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a starter `system.ts`, and the canonical local executor root `neuron/executors/`.
 
 ```bash
-# Create ./my-system with a starter neuron.config.yaml
+# Create ./my-system as a TypeScript project (default)
 neuron init my-system
-cd my-system
+
+# Create ./my-system as a YAML project
+neuron init my-system --lang yaml
 ```
 
-The scaffolded config selects the YAML authoring language. To author in TypeScript, set `lang: typescript`, point `entry` at your `.ts` file, and add the SDK project files — see [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md).
+The scaffolded config declares the authoring language and entry file:
 
-### `neuron register`
+```json
+{
+  "lang": "typescript",
+  "entry": "system.ts",
+  "runtime": { "execution": { "mode": "wait", "timeout": "30m" } },
+  "executors": { "localRoots": ["./neuron/executors"] },
+  "inspector": { "enabled": true, "address": "127.0.0.1:7433" }
+}
+```
 
-Build and register the current project with N.O.R.E.
+### `neuron build`
+
+Build the current project and register the system with N.O.R.E.
 
 ```
 Usage:
-  neuron register [flags]
+  neuron build [flags]
 
 Flags:
   -l, --lang string   project authoring language (yaml, yml, typescript, ts)
   -r, --root string   project root (defaults to the current directory)
 ```
 
-`neuron register` runs the full authoring pipeline in one step:
+`neuron build` runs the full authoring pipeline in one step:
 
+| Step         | Responsibility                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Build**    | The project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`                                                                                                                                                    |
+| **Compile**  | The canonical manifest is compiled into a runtime system representation                                                                                                                                                                    |
+| **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the build record. Built-in modules are skipped — they run in-process inside N.O.R.E. |
+| **Register** | The compiled system and its frozen module set are sent to N.O.R.E., which persists it and returns a system key                                                                                                                             |
 
-| Step         | Responsibility                                                                                                                                                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Build**    | The project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`                                                                                                                                                          |
-| **Compile**  | The canonical manifest is compiled into a runtime system representation                                                                                                                                                                          |
-| **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the registration payload. Built-in modules are skipped — they run in-process inside N.O.R.E. |
-| **Register** | The compiled system and its frozen module set are sent to N.O.R.E., which persists it and returns a system key                                                                                                                                   |
-
-
-The CLI stores the registration key locally and prints it on success:
+The CLI records the registration key in `.neuron/register.json` and prints it on success:
 
 ```text
 order-processing@1.0.0#a1b2c3d4:development
 ```
 
 ```bash
-# Register the project in the current directory (language auto-detected)
-neuron register
+# Build the project in the current directory (language auto-detected)
+neuron build
 
 # Force a language and a different project root
-neuron register --lang typescript --root ./pipeline
+neuron build --lang typescript --root ./pipeline
 
 # Replace any previously registered version of this system
-neuron register --force
+neuron build --force
 ```
 
-After registration, `neuron run` executes the registered system.
+After the build, `neuron run` executes the registered system.
+
+> `neuron register` is a deprecated alias of `neuron build`, hidden from help, kept for existing workflows. It will be removed.
 
 ### `neuron run`
 
@@ -196,7 +210,7 @@ Flags:
 
 `neuron run` asks N.O.R.E. to create an instance and execute a system, then streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
 
-Without an argument, `neuron run` runs the registered system: it loads the registration key stored by `neuron register` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
+Without an argument, `neuron run` runs the registered system: it loads the registration key recorded by `neuron build` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
 
 | Target form             | Example                             | Meaning                                  |
 | ----------------------- | ----------------------------------- | ---------------------------------------- |
@@ -205,7 +219,7 @@ Without an argument, `neuron run` runs the registered system: it loads the regis
 | Key, at form            | `order-processing@1.0.0`            | Same as the colon form                   |
 | Bare name               | `order-processing`                  | Run the key's latest registered version  |
 
-Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as a system key and normalized to its colon-encoded wire form. When no argument is given and the project is not registered, the command stops with a message pointing you at `neuron register`.
+Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as a system key and normalized to its colon-encoded wire form. When no argument is given and the project is not built, the command stops with a message pointing you at `neuron build`.
 
 ```bash
 # Run the registered system with no input, streaming events
@@ -412,7 +426,7 @@ Available Commands:
   stop        Stop the background N.O.R.E. daemon
 ```
 
-The daemon is normally started and stopped automatically. `neuron daemon stop` is useful when you want to release the daemon before the CLI exits.
+The daemon is normally started automatically on first use and keeps running in the background until you stop it. `neuron daemon stop` shuts it down gracefully; it is not tied to any single CLI process.
 
 ```bash
 # Stop the background daemon
@@ -441,33 +455,26 @@ The CLI resolves configuration from several layers, later layers overriding earl
 3. Environment variables.
 4. Command-line flags.
 
-**The scaffolded** `neuron.config.yaml` **produced by** `neuron init`
+**The scaffolded** `neuron.config.json` **produced by** `neuron init` (default TypeScript authoring):
 
-```yaml
-#
-# Neuron project configuration. neuron.config.json | .yaml | .yml is the single
-# source of truth for how this project is authored and runs.
-#
-
-lang: yaml
-entry: system.yaml
-
-runtime:
-  execution:
-    mode: wait
-    timeout: 30m
-  workers:
-    min: 1
-    max: 8
-
-executors:
-  registries:
-    - name: local
-      url: ./executors
-
-inspector:
-  enabled: true
-  address: 127.0.0.1:7433
+```json
+{
+  "lang": "typescript",
+  "entry": "system.ts",
+  "runtime": {
+    "execution": {
+      "mode": "wait",
+      "timeout": "30m"
+    }
+  },
+  "executors": {
+    "localRoots": ["./neuron/executors"]
+  },
+  "inspector": {
+    "enabled": true,
+    "address": "127.0.0.1:7433"
+  }
+}
 ```
 
 
@@ -488,6 +495,7 @@ inspector:
 | `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                                                    |
 | `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                                                           |
 | `executors.storeDir`        | `~/.neuron/executors` | Where resolved modules are installed                                                                       |
+| `executors.localRoots`      | `./neuron/executors`  | Project-scoped directories treated as implicit `local` registries for resolution                           |
 | `executors.registries`      | none                  | Registries used to resolve external modules; with no block, only built-in executors are available          |
 | `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
 | `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
@@ -511,17 +519,17 @@ Environment variables can also be used for any configuration value with the `NEU
 
 ### Project layout
 
-`neuron init <project>` creates the project directory and a starter `neuron.config.yaml` (project configuration with `lang: yaml`, `entry: system.yaml`). From there you add the system definition by hand. The canonical YAML layout (as shipped in `examples/ecommerce_order`) is:
+`neuron init <project>` scaffolds a **TypeScript** project by default: `neuron.config.json` (`lang: typescript`, `entry: system.ts`), `package.json`, `tsconfig.json`, `system.ts`, and `neuron/executors/`. `neuron init <project> --lang yaml` scaffolds the canonical YAML layout instead (as shipped in `examples/ecommerce_order`):
 
 ```text
 <project>
-├── neuron.config.yaml   project configuration (lang, entry, runtime)
+├── neuron.config.json   project configuration (lang, entry, runtime)
 └── system.yaml          system definition (the entry file)
 ```
 
 The system file lists its services either by `entry:` reference or inline, and connectors are declared **inline** in the system file (mappings and validations) — there is no separate `connectors/` directory.
 
-`neuron register` resolves this layout, builds the canonical manifest into `.neuron/manifest.json`, compiles it, and registers the result. The TypeScript authoring surface produces the same canonical manifest from SDK definitions.
+`neuron build` resolves this layout, produces the canonical manifest into `.neuron/manifest.json`, compiles it, and registers the result. The TypeScript authoring surface produces the same canonical manifest from SDK definitions.
 
 ## Module Resolution
 

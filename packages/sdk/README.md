@@ -68,6 +68,9 @@ const validateOrder = Service({
 | `version` | Semver version — tracked in the manifest and frozen into registrations |
 | `description` | Human-readable purpose (optional, for documentation and registries) |
 
+> [!NOTE]
+> Executor names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a service without an explicit `.executor()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a service through an external module — a signed process or a WebAssembly worker — set `.executor({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../docs/MODULES.md).
+
 ---
 
 ## Contracts — what goes in and out
