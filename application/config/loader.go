@@ -86,13 +86,11 @@ func Load(opts Options) (Config, error) {
 		if err := rejectInternalKeys(projectPath); err != nil {
 			return Config{}, err
 		}
-		if err := rejectInternalKeys(projectPath); err != nil {
-			return Config{}, err
-		}
 		v.SetConfigFile(projectPath)
 		if err := v.MergeInConfig(); err != nil {
 			return Config{}, fmt.Errorf("read project config: %w", err)
 		}
+		cfg.ConfigFile = projectPath
 	} else if opts.ProjectDir != "" {
 		// The neuron.yaml / neuron.yml names are reserved for the YAML
 		// authoring surface and were removed as config names. Refuse to run

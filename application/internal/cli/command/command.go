@@ -14,6 +14,10 @@ var (
 
 	Register = "register"
 
+	// Build is the canonical command that takes a project from source to a
+	// registered, runnable system. `register` is its deprecated alias.
+	Build = "build"
+
 	Version = "version"
 
 	Daemon = "daemon"

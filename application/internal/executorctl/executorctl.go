@@ -15,11 +15,13 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/executor/source/github"
 	"github.com/Muhammad-Jay/neuron/application/executor/source/local"
 	"github.com/Muhammad-Jay/neuron/application/executor/store"
+	"github.com/Muhammad-Jay/neuron/application/project"
 )
 
 // Catalog bundles the wired executor pipeline.
 type Catalog struct {
 	cfg        config.ExecutorsConfig
+	roots      []string
 	Registry   *executor.Registry
 	Store      executor.Store
 	Installer  *executor.Installer
@@ -127,12 +129,21 @@ func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 
 	return &Catalog{
 		cfg:        cfg.ExecutorsConfig,
+		roots:      roots,
 		Registry:   reg,
 		Store:      fsStore,
 		Installer:  installer,
 		Downloader: downloader,
 		Resolver:   resolver,
 	}, nil
+}
+
+// Roots returns the absolute local executor search roots backing this catalog
+// (the implicit project root plus any configured localRoots/local registries).
+func (c *Catalog) Roots() []string {
+	out := make([]string, len(c.roots))
+	copy(out, c.roots)
+	return out
 }
 
 // localOrigin is one local executor search root. implicit roots (the project's
@@ -182,7 +193,7 @@ func collectLocalRoots(ec config.ExecutorsConfig, projectRoot string) ([]localOr
 	}
 
 	// The project's own ./neuron/executors is always a search root.
-	if err := add(filepath.Join(absBase, "neuron", "executors"), true); err != nil {
+	if err := add(filepath.Join(absBase, filepath.FromSlash(project.ImplicitExecutorRoot)), true); err != nil {
 		return nil, err
 	}
 

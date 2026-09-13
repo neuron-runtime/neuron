@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/build"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/daemon"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/executor"
@@ -59,6 +60,7 @@ func init() {
 		instance.New(),
 		daemon.New(),
 		initcmd.New(),
+		build.New(),
 		register.New(),
 		executor.New(),
 		executor.NewAddCmd(),

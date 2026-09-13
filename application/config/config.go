@@ -51,6 +51,11 @@ type Config struct {
 	// artifacts).
 	ProjectDir string `yaml:"-" mapstructure:"-"`
 
+	// ConfigFile is the absolute path of the effective project configuration
+	// file (neuron.config.json/yaml/yml) actually loaded, when one was found.
+	// It participates in build fingerprints and is never read from a file.
+	ConfigFile string `yaml:"-" mapstructure:"-"`
+
 	// Warnings surfaces non-fatal configuration notices (for example multiple
 	// neuron.config.* candidates found during discovery). It is never loaded
 	// from a configuration file.

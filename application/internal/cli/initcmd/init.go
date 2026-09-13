@@ -23,7 +23,7 @@ func New() *cobra.Command {
 		Short: "Scaffold a new neuron project",
 		Long: "Create a runnable Neuron project in the given directory (or the " +
 			"current one). The project is scaffolded only: install dependencies " +
-			"and run `neuron register && neuron run` to see it execute.",
+			"and run `neuron build && neuron run` to see it execute.",
 		RunE: initCmdHandler,
 	}
 
@@ -275,11 +275,11 @@ func printNextSteps(dir string, lang language.Language) {
 	if lang == language.TypeScript {
 		fmt.Println("\nNext steps:")
 		fmt.Println("  npm install        # install the SDK and toolchain")
-		fmt.Println("  neuron register    # build the system and register it with N.O.R.E.")
+		fmt.Println("  neuron build       # build the system and register it with N.O.R.E.")
 		fmt.Println("  neuron run         # create an instance and watch it execute")
 	} else {
 		fmt.Println("\nNext steps:")
-		fmt.Println("  neuron register    # build the system and register it with N.O.R.E.")
+		fmt.Println("  neuron build       # build the system and register it with N.O.R.E.")
 		fmt.Println("  neuron run         # create an instance and watch it execute")
 	}
 }

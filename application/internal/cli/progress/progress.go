@@ -96,6 +96,14 @@ func (r *Reporter) Installed(result executor.InstallResult) {
 	r.complete(display(result.Installed.Type, result.Installed.Version) + verb)
 }
 
+// Status renders one per-executor build decision (cached / built / installed /
+// failed) reported through executorctl.BuildOptions.Status. It renders as a
+// completed line; build commands may run concurrently under BuildLocal, so
+// this never mutates the shared spinner.
+func (r *Reporter) Status(typ, version, message string) {
+	r.complete(display(typ, version) + " " + message)
+}
+
 // Stop halts any active spinner and restores the cursor. It is safe to call
 // when nothing is running (e.g. from a deferred cleanup).
 func (r *Reporter) Stop() {
