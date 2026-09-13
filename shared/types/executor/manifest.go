@@ -80,6 +80,35 @@ type Manifest struct {
 	Services     []string            `json:"services"`
 	Capabilities []string            `json:"capabilities,omitempty"`
 	Platforms    map[string]Platform `json:"platforms"`
+
+	// Build and Artifact carry authoring-time hints for how this executor's
+	// payload is produced when it lives in a local source tree. They tell the
+	// CLI how to materialize the artifact (build.command) and where it lands
+	// (artifact.path) relative to the package directory. They are NEVER part
+	// of the installed runtime contract: the installer strips them from the
+	// stored executor.json. Released packages (e.g. GitHub archives) ship
+	// prebuilt artifacts and omit both.
+	Build    *ManifestBuild    `json:"build,omitempty"`
+	Artifact *ManifestArtifact `json:"artifact,omitempty"`
+}
+
+// ManifestBuild is an optional authoring-time instruction for producing a
+// local executor artifact. Distributed packages omit it.
+type ManifestBuild struct {
+	// Command is the shell command that produces the artifact declared by
+	// Artifact.Path. It runs in the package directory (the version
+	// directory), inheriting the parent environment plus NEURON_PROJECT_ROOT
+	// and NEURON_EXECUTOR_DIR.
+	Command string `json:"command,omitempty"`
+}
+
+// ManifestArtifact locates the built payload relative to the package
+// directory. A directory payload is copied recursively; a file payload is
+// treated like a single binary (or archive) artifact. Distributed packages
+// may list the release asset name here.
+type ManifestArtifact struct {
+	// Path is the artifact file or directory produced by Build.Command.
+	Path string `json:"path,omitempty"`
 }
 
 // ManifestMetadata identifies the executor artifact.
@@ -159,4 +188,34 @@ func (m *Manifest) HasCapability(cap string) bool {
 		}
 	}
 	return false
+}
+
+// BuildCommand returns the authoring-time build command, or "" when the
+// manifest ships a prebuilt artifact (or none).
+func (m *Manifest) BuildCommand() string {
+	if m != nil && m.Build != nil {
+		return strings.TrimSpace(m.Build.Command)
+	}
+	return ""
+}
+
+// Sanitized returns a copy of the manifest safe to persist inside an
+// installed executor: authoring-time build/artifact hints are stripped because
+// an installed artifact has no build step. The runtime contract only carries
+// identity, runtime, services, capabilities, and platforms.
+func (m *Manifest) Sanitized() *Manifest {
+	if m == nil {
+		return nil
+	}
+	clone := *m
+	clone.Build = nil
+	clone.Artifact = nil
+	if clone.Platforms != nil {
+		pc := make(map[string]Platform, len(clone.Platforms))
+		for k, v := range clone.Platforms {
+			pc[k] = v
+		}
+		clone.Platforms = pc
+	}
+	return &clone
 }

@@ -26,6 +26,96 @@ import (
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 )
 
+// VersionSpec is a resolved view of one version directory under a local root.
+// It binds the manifest to the concrete artifact payload the directory ships,
+// and carries the build hint the CLI uses to materialize the payload when it
+// does not exist yet.
+type VersionSpec struct {
+	// Root is the version directory (the build/mandate working directory).
+	Root string
+
+	// ManifData is the raw executor.json bytes, nil when the directory ships
+	// only a canonical package archive (whose inner manifest is then
+	// authoritative and reconciled at install time).
+	ManifestData []byte
+
+	// Manifest is the parsed executor.json, nil when only an archive exists.
+	Manifest *shadexec.Manifest
+
+	// Type is the logical executor type (e.g. "example:echo").
+	Type string
+
+	// Version is the package version (e.g. "1.0.0").
+	Version string
+
+	// Artifact is the absolute path to the resolved artifact payload: the
+	// canonical package archive, manifest artifact.path, or the platform
+	// artifact for the runtime kind. Empty when the directory declares no
+	// material artifact.
+	Artifact string
+
+	// BuildCommand is the manifest's build.command ("" when none).
+	BuildCommand string
+}
+
+// DiscoverVersion reads one version directory under root and reports what it
+// ships. It never runs builds; it only describes. Payload discovery order:
+//
+//  1. canonical package archive
+//  2. manifest artifact.path (file or directory)
+//  3. platform artifact for the manifest's runtime kind
+//
+// A directory with no manifest and no archive is ErrNotFound.
+func DiscoverVersion(root, typ, version string) (*VersionSpec, error) {
+	versionDir, err := versionDirFor(root, typ, version)
+	if err != nil {
+		return nil, err
+	}
+
+	spec := &VersionSpec{Root: versionDir, Type: typ, Version: version}
+
+	// The standalone executor.json is optional when the version directory
+	// ships an executor package archive; the archive's inner manifest is then
+	// authoritative and reconciled at install time.
+	manifestPath := filepath.Join(versionDir, shadexec.ManifestFile)
+	data, err := os.ReadFile(manifestPath)
+	if err == nil {
+		m, err := executor.ParseManifest(data)
+		if err != nil {
+			return nil, err
+		}
+		spec.ManifestData = data
+		spec.Manifest = m
+		spec.BuildCommand = m.BuildCommand()
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	// The executor package archive is the preferred payload.
+	if archive, ok := archivePayload(versionDir, typ, version); ok {
+		spec.Artifact = archive
+		return spec, nil
+	}
+
+	if spec.Manifest == nil {
+		return nil, executor.ErrNotFound
+	}
+
+	// artifact.path from the manifest, if declared and present.
+	if spec.Manifest.Artifact != nil && strings.TrimSpace(spec.Manifest.Artifact.Path) != "" {
+		p := filepath.Join(versionDir, filepath.FromSlash(spec.Manifest.Artifact.Path))
+		spec.Artifact = p
+		return spec, nil
+	}
+
+	// Platform artifact for the runtime kind.
+	if platform, ok := spec.Manifest.Platforms[executor.PlatformForRuntime(spec.Manifest.Runtime.Type)]; ok && platform.Artifact != "" {
+		spec.Artifact = filepath.Join(versionDir, filepath.FromSlash(platform.Artifact))
+	}
+
+	return spec, nil
+}
+
 // Registry serves executor packages laid out under one or more local roots.
 type Registry struct {
 	roots []string
@@ -137,71 +227,63 @@ func (r *Registry) Package(ctx context.Context, typ, version string) (*executor.
 	return nil, executor.ErrNotFound
 }
 
+// PackageFromSpec builds the wire Package a spec describes. The artifact URL
+// is file-backed against the resolved payload; when the payload is absent the
+// Package carries no artifact and materialization fails later.
+func PackageFromSpec(spec *VersionSpec) *executor.Package {
+	if spec == nil {
+		return nil
+	}
+	pkg := &executor.Package{
+		Type:     spec.Type,
+		Version:  spec.Version,
+		Registry: "local",
+		Artifact: artifactOf(spec),
+	}
+	if spec.Manifest == nil {
+		return pkg
+	}
+	pkg.Manifest = spec.ManifestData
+	pkg.Description = spec.Manifest.Metadata.Description
+	pkg.Capabilities = spec.Manifest.Capabilities
+	pkg.Services = spec.Manifest.Services
+	pkg.Platforms = spec.Manifest.Platforms
+	pkg.Runtime = executor.RuntimeSpec{
+		Type:       spec.Manifest.Runtime.Type,
+		Entrypoint: spec.Manifest.Runtime.Entrypoint,
+		Protocol:   spec.Manifest.Runtime.Protocol,
+		MaxWorkers: spec.Manifest.Runtime.MaxWorkers,
+	}
+	return pkg
+}
+
 // packageFromVersionDir builds the Package for typ@version stored under root.
 func packageFromVersionDir(root, typ, version string) (*executor.Package, error) {
-	versionDir, err := versionDirFor(root, typ, version)
+	spec, err := DiscoverVersion(root, typ, version)
 	if err != nil {
 		return nil, err
 	}
-
-	// The standalone executor.json is optional when the version directory
-	// ships an executor package archive; the archive's inner manifest is then
-	// authoritative and reconciled at install time.
-	manifestPath := filepath.Join(versionDir, shadexec.ManifestFile)
-	data, err := os.ReadFile(manifestPath)
-	var m *shadexec.Manifest
-	if err == nil {
-		m, err = executor.ParseManifest(data)
-		if err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-
-	pkg := &executor.Package{Type: typ, Version: version, Registry: "local"}
-	if m != nil {
-		pkg.Manifest = data
-		pkg.Description = m.Metadata.Description
-		pkg.Runtime = executor.RuntimeSpec{
-			Type:       m.Runtime.Type,
-			Entrypoint: m.Runtime.Entrypoint,
-			Protocol:   m.Runtime.Protocol,
-			MaxWorkers: m.Runtime.MaxWorkers,
-		}
-		pkg.Capabilities = m.Capabilities
-		pkg.Services = m.Services
-		pkg.Platforms = m.Platforms
-	}
-
-	// The executor package archive is the preferred payload: one file that
-	// installs the whole executor. Prefer the exact <type>-<version> name,
-	// then any canonical archive in the version directory.
-	if archive, ok := archivePayload(versionDir, typ, version); ok {
-		pkg.Artifact = executor.Artifact{
-			URL:  "file://" + filepath.ToSlash(archive),
-			Name: filepath.Base(archive),
-		}
-		return pkg, nil
-	}
-
-	if m == nil {
+	if spec.Manifest == nil && spec.Artifact == "" {
 		return nil, executor.ErrNotFound
 	}
+	return PackageFromSpec(spec), nil
+}
 
-	// No archive: bind the platform artifact for the executor's runtime kind.
-	if platform, ok := m.Platforms[executor.PlatformForRuntime(m.Runtime.Type)]; ok && platform.Artifact != "" {
-		artifactPath := filepath.Join(versionDir, platform.Artifact)
-		if info, err := os.Stat(artifactPath); err == nil && !info.IsDir() {
-			pkg.Artifact = executor.Artifact{
-				URL:    "file://" + filepath.ToSlash(artifactPath),
-				Name:   platform.Artifact,
-				SHA256: platform.SHA256,
-			}
+// artifactOf builds the wire Artifact for a spec's resolved payload.
+func artifactOf(spec *VersionSpec) executor.Artifact {
+	if spec.Artifact == "" {
+		return executor.Artifact{}
+	}
+	a := executor.Artifact{
+		URL:  "file://" + filepath.ToSlash(spec.Artifact),
+		Name: filepath.Base(spec.Artifact),
+	}
+	if spec.Manifest != nil {
+		if platform, ok := spec.Manifest.Platforms[executor.PlatformForRuntime(spec.Manifest.Runtime.Type)]; ok {
+			a.SHA256 = platform.SHA256
 		}
 	}
-
-	return pkg, nil
+	return a
 }
 
 // archivePayload finds the canonical executor package archive in dir,

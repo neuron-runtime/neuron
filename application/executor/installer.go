@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,14 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
+	// Persist the sanitized manifest back over the payload copy: authoring-time
+	// build/artifact hints are authoring concerns, not installed-runtime
+	// contract. An installed executor carries identity, runtime, services,
+	// capabilities, and platforms only.
+	if err := writeManifestSanitized(manifestPath, m); err != nil {
+		return nil, err
+	}
+
 	// Reconcile the manifest identity with the identity resolved from the
 	// registry so a mismatched asset cannot masquerade as another executor.
 	// This runs for every payload form: a separate registry-fetched manifest
@@ -140,6 +149,16 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	})
 
 	return &InstallResult{Installed: installed}, nil
+}
+
+// writeManifestSanitized re-encodes path from a sanitized copy of m.
+func writeManifestSanitized(path string, m *shadexec.Manifest) error {
+	san := m.Sanitized()
+	data, err := json.MarshalIndent(san, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // notify invokes f against the observer, if any. It lives here as a package
