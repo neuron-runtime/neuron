@@ -483,6 +483,50 @@ func TestPackageArchiveVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestStandaloneManifestIdentityReconciled(t *testing.T) {
+	// B4: the identity reconciliation runs even when the registry supplied the
+	// manifest (pkg.Manifest != nil). A standalone executor.json whose
+	// metadata.name claims another executor must not install under the
+	// resolved type path.
+	regRoot := t.TempDir()
+	versionDir := filepath.Join(regRoot, "example", "echo", "1.0.0")
+	data, err := json.MarshalIndent(&shadexec.Manifest{
+		APIVersion: shadexec.APIVersion,
+		Kind:       shadexec.Kind,
+		Metadata:   shadexec.ManifestMetadata{Name: "other:echo", Version: "1.0.0"},
+		Runtime: shadexec.ManifestRuntime{
+			Type:       shadexec.RuntimeKindWasm,
+			Entrypoint: "echo.wasm",
+			Protocol:   shadexec.ProtocolJSONV1,
+		},
+		Services: []string{"echo"},
+		Platforms: map[string]shadexec.Platform{
+			shadexec.ExecutorPlatformWasm: {Artifact: "echo.wasm"},
+		},
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(versionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionDir, shadexec.ManifestFile), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionDir, "echo.wasm"), wasmMagicHeader, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = installViaLocal(t, regRoot, filepath.Join(t.TempDir(), "store"),
+		executor.Requirement{Type: "example:echo", Version: "1.0.0", Registries: []string{"local"}})
+	if err == nil {
+		t.Fatal("expected install to reject mismatched standalone manifest name")
+	}
+	if !errors.Is(err, executor.ErrManifestInvalid) {
+		t.Errorf("want ErrManifestInvalid, got %v", err)
+	}
+}
+
 func TestStandaloneWasmPlatformRecorded(t *testing.T) {
 	// A wasm executor spread across a version directory (no archive) binds
 	// the wasm32-wasi platform key and records it at install time.

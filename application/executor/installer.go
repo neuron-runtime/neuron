@@ -80,17 +80,16 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
-	// When the payload is a package archive and no separate manifest was
-	// fetched from the registry, the executor.json inside the archive is
-	// authoritative. Reconcile it with the identity resolved from the
+	// Reconcile the manifest identity with the identity resolved from the
 	// registry so a mismatched asset cannot masquerade as another executor.
-	if pkg.Manifest == nil {
-		if m.Metadata.Name != "" && m.Metadata.Name != pkg.Type {
-			return nil, fmt.Errorf("%w: package archive carries executor %q, require %q", ErrManifestInvalid, m.Metadata.Name, pkg.Type)
-		}
-		if m.Metadata.Version != "" && !versionMatches(m.Metadata.Version, pkg.Version) {
-			return nil, fmt.Errorf("%w: package archive declares version %q, require %q", ErrManifestInvalid, m.Metadata.Version, pkg.Version)
-		}
+	// This runs for every payload form: a separate registry-fetched manifest
+	// and an archive-internal executor.json must both agree with the resolved
+	// (type, version).
+	if m.Metadata.Name != "" && m.Metadata.Name != pkg.Type {
+		return nil, fmt.Errorf("%w: executor manifest carries name %q, require %q", ErrManifestInvalid, m.Metadata.Name, pkg.Type)
+	}
+	if m.Metadata.Version != "" && !versionMatches(m.Metadata.Version, pkg.Version) {
+		return nil, fmt.Errorf("%w: executor manifest declares version %q, require %q", ErrManifestInvalid, m.Metadata.Version, pkg.Version)
 	}
 
 	// 3. Resolve the concrete entrypoint (may differ from the package manifest
