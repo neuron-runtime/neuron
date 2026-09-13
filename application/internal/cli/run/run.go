@@ -123,7 +123,12 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	if !detach {
-		return streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID)
+		summary := newRunSummary(key.SystemID, target)
+		if err := streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID, summary); err != nil {
+			return err
+		}
+		renderSummary(summary)
+		return nil
 	}
 
 	ts := formatTime(time.Now().UnixNano())
@@ -187,12 +192,13 @@ func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.Instanc
 }
 
 // streamEventsAndWait streams execution events in real time until the
-// execution reaches a terminal state. It prefers the WebSocket transport and
-// falls back to Server-Sent Events for transports that cannot open a WebSocket
-// session.
-func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID) error {
+// execution reaches a terminal state, feeding each event to the run summary.
+// It prefers the WebSocket transport and falls back to Server-Sent Events for
+// transports that cannot open a WebSocket session.
+func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, summary *runSummary) error {
 	err := c.StreamExecutionEventsWS(ctx, instanceID, executionID, func(evt protocol.StreamEvent) error {
 		printEvent(evt)
+		summary.observe(evt)
 		if isTerminalEvent(evt.Type) {
 			return errExecutionTerminal
 		}
@@ -203,7 +209,7 @@ func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID strin
 	case err == nil, errors.Is(err, errExecutionTerminal), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return nil
 	case errors.Is(err, connection.ErrWebSocketUnavailable):
-		return streamEventsAndWaitSSE(ctx, c, instanceID, executionID)
+		return streamEventsAndWaitSSE(ctx, c, instanceID, executionID, summary)
 	default:
 		return err
 	}
@@ -224,7 +230,7 @@ func isTerminalEvent(eventType string) bool {
 
 // streamEventsAndWaitSSE is the legacy Server-Sent Events streaming path, kept
 // as a fallback for transports without WebSocket support.
-func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID) error {
+func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, summary *runSummary) error {
 	eventCh := make(chan protocol.StreamEvent, 64)
 	errCh := make(chan error, 1)
 
@@ -249,6 +255,7 @@ func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID st
 				return nil
 			}
 			printEvent(evt)
+			summary.observe(evt)
 			if isTerminalEvent(evt.Type) {
 				return nil
 			}
@@ -351,6 +358,127 @@ func printNode(indent string, key string, val any) {
 			fmt.Printf("%s%s%s%s: null\n", indent, colorKey, key, colorReset)
 		} else {
 			fmt.Printf("%s%s%s%s: %v\n", indent, colorKey, key, colorReset, v)
+		}
+	}
+}
+
+// runSummary accumulates the lifecycle of a streamed execution so the final
+// block of a run can render the system, terminal status, per-service results,
+// and the resolved aggregate outputs without further API round-trips.
+type runSummary struct {
+	system       string
+	terminal     string
+	failure      string
+	services     map[string]string
+	serviceOrder []string
+	outputs      map[string]map[string]any
+	outputOrder  []string
+}
+
+func newRunSummary(systemID, target string) *runSummary {
+	system := systemID
+	if system == "" {
+		system = target
+	}
+	if strings.HasPrefix(system, "inst_") {
+		system = "instance " + system
+	} else if i := strings.IndexByte(system, '@'); i >= 0 {
+		system = system[:i]
+	}
+	return &runSummary{
+		system:   system,
+		services: make(map[string]string),
+		outputs:  make(map[string]map[string]any),
+	}
+}
+
+// observe folds a streamed event into the summary.
+func (s *runSummary) observe(evt protocol.StreamEvent) {
+	switch evt.Type {
+	case "service.started":
+		s.setService(string(evt.ServiceID), "running")
+	case "service.completed":
+		s.setService(string(evt.ServiceID), "completed")
+	case "service.failed":
+		s.setService(string(evt.ServiceID), "failed")
+	case "execution.completed":
+		s.terminal = "completed"
+		if len(evt.Payload) > 0 {
+			var payload struct {
+				Outputs map[string]map[string]any
+			}
+			if err := json.Unmarshal(evt.Payload, &payload); err == nil {
+				for id := range payload.Outputs {
+					if _, seen := s.outputs[id]; !seen {
+						s.outputOrder = append(s.outputOrder, id)
+					}
+				}
+				s.outputs = payload.Outputs
+			}
+		}
+	case "execution.failed":
+		s.terminal = "failed"
+		if len(evt.Payload) > 0 {
+			var payload struct {
+				Message string
+			}
+			if err := json.Unmarshal(evt.Payload, &payload); err == nil {
+				s.failure = payload.Message
+			}
+		}
+	case "execution.cancelled":
+		s.terminal = "cancelled"
+	}
+}
+
+func (s *runSummary) setService(id, status string) {
+	if _, ok := s.services[id]; !ok {
+		s.serviceOrder = append(s.serviceOrder, id)
+	}
+	s.services[id] = status
+}
+
+// renderSummary prints the final System/Execution/Result block after a run's
+// live stream has closed.
+func renderSummary(s *runSummary) {
+	fmt.Println()
+	fmt.Printf("%sSystem:%s %s\n", colorKey, colorReset, s.system)
+
+	status := s.terminal
+	if status == "" {
+		status = "terminated"
+	}
+	fmt.Printf("%sStatus:%s %s\n", colorKey, colorReset, status)
+
+	fmt.Println("\nExecution")
+	if len(s.serviceOrder) == 0 {
+		printNode("  ", "services", "none")
+	}
+	for _, id := range s.serviceOrder {
+		fmt.Printf("  %-16s %s\n", id, s.services[id])
+	}
+
+	if s.terminal == "failed" && s.failure != "" {
+		fmt.Println("\nResult")
+		printNode("  ", "error", s.failure)
+	}
+	if len(s.outputs) > 0 {
+		fmt.Println("\nResult")
+		if len(s.outputs) == 1 {
+			for _, out := range s.outputs {
+				keys := make([]string, 0, len(out))
+				for k := range out {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					printNode("  ", k, out[k])
+				}
+			}
+		} else {
+			for _, id := range s.outputOrder {
+				printNode("  ", id, s.outputs[id])
+			}
 		}
 	}
 }
