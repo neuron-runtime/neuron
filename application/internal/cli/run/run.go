@@ -71,7 +71,7 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	if verbose {
-		fmt.Println("Running in verbose mode.")
+		fmt.Fprintln(cmd.ErrOrStderr(), "neuron: running in verbose mode")
 	}
 
 	var key protocol.InstanceKey

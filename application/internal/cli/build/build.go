@@ -170,10 +170,13 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 // cache note. A local executor with neither a payload nor a build command is a
 // hard error.
 func buildLocalExecutors(ctx context.Context, cfg config.Config, root string, force bool, maxWorkers int, rep *progress.Reporter) error {
+	// BuildLocal renders through its Status callback (one line per executor
+	// decision) so the shared Installer observer is not attached here; the
+	// observer is reserved for the registry-resolution step, which would
+	// otherwise double-report every local install.
 	catalog, err := executorctl.BuildCatalog(executorctl.CatalogConfig{
 		ExecutorsConfig: cfg.Executors,
 		ProjectRoot:     root,
-		Observer:        rep,
 	})
 	if err != nil {
 		return fmt.Errorf("build executor catalog: %w", err)

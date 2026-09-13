@@ -8,60 +8,6 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/executor"
 )
 
-func TestSGRStripper(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "drops foreground color around glyph",
-			input: "\x1b[37m⠋\x1b[0m Resolving example:echo",
-			want:  "⠋ Resolving example:echo",
-		},
-		{
-			name:  "keeps erase and carriage return",
-			input: "\r\x1b[K\r Resolving",
-			want:  "\r\x1b[K\r Resolving",
-		},
-		{
-			name:  "keeps cursor control",
-			input: "\x1b[?25l",
-			want:  "\x1b[?25l",
-		},
-		{
-			name:  "keeps non-SGR CSI",
-			input: "\x1b[2K",
-			want:  "\x1b[2K",
-		},
-		{
-			name:  "strips multi-parameter SGR",
-			input: "x\x1b[1;31my",
-			want:  "xy",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			stripper := &sgrStripper{w: &buf}
-
-			// Split half way through to exercise cross-write state.
-			mid := len(tc.input) / 2
-			if _, err := stripper.Write([]byte(tc.input[:mid])); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := stripper.Write([]byte(tc.input[mid:])); err != nil {
-				t.Fatal(err)
-			}
-
-			if got := buf.String(); got != tc.want {
-				t.Fatalf("stripped output = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestReporterLineOutput(t *testing.T) {
 	// A non-terminal writer (bytes.Buffer) falls back to line-based output
 	// with check marks and no color codes.

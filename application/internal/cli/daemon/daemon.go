@@ -9,6 +9,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/config"
 	noredaemon "github.com/Muhammad-Jay/neuron/application/daemon"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -41,17 +42,23 @@ func newStopCmd() *cobra.Command {
 
 			manager := noredaemon.NewManager(noredaemon.ConfigFromEffective(cfg), nil)
 
-			fmt.Println("Stopping N.O.R.E. daemon...")
+			// Daemon lifecycle is progress, not a machine-readable record:
+			// render it on stderr through the step runner.
+			rep := ui.New(cmd.ErrOrStderr())
+			defer rep.Stop()
+
+			rep.Info("Stopping N.O.R.E. daemon...")
 
 			if err := manager.Stop(ctx); err != nil {
 				if errors.Is(err, noredaemon.ErrNotRunning) {
-					fmt.Println("Daemon is not currently running.")
+					rep.Info("Daemon is not currently running.")
 					return nil
 				}
+				rep.Fail("Failed to stop the daemon")
 				return fmt.Errorf("failed to stop daemon: %w", err)
 			}
 
-			fmt.Println("Daemon stopped successfully.")
+			rep.OK("Daemon stopped successfully.")
 			return nil
 		},
 	}

@@ -8,9 +8,11 @@ import (
 )
 
 func main() {
-	// Execute the root command. If it fails, exit with a non-zero status code.
+	// The root command never prints errors itself (cobra's SilenceErrors and
+	// SilenceUsage are set in cli.go); this is the single, uniform error
+	// surface for every command.
 	if err := cli.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "\u2717 %s\n", err)
 		os.Exit(1)
 	}
 }

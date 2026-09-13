@@ -32,6 +32,11 @@ var RootCmd = &cobra.Command{
 
 // Execute is called by main.go to start the CLI.
 func Execute() error {
+	// Errors bubble up to main.go so there is exactly one, uniformly styled
+	// error surface. SilenceUsage keeps spurious usage dumps out of error
+	// output (each command owns its usage via cmd.Help()).
+	RootCmd.SilenceErrors = true
+	RootCmd.SilenceUsage = true
 	return RootCmd.Execute()
 }
 
