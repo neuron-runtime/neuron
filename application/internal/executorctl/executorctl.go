@@ -263,6 +263,14 @@ func (c *Catalog) Install(ctx context.Context, typ, version string, registries [
 	return c.Resolver.Resolve(ctx, req)
 }
 
+// InstallForce is Install with the store fast-path disabled: the registries
+// are always consulted and the selected version is freshly fetched and
+// verified even when an identical version is already installed.
+func (c *Catalog) InstallForce(ctx context.Context, typ, version string, registries []string) (*executor.Installed, error) {
+	req := c.Require(typ, version, registries)
+	return c.Resolver.ResolveForce(ctx, req)
+}
+
 // List returns every installed version of typ (or all when typ is empty).
 func (c *Catalog) List(ctx context.Context, typ string) ([]executor.Installed, error) {
 	return c.Store.List(ctx, typ)

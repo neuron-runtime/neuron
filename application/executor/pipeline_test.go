@@ -367,6 +367,112 @@ func TestResolveUnconfiguredRegistry(t *testing.T) {
 	}
 }
 
+func TestResolveForceReinstalls(t *testing.T) {
+	// ResolveForce bypasses the installed-store fast path and reintalls the
+	// selected version even when it is already present: the registry is
+	// consulted and the artifact is fetched, verified, and committed fresh.
+	ctx := context.Background()
+
+	regRoot := t.TempDir()
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	writeExecutorPackage(t, regRoot, "github:read", "1.2.0")
+
+	reg, err := local.New(regRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsStore, err := execstore.NewFilesystemStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := executor.NewRegistry()
+	if err := catalog.Add(reg); err != nil {
+		t.Fatal(err)
+	}
+	installer := &executor.Installer{Store: fsStore, Downloader: executor.NewHTTPDownloader()}
+	resolver := executor.NewResolver(catalog, fsStore, installer)
+
+	req := executor.Requirement{Type: "github:read", Version: "1.2.0", Registries: []string{"local"}}
+
+	if _, err := resolver.Resolve(ctx, req); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// An exact-pin resolve is idempotent: the store fast path answers without
+	// installing anything.
+	cached := &recordingObserver{}
+	resolver.Observer = cached
+	if _, err := resolver.Resolve(ctx, req); err != nil {
+		t.Fatalf("Resolve cached: %v", err)
+	}
+	if len(cached.events) != 2 || cached.events[1] != "already:github:read@1.2.0" {
+		t.Fatalf("cached resolve events = %v, want [resolve:github:read already:github:read@1.2.0]", cached.events)
+	}
+
+	// Force reinstalls from the registry: the installer runs again and the
+	// store keeps exactly one entry for the type/version.
+	forced := &recordingObserver{}
+	installer.Observer = forced
+	resolver.Observer = forced
+	if _, err := resolver.ResolveForce(ctx, req); err != nil {
+		t.Fatalf("ResolveForce: %v", err)
+	}
+	if len(forced.events) != 3 || forced.events[1] != "install:github:read@1.2.0" {
+		t.Fatalf("force resolve events = %v, want [resolve:github:read install:github:read@1.2.0 installed:github:read@1.2.0]", forced.events)
+	}
+
+	list, err := fsStore.List(ctx, "github:read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("store entries = %d, want exactly 1 after force reinstall", len(list))
+	}
+}
+
+func TestResolveForceFloating(t *testing.T) {
+	// A floating requirement under force still consults the registries and
+	// reinstalls the newest matching version.
+	ctx := context.Background()
+
+	regRoot := t.TempDir()
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	writeExecutorPackage(t, regRoot, "github:read", "1.2.0")
+	writeExecutorPackage(t, regRoot, "github:read", "2.0.0")
+
+	reg, err := local.New(regRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsStore, err := execstore.NewFilesystemStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := executor.NewRegistry()
+	if err := catalog.Add(reg); err != nil {
+		t.Fatal(err)
+	}
+	installer := &executor.Installer{Store: fsStore, Downloader: executor.NewHTTPDownloader()}
+	resolver := executor.NewResolver(catalog, fsStore, installer)
+
+	req := executor.Requirement{Type: "github:read", Registries: []string{"local"}}
+
+	if _, err := resolver.Resolve(ctx, req); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	forced, err := resolver.ResolveForce(ctx, req)
+	if err != nil {
+		t.Fatalf("ResolveForce: %v", err)
+	}
+	if forced.Version != "2.0.0" {
+		t.Errorf("forced version = %q, want 2.0.0", forced.Version)
+	}
+	if forced.RootDir == "" {
+		t.Error("forced install has no RootDir")
+	}
+}
+
 func TestFrozenJSONRoundTrip(t *testing.T) {
 	ctx := context.Background()
 

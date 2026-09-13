@@ -61,11 +61,32 @@ func (r *Resolver) Resolve(ctx context.Context, req Requirement) (*Installed, er
 		return installed, nil
 	}
 
+	return r.resolveFromRegistries(ctx, req, false)
+}
+
+// ResolveForce is Resolve with the store fast-path disabled: the registries
+// are always consulted and the selected version is reinstalled from source,
+// even when an identical version is already installed. Used by `neuron add
+// --force` (global --force) to re-fetch a package the user asked to replace.
+func (r *Resolver) ResolveForce(ctx context.Context, req Requirement) (*Installed, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	notify(r.Observer, func(o Observer) { o.Resolving(req) })
+
+	return r.resolveFromRegistries(ctx, req, true)
+}
+
+// resolveFromRegistries resolves req against every configured registry in
+// order, returning the first success. With force, the selected version is
+// removed from the store before reinstallation so the artifact is freshly
+// fetched and verified even when an identical version is already present.
+func (r *Resolver) resolveFromRegistries(ctx context.Context, req Requirement, force bool) (*Installed, error) {
 	if r.installer == nil {
 		return nil, fmt.Errorf("no installer configured; executor %s not installed", req.Type)
 	}
 
-	// 3: resolve against the configured registries.
 	registries := req.Registries
 	if len(registries) == 0 {
 		return nil, fmt.Errorf(
@@ -84,7 +105,7 @@ func (r *Resolver) Resolve(ctx context.Context, req Requirement) (*Installed, er
 			continue
 		}
 
-		installed, err := r.resolveFrom(ctx, registry, req)
+		installed, err := r.resolveFrom(ctx, registry, req, force)
 		if err != nil {
 			lastErr = err
 			continue
@@ -121,7 +142,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, requirements []Requirement) 
 	return env, nil
 }
 
-func (r *Resolver) resolveFrom(ctx context.Context, registry Provider, req Requirement) (*Installed, error) {
+func (r *Resolver) resolveFrom(ctx context.Context, registry Provider, req Requirement, force bool) (*Installed, error) {
 	versions, err := registry.Versions(ctx, req.Type)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -138,6 +159,14 @@ func (r *Resolver) resolveFrom(ctx context.Context, registry Provider, req Requi
 	pkg, err := registry.Package(ctx, req.Type, version)
 	if err != nil {
 		return nil, fmt.Errorf("registry %s package %s@%s: %w", registry.Name(), req.Type, version, err)
+	}
+
+	if force && r.store != nil {
+		// Drop the existing copy so the artifact is fetched and verified fresh
+		// rather than short-circuited by the installer's idempotency check.
+		if err := r.store.Remove(ctx, req.Type, version); err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("remove existing %s@%s before reinstall: %w", req.Type, version, err)
+		}
 	}
 
 	result, err := r.installer.Install(ctx, pkg)

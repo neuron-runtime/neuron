@@ -10,6 +10,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/progress"
 	"github.com/Muhammad-Jay/neuron/application/internal/executorctl"
+	"github.com/Muhammad-Jay/neuron/application/project"
 	"github.com/spf13/cobra"
 )
 
@@ -67,16 +68,20 @@ against the configured registries (github, local) and installed immutably under
 }
 
 // NewAddCmd returns the top-level `neuron add` command, which resolves and
-// installs an executor package.
+// installs an executor package. A successful install is pinned into the
+// project's .neuron/executors.json so the version a developer chose is
+// recorded next to the project.
 func NewAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Add,
 		Short: "Resolve and install an executor package",
-		Long: `Resolve and install an executor package into the local store.
+		Long: `Resolve and install an executor package into the local store and pin it
+into the project's .neuron/executors.json.
 
-	name@version selects an exact or constrained version (e.g. github:read or
-	Muhammad-Jay:github:read@^1.0.0). Without a version the best matching
-	version is installed.
+ name@version selects an exact or constrained version (e.g. github:read or
+ Muhammad-Jay:github:read@^1.0.0). Without a version the best matching
+ version is installed. The global --force flag re-fetches the package even
+ when it is already installed.
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -95,16 +100,55 @@ func NewAddCmd() *cobra.Command {
 				return err
 			}
 
-			installed, err := catalog.Install(ctx, typ, version, nil)
+			force, _ := cmd.Flags().GetBool("force")
+
+			var installed *executor.Installed
+			if force {
+				installed, err = catalog.InstallForce(ctx, typ, version, nil)
+			} else {
+				installed, err = catalog.Install(ctx, typ, version, nil)
+			}
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("installed %s@%s (from %s)\n", installed.Type, installed.Version, installed.Registry)
+			if err := pinInstalled(ctx, installed); err != nil {
+				return err
+			}
+
+			fmt.Printf("pinned %s@%s (from %s)\n", installed.Type, installed.Version, installed.Registry)
 			return nil
 		},
 	}
 	return cmd
+}
+
+// pinInstalled upserts the installed executor into the project's
+// .neuron/executors.json so `neuron add` records exactly what a developer
+// pinned, independent of the shared artifact store.
+func pinInstalled(ctx context.Context, installed *executor.Installed) error {
+	cfg, ok := config.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("configuration not loaded")
+	}
+	if cfg.ProjectDir == "" {
+		return nil
+	}
+
+	pins, err := project.LoadExecutorsFile(cfg.ProjectDir)
+	if err != nil {
+		return err
+	}
+	pins.Upsert(project.ExecutorPin{
+		Type:     installed.Type,
+		Version:  installed.Version,
+		Registry: installed.Registry,
+		Digest:   installed.Digest,
+	})
+	if err := project.SaveExecutorsFile(cfg.ProjectDir, pins); err != nil {
+		return fmt.Errorf("pin executor %s@%s: %w", installed.Type, installed.Version, err)
+	}
+	return nil
 }
 
 func newListCmd() *cobra.Command {
