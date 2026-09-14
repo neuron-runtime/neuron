@@ -15,7 +15,7 @@ type stubConnection struct {
 	healthErr error
 }
 
-func (s *stubConnection) Health(ctx context.Context) error                         { return s.healthErr }
+func (s *stubConnection) Health(ctx context.Context) error { return s.healthErr }
 func (s *stubConnection) Do(ctx context.Context, method, path string, body any, out any) error {
 	return nil
 }

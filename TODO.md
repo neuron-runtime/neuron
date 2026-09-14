@@ -61,11 +61,14 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   deliberately opt-in. Confirm the fallback path resolves correctly for the shipped
   value and tighten the error to name the exact fix.
   ```
-- [ ] **SDK default executor name = service name.** Services without `.executor()` get an
+- [x] **SDK default executor name = service name.** Services without `.executor()` get an
   ```
   executor name equal to the service name (e.g. `content.extract`), which fails
   `ParseType` at registration ("must contain at least one ':' separator"). Validate in the
   SDK or relax `ParseType`; document the `owner:capability:sub` convention. (B1)
+  RESOLVED (2026-09-13): a service without `.executor()` now defaults to the built-in
+  `neuron:core:set` (in-process, no resolution). The `owner:capability:sub` convention is
+  documented in the SDK README.
   ```
 - [ ] **Local-registry identity reconciliation skipped.** The installer verifies
   ```
@@ -105,11 +108,15 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   config surface (`neuron.config.ts`, `defineConfig`) removed; manifest `config` block
   removed; resolution reads `cfg.Executors.Registries`.
   ```
-- [ ] **`neuron init --lang ts` scaffolding.** Generate a runnable TS project (package.json,
+- [x] **`neuron init --lang ts` scaffolding.** Generate a runnable TS project (package.json,
   ```
   `system.ts`, `neuron.config.json` with `lang: typescript`, `entry: system.ts`, and a
   `local` registry block) so fresh projects are not pre-broken for external executors.
   (F4)
+  RESOLVED (2026-09-13): TypeScript is the default scaffold (`neuron init`), producing
+  `neuron.config.json` (`lang: typescript`, `entry: system.ts`), `package.json` with
+  `@neuron/sdk`, `tsconfig.json`, a runnable `system.ts`, and the implicit executor root
+  `neuron/executors/` via `executors.localRoots`.
   ```
 - [ ] **`neuron daemon status` command.** Show running/stopped, PID, data dir, socket path,
   ```
@@ -152,9 +159,11 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   merging, silently dropping the default `github` registry when a user declares `local`.
   (F3)
   ```
-- [ ] **`neuron instance` with no subcommand prints help.** It exits silently today; teach
+- [x] **`neuron instance` with no subcommand prints help.** It exits silently today; teach
   ```
   the user the subcommands instead. (E6)
+  RESOLVED (2026-09-13): the instance root command renders its help; the dead commented
+  single-instance lookup was removed.
   ```
 - [ ] **Execution-history retention policies.** Implement `storage.executionHistory:
   ```
@@ -197,7 +206,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the executor should be written in .NET, and it should contain the typescript Service package in it repo,
   Not yet pushed to GitHub / not yet published to a registry:
   - packages/executor-dotnet/Neuron.Executor: builds, 26 tests green, packs as NuGet. Referenced by ProjectReference from the content-extract repo.
-  - content-extract repo (Desktop/content-extract): .NET executor (neuron/executor-v1 gRPC), executor.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron register` + `neuron run` through the local catalog.
+  - content-extract repo (Desktop/content-extract): .NET executor (neuron/executor-v1 gRPC), executor.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron build` + `neuron run` through the local catalog.
   - Remaining for a public release: push content-extract to GitHub, create v1.0.0 tag, publish Neuron.Executor to NuGet, replace the sibling-checkout ProjectReference/file: dependency with versioned package references.
   ```
 
@@ -220,33 +229,42 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Documentation
 
-- [ ] **Stale event names in GETTING_STARTED.** The guide shows `service.evaluating`;
+- [x] **Stale event names in GETTING_STARTED.** The guide shows `service.evaluating`;
   ```
   the real events are `service.started`/`service.completed`/`execution.completed`
   (`nore/internal/event/event_types.go`). Align the shipped runnable transcripts. (E1)
+  RESOLVED (2026-09-13): transcripts throughout GETTING_STARTED use the live event names.
   ```
-- [ ] **`neuron` root help says "workflow engine CLI".** Neuron is explicitly not a workflow
+- [x] **`neuron` root help says "workflow engine CLI".** Neuron is explicitly not a workflow
   ```
   engine (`application/internal/cli/cli.go:25`); change to "Neuron CLI". (E3)
+  RESOLVED (2026-09-13): root `Short` is "Neuron CLI".
   ```
-- [ ] **`application/README.md` daemon-lifecycle fix.** It claims the daemon stops when the
+- [x] **`application/README.md` daemon-lifecycle fix.** It claims the daemon stops when the
   ```
   CLI process exits; the daemon persists. Correct the text. (E4)
+  RESOLVED (2026-09-13): CLI reference now states the daemon persists until `neuron daemon stop`.
   ```
-- [ ] **Remove stale example config.** `examples/ecommerce_order_ts/neuron.config.ts` ships
+- [x] **Remove stale example config.** `examples/ecommerce_order_ts/neuron.config.ts` ships
   ```
   dead `script.build`, `storage.directory: "./home"`, and `storage.provider: "postgres"`;
   `examples/ecommerce_order/neuron.yaml` ships an `official` registry that `BuildCatalog`
   ignores. (E2)
+  RESOLVED (2026-09-13): `neuron.config.ts` is gone and both examples ship clean
+  `neuron.config.*` files; the `official` registry block no longer exists.
   ```
-- [ ] **Create or remove `docs/executors/2026-09-05-*.md`.** Referenced by the item below
+- [x] **Create or remove `docs/executors/2026-09-05-*.md`.** Referenced by the item below
   ```
   but the directory does not exist. (E5)
+  RESOLVED (2026-09-13): the case study moved to `docs/executors/2026-09-05-first-executor.md`.
   ```
-- [ ] **Document executor naming + config requirement.** Explain `owner:capability:sub` and
+- [x] **Document executor naming + config requirement.** Explain `owner:capability:sub` and
   ```
   that `neuron.yaml` `executors.registries` is required for external executors even in TS
   projects, in the SDK README and MODULES.md. (A1/B1/F1)
+  RESOLVED (2026-09-13): the SDK README documents `owner:capability:sub`, the built-in
+  `neuron:core:set` default, and points at MODULES.md; GETTING_STARTED Part 3 states the
+  `executors.registries` requirement for external modules.
   ```
 - [ ] **Design-notes sync.** `docs/executors/2026-09-05-*.md` must never contradict shipped
   ```

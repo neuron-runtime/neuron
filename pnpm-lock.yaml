@@ -21,6 +21,19 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  examples/hello:
+    dependencies:
+      '@neuron/sdk':
+        specifier: file:../../packages/sdk
+        version: link:../../packages/sdk
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.2
+
   packages/sdk:
     dependencies:
       jiti:

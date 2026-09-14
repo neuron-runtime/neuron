@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "@neuron/sdk": "file:../../packages/sdk"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2"
+  },
+  "name": "hello",
+  "private": true,
+  "scripts": {
+    "executor:add": "neuron add",
+    "register": "neuron register",
+    "start": "neuron run",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}

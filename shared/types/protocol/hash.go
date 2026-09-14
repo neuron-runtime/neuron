@@ -59,14 +59,14 @@ type normalizedMetadata struct {
 }
 
 type normalizedService struct {
-	ID          string           `json:"id"`
+	ID          string            `json:"id"`
 	Type        core.ExecutorType `json:"type"`
-	Config      map[string]any   `json:"config"`
-	Inputs      []core.Port      `json:"inputs,omitempty"`
-	Outputs     []core.Port      `json:"outputs,omitempty"`
-	Timeout     string           `json:"timeout,omitempty"`
-	MaxAttempts int              `json:"max_attempts,omitempty"`
-	Backoff     string           `json:"backoff,omitempty"`
+	Config      map[string]any    `json:"config"`
+	Inputs      []core.Port       `json:"inputs,omitempty"`
+	Outputs     []core.Port       `json:"outputs,omitempty"`
+	Timeout     string            `json:"timeout,omitempty"`
+	MaxAttempts int               `json:"max_attempts,omitempty"`
+	Backoff     string            `json:"backoff,omitempty"`
 }
 
 type normalizedConnector struct {
