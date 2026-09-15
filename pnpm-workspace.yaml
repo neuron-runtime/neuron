@@ -1,3 +1,4 @@
 packages:
-  - "packages/*"
+  - "packages/system-sdks/*"
+  - "packages/executor-sdks/*"
   - "examples/*"

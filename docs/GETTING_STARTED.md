@@ -382,7 +382,7 @@ The execution launches the installed module **out-of-process**, passes your inpu
 
 | | |
 | --- | --- |
-| **TypeScript SDK** | Every SDK feature in depth — [packages/sdk/README.md](../packages/sdk/README.md) |
+| **TypeScript SDK** | Every SDK feature in depth — [packages/system-sdks/typescript/README.md](../packages/system-sdks/typescript/README.md) |
 | **Modules & executors** | The unified module model, packaging, and authoring — [docs/MODULES.md](./MODULES.md) |
 | **Architecture** | How the platform is put together — [docs/ARCHITECTURE.md](./ARCHITECTURE.md) |
 | **CLI reference** | Every `neuron` command and flag — [application/README.md](../application/README.md) |

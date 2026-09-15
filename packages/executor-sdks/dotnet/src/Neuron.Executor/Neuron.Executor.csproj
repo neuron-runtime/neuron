@@ -21,7 +21,7 @@
     to an executor without generating the proto again.
   -->
   <ItemGroup>
-    <Protobuf Include="../../../../shared/protocol/executor/v1/executor.proto" GrpcServices="Both" />
+    <Protobuf Include="../../../../../shared/protocol/executor/v1/executor.proto" GrpcServices="Both" />
   </ItemGroup>
 
   <ItemGroup>

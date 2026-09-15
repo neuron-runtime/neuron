@@ -469,7 +469,7 @@ pnpm test:sdk         # run vitest
 pnpm typecheck:sdk    # tsc --noEmit
 ```
 
-Tests live in `packages/sdk/test/` and cover services, expressions, composition, connections, schemas, and full system manifests.
+Tests live in `packages/system-sdks/typescript/test/` and cover services, expressions, composition, connections, schemas, and full system manifests.
 
 ## Versioning and compatibility
 

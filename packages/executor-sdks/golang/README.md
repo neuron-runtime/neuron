@@ -24,7 +24,7 @@ flowchart LR
 ## Module
 
 ```text
-github.com/Muhammad-Jay/neuron/packages/executor-go
+github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang
 ```
 
 Requirements:
@@ -135,7 +135,7 @@ import (
 	"log"
 	"strings"
 
-	executor "github.com/Muhammad-Jay/neuron/packages/executor-go"
+	executor "github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang"
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 )
 
@@ -369,7 +369,7 @@ The two declared protocols are language-neutral:
 
 | Resource           | Path                                                     |
 | ------------------ | -------------------------------------------------------- |
-| Implementation     | `packages/executor-go/`                                  |
+| Implementation     | `packages/executor-sdks/golang/`                                  |
 | gRPC schema        | `shared/protocol/executor/v1/executor.proto`             |
 | Contract types     | `shared/types/executor`                                  |
 | Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |

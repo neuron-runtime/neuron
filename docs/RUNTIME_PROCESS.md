@@ -141,7 +141,7 @@ The transport is decided entirely by the frozen record's `protocol`:
 
 ### 5.1 A gRPC executor (recommended)
 
-Use the Go SDK (`packages/executor-go`). Implement a `Handler` and call `executor.Serve`; the SDK starts the gRPC server, writes the readiness file, and answers the handshake. The same binary falls back to JSON mode when it is launched without a socket, which is exactly what WASI targets need.
+Use the Go SDK (`packages/executor-sdks/golang`). Implement a `Handler` and call `executor.Serve`; the SDK starts the gRPC server, writes the readiness file, and answers the handshake. The same binary falls back to JSON mode when it is launched without a socket, which is exactly what WASI targets need.
 
 Other languages can implement the `ExecutorService` gRPC contract directly; the schema is in `shared/protocol/executor/v1/executor.proto` and the protocol is language-independent.
 
@@ -172,7 +172,7 @@ Any program that reads one JSON request from stdin and writes one JSON response 
 - Implementation: `nore/internal/runtime/process`
 - Contract: `shared/types/executor` (`Runtime`, `Instance`, `StartSpec`, `Request`, `Response`, protocol constants)
 - gRPC schema: `shared/protocol/executor/v1/executor.proto`
-- SDK: `packages/executor-go`
+- SDK: `packages/executor-sdks/golang`
 - Tests: `nore/internal/runtime/process/runtime_test.go` (round-trips on both transports, worker reuse, bounded concurrency, pool close)
 
 ---

@@ -221,7 +221,7 @@ An executor is an artifact that a system's service types resolve to. Creating on
 
 **The artifact.** Either a native binary or script that speaks one of the two protocols, or a `wasm32-wasi` module that reads a JSON request from stdin and writes a JSON response to stdout.
 
-For process executors that want the gRPC transport, the fastest path is the Go SDK (`packages/executor-go`): implement a `Handler`, call `Serve`, and the SDK handles sockets, readiness, negotiation, and lifecycle. The SDK transparently falls back to the JSON transport when launched without a socket, so one binary serves both. Executor authors are not required to write Go: the gRPC protocol is language-independent (`shared/protocol/executor/v1/executor.proto`), and the JSON protocol is trivially implemented anywhere.
+For process executors that want the gRPC transport, the fastest path is the Go SDK (`packages/executor-sdks/golang`): implement a `Handler`, call `Serve`, and the SDK handles sockets, readiness, negotiation, and lifecycle. The SDK transparently falls back to the JSON transport when launched without a socket, so one binary serves both. Executor authors are not required to write Go: the gRPC protocol is language-independent (`shared/protocol/executor/v1/executor.proto`), and the JSON protocol is trivially implemented anywhere.
 
 **The manifest.** Every executor ships an `executor.json`:
 
@@ -281,4 +281,4 @@ Successful and failed executions both flow back through the same response contra
 | **WASM runtime** | The WASM executor backend in detail — [RUNTIME_WASM.md](./RUNTIME_WASM.md) |
 | **Modules & executors** | The unified module model — [MODULES.md](./MODULES.md) |
 | **Architecture** | Boundaries and data flow — [ARCHITECTURE.md](./ARCHITECTURE.md) |
-| **Go SDK** | Author an executor — [packages/executor-go/README.md](../packages/executor-go/README.md) |
+| **Go SDK** | Author an executor — [packages/executor-sdks/golang/README.md](../packages/executor-sdks/golang/README.md) |

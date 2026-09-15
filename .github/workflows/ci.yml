@@ -25,19 +25,19 @@ jobs:
 
       - name: Formatting
         run: |
-          files="$(gofmt -l nore application shared packages/executor-go examples/simple_response)"
+          files="$(gofmt -l nore application shared packages/executor-sdks/golang examples/simple_response)"
           if [ -n "$files" ]; then
             echo "gofmt required on:"; echo "$files"; exit 1
           fi
 
       - name: Vet
-        run: go vet ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+        run: go vet ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
 
       - name: Test
-        run: go test ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+        run: go test ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
 
       - name: Build
-        run: go build ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+        run: go build ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
 
   sdk:
     name: TypeScript SDK

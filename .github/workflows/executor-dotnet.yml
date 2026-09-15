@@ -22,16 +22,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
           cache: true
-          cache-dependency-path: packages/executor-dotnet/**/*.csproj
+          cache-dependency-path: packages/executor-sdks/dotnet/**/*.csproj
 
       - name: Restore
-        run: dotnet restore packages/executor-dotnet/Neuron.Executor.slnx
+        run: dotnet restore packages/executor-sdks/dotnet/Neuron.Executor.slnx
 
       - name: Build
-        run: dotnet build packages/executor-dotnet/Neuron.Executor.slnx -c Release --no-restore
+        run: dotnet build packages/executor-sdks/dotnet/Neuron.Executor.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test packages/executor-dotnet/Neuron.Executor.slnx -c Release --no-build
+        run: dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx -c Release --no-build
 
       - name: Pack
-        run: dotnet pack packages/executor-dotnet/src/Neuron.Executor/Neuron.Executor.csproj -c Release --no-build -o "${{ runner.temp }}/pack"
+        run: dotnet pack packages/executor-sdks/dotnet/src/Neuron.Executor/Neuron.Executor.csproj -c Release --no-build -o "${{ runner.temp }}/pack"

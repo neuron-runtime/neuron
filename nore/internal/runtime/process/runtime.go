@@ -4,7 +4,7 @@
 // Two transports are supported, selected by the executor's declared protocol:
 //
 //   - neuron/executor-v1 (canonical): the executor process speaks gRPC
-//     over a Unix domain socket (see packages/executor-go). The runtime
+//     over a Unix domain socket (see packages/executor-sdks/golang). The runtime
 //     maintains a pool of long-lived worker processes, leasing requests to
 //     available workers. This provides warm runtimes, connection reuse,
 //     bounded concurrency, health checking, and graceful shutdown.

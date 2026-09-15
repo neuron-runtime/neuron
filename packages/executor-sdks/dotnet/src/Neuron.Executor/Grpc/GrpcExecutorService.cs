@@ -24,7 +24,7 @@ internal sealed class ShutdownCoordinator
 /// <summary>
 /// Adapts the <see cref="ExecutorHandler"/> to the generated
 /// <see cref="ExecutorService.ExecutorServiceBase"/> contract. The failure
-/// semantics mirror <c>packages/executor-go/executor.go</c>: an exception from
+/// semantics mirror <c>packages/executor-sdks/golang/executor.go</c>: an exception from
 /// Execute becomes a controlled failure in the response; an exception from
 /// Initialize or Shutdown becomes a transport failure.
 /// </summary>
