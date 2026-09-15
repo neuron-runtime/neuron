@@ -1,9 +1,9 @@
 go 1.26.5
 
 use (
-	./nore
 	./application
+	./nore
+	./packages/executor-sdks/golang
 	./shared
-	./packages/executor-go
 	examples/simple_response
 )

@@ -63,7 +63,7 @@ Instance + Execution events         service.ready → service.started → servic
 ### 1.1 The real end-to-end run
 
 The reference executor lives in a sibling repository (`Desktop/content-extract`) and
-reuses the .NET SDK at `packages/executor-dotnet` (built first, `134c44c`). It was
+reuses the .NET SDK at `packages/executor-sdks/dotnet` (built first, `134c44c`). It was
 registered and executed against the local registry:
 
 ```bash
@@ -90,7 +90,7 @@ The installed artifact at `~/.neuron/executors/Muhammad-Jay/content/extract/1.0.
 
 | Piece | Where | Responsibility |
 | --- | --- | --- |
-| .NET executor SDK | `packages/executor-dotnet` | `neuron/executor-v1` gRPC server wrapper, `ExecutorHandler`, health/shutdown |
+| .NET executor SDK | `packages/executor-sdks/dotnet` | `neuron/executor-v1` gRPC server wrapper, `ExecutorHandler`, health/shutdown |
 | Executor repo | `Desktop/content-extract` | the actual capability (`content-extract` binary), TS Service package, release script, CI/CD |
 | `executor.json` | repo root manifest | identity `Muhammad-Jay:content:extract`, runtime `process/content-extract/neuron/executor-v1`, services, capabilities, platforms |
 | TS Service package | `packages/typescript` | `Service("content.extract").executor({name, version, registry:"local"})` |
@@ -145,7 +145,7 @@ only surfaces later as "executor registry not configured".
 
 **B1 — Service name and executor name default to the same value.**
 If a Service omits `.executor()`, the SDK assigns the executor name from the service
-name (`packages/sdk/src/service.ts`). Service names are dotted (`content.extract`);
+name (`packages/system-sdks/typescript/src/service.ts`). Service names are dotted (`content.extract`);
 executor names must be `owner:capability[:sub]`. A service named `content.extract` then
 fails at `ParseType` with "must contain at least one ':' separator"
 (`application/executor/requirement.go:52-55`), and the message never explains the
@@ -177,20 +177,20 @@ the JS does not, and the failure is a cryptic Node ENOENT surfaced as "typescrip
 failed".
 
 **C2 — `neuron.config.ts` `script.build` is dead.**
-The field exists in the config type (`packages/sdk/src/cli/config.ts:6-8`) and the
+The field exists in the config type (`packages/system-sdks/typescript/src/cli/config.ts:6-8`) and the
 shipped example even sets it (`examples/ecommerce_order_ts/neuron.config.ts:5-7`); it is
 never executed.
 
 **C3 — `entryFile` is dead code in the SDK.**
-`project.ts` hardcodes `"index.ts"` (`packages/sdk/src/cli/project.ts:33`) while
-`build.ts` independently recomputes the entry (`packages/sdk/src/cli/build.ts:15`). The
+`project.ts` hardcodes `"index.ts"` (`packages/system-sdks/typescript/src/cli/project.ts:33`) while
+`build.ts` independently recomputes the entry (`packages/system-sdks/typescript/src/cli/build.ts:15`). The
 returned `entryFile` is never consumed.
 
 **C4 — Config-file discovery does not short-circuit.**
 If multiple `neuron.config.*` candidates exist, the last found wins silently.
 
 **C5 — No manifest validation at build time.**
-`build.ts` only checks that a default export exists (`packages/sdk/src/cli/build.ts:21`);
+`build.ts` only checks that a default export exists (`packages/system-sdks/typescript/src/cli/build.ts:21`);
 a malformed manifest passes the build stage and fails later inside the Go compiler.
 
 ### D. Daemon / runtime UX

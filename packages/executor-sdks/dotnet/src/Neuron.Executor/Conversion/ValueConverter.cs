@@ -6,7 +6,7 @@ namespace Neuron.Executor.Conversion;
 
 /// <summary>
 /// Converts between the transport's dynamic <c>Value</c> messages and plain
-/// C# values. The conversion table mirrors <c>packages/executor-go/values.go</c>
+/// C# values. The conversion table mirrors <c>packages/executor-sdks/golang/values.go</c>
 /// so executors written in either SDK observe identical wire semantics:
 /// nil, booleans, strings, all integral/floating point numbers to double,
 /// byte arrays to UTF-8 strings, timestamps to RFC 3339 strings, dictionaries

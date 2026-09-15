@@ -77,9 +77,9 @@ The repository is a monorepo organized into strictly separated Go modules:
 | `application/` | The `neuron` CLI — authoring, building, module resolution, client, daemon bootstrap |
 | `nore/` | N.O.R.E. — the Neuron Operational Runtime Engine |
 | `shared/` | Canonical types, executor contract, version — agreed on by both Go modules |
-| `packages/sdk/` | `@neuron/sdk` — TypeScript system-definition language |
-| `packages/executor-go/` | Go SDK for authoring Neuron modules (executors) |
-| `packages/executor-dotnet/` | .NET SDK for authoring Neuron modules (`Neuron.Executor`) |
+| `packages/system-sdks/typescript/` | `@neuron/sdk` — TypeScript system-definition language |
+| `packages/executor-sdks/golang/` | Go SDK for authoring Neuron modules (executors) |
+| `packages/executor-sdks/dotnet/` | .NET SDK for authoring Neuron modules (`Neuron.Executor`) |
 | `examples/` | Runnable example systems and reference modules |
 | `docs/` | Architecture, getting started, installation, module, and runtime docs |
 | `scripts/` | Workspace development and release helpers |
@@ -209,7 +209,7 @@ export default System({
   .toManifest();
 ```
 
-The SDK is a **definition tool**. It describes systems; it does not execute them, and it must never become a runtime. The Go side remains responsible for parsing, validating, compiling, and running the canonical representation. See [packages/sdk/README.md](../packages/sdk/README.md).
+The SDK is a **definition tool**. It describes systems; it does not execute them, and it must never become a runtime. The Go side remains responsible for parsing, validating, compiling, and running the canonical representation. See [packages/system-sdks/typescript/README.md](../packages/system-sdks/typescript/README.md).
 
 ---
 
@@ -340,7 +340,7 @@ The runtime never assumes an executor is written in Go, compiled to WASM, or lau
 
 The gRPC surface is defined in `shared/protocol/executor/v1`. It covers handshake, protocol version, identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. For a simple one-shot module, the JSON variant keeps the barrier to entry at "read a line, write a line."
 
-The transport detail lives behind the executor runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring an executor is covered by the Go SDK in `packages/executor-go` and by the .NET SDK in `packages/executor-dotnet`; a reference module is shipped in `examples/executors/echo`, compiled for both runtimes from the same source.
+The transport detail lives behind the executor runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring an executor is covered by the Go SDK in `packages/executor-sdks/golang` and by the .NET SDK in `packages/executor-sdks/dotnet`; a reference module is shipped in `examples/executors/echo`, compiled for both runtimes from the same source.
 
 ---
 
@@ -382,5 +382,5 @@ Execution history and retention are intended to become a **configurable storage 
 | **Runtime deep dive** | The runtime execution model (maintainer-focused) — [docs/RUNTIME.md](./RUNTIME.md) |
 | **CLI** | The `neuron` CLI — [application/README.md](../application/README.md) |
 | **Runtime engine** | N.O.R.E. reference (maintainer-focused) — [nore/README.md](../nore/README.md) |
-| **TypeScript SDK** | The system-definition language — [packages/sdk/README.md](../packages/sdk/README.md) |
+| **TypeScript SDK** | The system-definition language — [packages/system-sdks/typescript/README.md](../packages/system-sdks/typescript/README.md) |
 | **Getting started** | Build and run your first system — [docs/GETTING_STARTED.md](./GETTING_STARTED.md) |

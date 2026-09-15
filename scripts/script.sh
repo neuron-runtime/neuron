@@ -10,7 +10,7 @@ go_modules=(
   "./nore"
   "./shared"
   "./application"
-  "./packages/executor-go"
+  "./packages/executor-sdks/golang"
   "./examples/simple_response"
 )
 
@@ -23,11 +23,17 @@ for mod in "${go_modules[@]}"; do
   (
     cd "$mod" || exit 1
     # Build into a scratch directory so `go build ./...` never drops binaries
-    # into the source tree.
+    # into the source tree. Library-only modules (no package main) have nothing
+    # to link, so build them without -o; the scratch dir only applies when there
+    # is something to build.
     scratch="$(mktemp -d)"
     go vet ./... \
       && go test ./... \
-      && go build -o "$scratch" ./... || {
+      && if grep -rq '^package main' --include='*.go' .; then
+           go build -o "$scratch" ./...
+         else
+           go build ./...
+         fi || {
         echo "FAILED: $mod" >&2
         exit 1
       }
@@ -35,7 +41,7 @@ for mod in "${go_modules[@]}"; do
   ) || exit 1
 done
 
-for pkg in ./packages/* ./examples/*; do
+for pkg in ./packages/system-sdks/* ./packages/executor-sdks/* ./examples/*; do
   if [ ! -f "$pkg/package.json" ]; then
     echo "skip $pkg (not a pnpm package)"
     continue

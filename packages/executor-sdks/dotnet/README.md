@@ -75,7 +75,7 @@ public sealed class InitializeResult
 }
 ```
 
-Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/executor-v1`), mirroring `packages/executor-go`.
+Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/executor-v1`), mirroring `packages/executor-sdks/golang`.
 
 `Execute` receives the resolved input map plus an `ExecuteContext` (execution id, timeout, correlation id) and returns `ExecutionResult` with an output map. Setting `ExecutionResult.Error` records a **controlled failure** — the request still succeeds over the transport, and the runtime surfaces the message as an execution failure, exactly like an error in the Go SDK.
 
@@ -150,7 +150,7 @@ The SDK cleans up a stale socket file from a crashed process before listening, s
 
 ## Data conversion
 
-Inputs and outputs are dynamic maps (`IReadOnlyDictionary<string, object?>`). The SDK converts them to and from the protobuf `Value` type used on the gRPC transport, mirroring `packages/executor-go/values.go`:
+Inputs and outputs are dynamic maps (`IReadOnlyDictionary<string, object?>`). The SDK converts them to and from the protobuf `Value` type used on the gRPC transport, mirroring `packages/executor-sdks/golang/values.go`:
 
 | C# type                                                              | Preserved as      |
 | -------------------------------------------------------------------- | ----------------- |
@@ -178,8 +178,8 @@ The gRPC contract lives once in `shared/protocol/executor/v1/executor.proto`. Th
 
 | Resource           | Path                                                     |
 | ------------------ | -------------------------------------------------------- |
-| Implementation     | `packages/executor-dotnet/`                              |
-| Go SDK (parity)    | [packages/executor-go](../../packages/executor-go/README.md) |
+| Implementation     | `packages/executor-sdks/dotnet/`                              |
+| Go SDK (parity)    | [packages/executor-sdks/golang](../../packages/executor-sdks/golang/README.md) |
 | gRPC schema        | `shared/protocol/executor/v1/executor.proto`             |
 | Contract types     | `shared/types/executor`                                  |
 | Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |

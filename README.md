@@ -65,7 +65,7 @@ A Service does not have to be a "microservice". A database query, an HTTP call, 
 
 ## Build a System
 
-Systems are defined in TypeScript with the (`@neuron/sdk`)`[@neuron/sdk](https://github.com/Muhammad-Jay/neuron/blob/main/packages/sdk)` — a typed, autocompleted system-definition language — or in YAML. Both authoring surfaces converge on the **same canonical manifest** before anything runtime-specific happens.
+Systems are defined in TypeScript with the (`@neuron/sdk`)`[@neuron/sdk](https://github.com/Muhammad-Jay/neuron/blob/main/packages/system-sdks/typescript)` — a typed, autocompleted system-definition language — or in YAML. Both authoring surfaces converge on the **same canonical manifest** before anything runtime-specific happens.
 
 Here is a real order-fulfillment definition. Three independent capabilities, wired by explicit relationships, executed by the Neuron runtime:
 
@@ -341,9 +341,9 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 | **Architecture**        | The canonical pipeline and the boundaries that never blur — [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
 | **Modules & executors** | The unified module model, packaging, resolution, and protocol — [docs/MODULES.md](./docs/MODULES.md)       |
 | **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
-| **TypeScript SDK**      | Define systems as typed, composable capabilities — [packages/sdk/README.md](./packages/sdk/README.md)      |
-| **Go executor SDK**     | Build production executors — [packages/executor-go/README.md](./packages/executor-go/README.md)            |
-| **.NET executor SDK**  | Build production executors with C#/.NET — [packages/executor-dotnet/README.md](./packages/executor-dotnet/README.md) |
+| **TypeScript SDK**      | Define systems as typed, composable capabilities — [packages/system-sdks/typescript/README.md](./packages/system-sdks/typescript/README.md)      |
+| **Go executor SDK**     | Build production executors — [packages/executor-sdks/golang/README.md](./packages/executor-sdks/golang/README.md)            |
+| **.NET executor SDK**  | Build production executors with C#/.NET — [packages/executor-sdks/dotnet/README.md](./packages/executor-sdks/dotnet/README.md) |
 | **CLI reference**       | Every `neuron` command and flag — [application/README.md](./application/README.md)                         |
 | **N.O.R.E.**            | The runtime engine in depth (maintainer-focused) — [nore/README.md](./nore/README.md)                      |
 | **Status**              | What is available, experimental, and planned — [docs/STATUS.md](./docs/STATUS.md)                          |
@@ -361,9 +361,9 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 | `application/`          | The `neuron` CLI — authoring, building, module resolution, client, daemon bootstrap |
 | `nore/`                 | N.O.R.E. — the Neuron Operational Runtime Engine                                    |
 | `shared/`               | Canonical types and protocol contracts agreed on by both Go modules                 |
-| `packages/sdk/`         | `@neuron/sdk` — TypeScript system-definition language                               |
-| `packages/executor-go/`        | Go SDK for authoring Neuron modules (executors)                                                        |
-| `packages/executor-dotnet/`    | .NET SDK for authoring Neuron modules (`Neuron.Executor`)                                               |
+| `packages/system-sdks/typescript/`         | `@neuron/sdk` — TypeScript system-definition language                               |
+| `packages/executor-sdks/golang/`        | Go SDK for authoring Neuron modules (executors)                                                        |
+| `packages/executor-sdks/dotnet/`    | .NET SDK for authoring Neuron modules (`Neuron.Executor`)                                               |
 | `examples/`             | Runnable systems and reference executors                                            |
 | `docs/`                 | Architecture, getting started, installation, module, and runtime docs               |
 
@@ -402,12 +402,12 @@ The repository is a Go workspace plus a pnpm monorepo.
 ```bash
 # Prerequisites: Go 1.26.5+, pnpm 10.33.0 (10.x), Node.js, .NET SDK 10
 
-go test   ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
-go vet    ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
-go build  ./nore/... ./application/... ./shared/... ./packages/executor-go/... ./examples/simple_response/...
+go test   ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
+go vet    ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
+go build  ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/... ./examples/simple_response/...
 
-dotnet build packages/executor-dotnet/Neuron.Executor.slnx -c Release   # .NET executor SDK
-dotnet test  packages/executor-dotnet/Neuron.Executor.slnx -c Release
+dotnet build packages/executor-sdks/dotnet/Neuron.Executor.slnx -c Release   # .NET executor SDK
+dotnet test  packages/executor-sdks/dotnet/Neuron.Executor.slnx -c Release
 
 pnpm install
 pnpm build:sdk

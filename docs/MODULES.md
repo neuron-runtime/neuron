@@ -310,7 +310,7 @@ Authoring an external module means producing a directory that satisfies the exec
 
 ### The easy path — the Go SDK
 
-The Go SDK (`packages/executor-go`) removes the protocol plumbing. Write a `Handler`, call `executor.Serve`, and you have an executor:
+The Go SDK (`packages/executor-sdks/golang`) removes the protocol plumbing. Write a `Handler`, call `executor.Serve`, and you have an executor:
 
 ```go
 package main
@@ -319,7 +319,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/Muhammad-Jay/neuron/packages/executor-go"
+	"github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang"
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 )
 
@@ -337,9 +337,9 @@ func main() {
 }
 ```
 
-The SDK supports both transports and handles marshalling, environment, and protocol details. See [packages/executor-go/README.md](../packages/executor-go/README.md).
+The SDK supports both transports and handles marshalling, environment, and protocol details. See [packages/executor-sdks/golang/README.md](../packages/executor-sdks/golang/README.md).
 
-Authors with .NET can use the [.NET SDK](../packages/executor-dotnet/README.md) (`Neuron.Executor`). It implements the same `Handler` contract and the `neuron/executor-v1` gRPC transport with the same failure semantics (required `Initialize`/`Execute`, optional `Health`/`Shutdown`, controlled execution errors), and references the same canonical proto from `shared/protocol/executor/v1/executor.proto`.
+Authors with .NET can use the [.NET SDK](../packages/executor-sdks/dotnet/README.md) (`Neuron.Executor`). It implements the same `Handler` contract and the `neuron/executor-v1` gRPC transport with the same failure semantics (required `Initialize`/`Execute`, optional `Health`/`Shutdown`, controlled execution errors), and references the same canonical proto from `shared/protocol/executor/v1/executor.proto`.
 
 ### The reference module
 
