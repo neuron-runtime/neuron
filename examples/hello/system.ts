@@ -5,7 +5,7 @@ const sayHello = Service({
   version: "1.0.0",
   description: "Return a friendly greeting",
 })
-  .executor({ name: "neuron:core:set" })
+  .executor({ name: "neuron:core:set", registry: "local" })
   .inputSchema<{ name: string }>()
   .outputSchema<{ name: string; message: string }>();
 

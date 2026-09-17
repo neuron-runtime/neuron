@@ -1,0 +1,73 @@
+# Publish @neuron/sdk to npm using Trusted Publishing (OIDC).
+#
+# No tokens or secrets are stored in GitHub. npm verifies a short-lived OIDC
+# token issued by GitHub Actions against the Trusted Publisher configured for
+# the package on npmjs.com.
+#
+# One-time setup (required, on npmjs.com):
+#   1. Sign in to https://www.npmjs.com and open the @neuron/sdk package.
+#   2. Settings -> Trusted Publisher -> GitHub Actions.
+#   3. Publisher:      GitHub
+#      Organization:   Muhammad-Jay
+#      Repository:     neuron
+#      Workflow name:  publish-sdk.yml   (must match this file exactly)
+#      Environment:    (leave empty unless a protected environment is used)
+#   4. Save.
+#
+# Release: push a tag named sdk-v<semver>, e.g. `git tag sdk-v0.1.0 && git push
+# origin sdk-v0.1.0`. The tag version overrides package.json before publishing.
+
+name: Publish TypeScript SDK
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish @neuron/sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.33.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+
+      # Trusted publishing requires npm >= 11.5.1.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm --filter @neuron/sdk build
+
+      - name: Set version from tag
+        working-directory: packages/system-sdks/typescript
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#sdk-v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not map to a valid semver version (${version})" >&2
+            exit 1
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
+
+      # OIDC is exchanged automatically; no NODE_AUTH_TOKEN is needed.
+      - name: Publish
+        working-directory: packages/system-sdks/typescript
+        run: npm publish --access public --provenance --ignore-scripts

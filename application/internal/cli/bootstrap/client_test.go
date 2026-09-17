@@ -44,6 +44,7 @@ func TestResolveNoreBinaryPrefersBundledSibling(t *testing.T) {
 }
 
 func TestResolveNoreBinaryCheckoutFallback(t *testing.T) {
+	t.Setenv("PATH", "")
 	root := t.TempDir()
 	// Simulate a checkout three levels deep under the current directory.
 	cwd := filepath.Join(root, "one/two/three")
@@ -72,6 +73,7 @@ func TestResolveNoreBinaryCheckoutFallback(t *testing.T) {
 }
 
 func TestResolveNoreBinaryNotFound(t *testing.T) {
+	t.Setenv("PATH", "")
 	oldWd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
