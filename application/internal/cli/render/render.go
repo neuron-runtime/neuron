@@ -17,8 +17,8 @@ func Instances(instances []protocol.InstanceResponse) {
 		{Title: "Blueprint Name"},
 		{Title: "Status"},
 		{Title: "Version"},
-		{Title: "Hash"},
-		{Title: "Env"},
+		//{Title: "Hash"},
+		//{Title: "Env"},
 	}
 
 	var rows [][]string
@@ -29,8 +29,8 @@ func Instances(instances []protocol.InstanceResponse) {
 			inst.BlueprintMetadata.Name,
 			inst.Status,
 			inst.Version,
-			inst.Hash,
-			inst.Env,
+			//inst.Hash,
+			//inst.Env,
 		})
 	}
 

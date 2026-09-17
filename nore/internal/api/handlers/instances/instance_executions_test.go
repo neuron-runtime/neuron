@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
 	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
@@ -127,5 +129,89 @@ func TestListExecutionsUnknownInstanceIDReturns404(t *testing.T) {
 	rec, status, _ := testListExecutions(t, h, "inst_deadbeef")
 	if status != http.StatusNotFound {
 		t.Fatalf("list executions = status %d, want 404 (body %s)", status, rec.Body.String())
+	}
+}
+
+// A stale instance restored metadata-only after a daemon restart (its runtime
+// is gone, status coerced to failed) must be transparently recreated by
+// Execute rather than rejected with "instance is not running". This is what
+// makes `neuron run` re-run an already-instantiated system.
+func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
+	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	systemsRepo := system.NewRepository(store)
+	key := protocol.InstanceKey{SystemID: "sys", Version: "1.0.0", Hash: "h", Env: "dev"}
+	if _, _, err := systemsRepo.Register(context.Background(), system.RegisteredSystem{
+		Key: key,
+		System: shared.System{
+			Metadata: shared.Metadata{Name: key.SystemID, Version: key.Version},
+			Specification: shared.SystemSpec{
+				Services: []shared.Service{{
+					Metadata: shared.Metadata{ID: shared.NewID("svc_"), Name: "sys.say", Version: "1.0.0"},
+					Type:     shared.CoreName("set"),
+				}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("register system: %v", err)
+	}
+
+	// Seed an instance metadata record as a previous process would have left it.
+	rec := map[string]any{
+		"id":                 "inst_stale",
+		"system_id":          key.SystemID,
+		"version":            key.Version,
+		"hash":               key.Hash,
+		"env":                key.Env,
+		"status":             "running",
+		"blueprint_metadata": map[string]any{},
+		"created_at":         time.Now().UTC(),
+		"updated_at":         time.Now().UTC(),
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	if err := store.Put(context.Background(), "instances/inst_stale", data); err != nil {
+		t.Fatalf("seed metadata: %v", err)
+	}
+
+	// A fresh manager reconciles the record as metadata-only; the runtime is
+	// intentionally absent.
+	m := instance.NewManager(context.Background(), 2, store, systemsRepo)
+	stale, ok := m.GetByID("inst_stale")
+	if !ok {
+		t.Fatal("stale instance was not restored")
+	}
+	if stale.Status() == instance.StatusRunning {
+		t.Fatal("restored instance should not report running")
+	}
+
+	cel, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
+	if err != nil {
+		t.Fatalf("new CEL compiler: %v", err)
+	}
+	compiler, err := planner.NewCompiler(cel)
+	if err != nil {
+		t.Fatalf("new planner compiler: %v", err)
+	}
+	h := New(m, systemsRepo, compiler)
+
+	body := `{"mode":"detach"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/instances/inst_stale/executions", strings.NewReader(body))
+	req.SetPathValue("id", "inst_stale")
+	w := httptest.NewRecorder()
+	h.Execute(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("execute stale instance = status %d, want 202 (body %s)", w.Code, w.Body.String())
+	}
+	recreated, ok := m.GetByID("inst_stale")
+	if !ok || recreated.Status() != instance.StatusRunning {
+		t.Fatalf("instance was not recreated as running (ok=%v status=%v)", ok, recreated)
 	}
 }

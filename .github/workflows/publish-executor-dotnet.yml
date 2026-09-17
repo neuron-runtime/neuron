@@ -1,0 +1,89 @@
+# Publish the Neuron.Executor .NET SDK to NuGet using Trusted Publishing (OIDC).
+#
+# No long-lived API key is stored in GitHub. The NuGet/login action exchanges a
+# GitHub OIDC token for a short-lived NuGet API key, which is only valid for the
+# duration of the job.
+#
+# One-time setup (required):
+#   1. Create a Trusted Publishing policy on nuget.org:
+#        Account -> Trusted Publishing -> Add policy
+#        Publisher:      GitHub Actions
+#        Repository owner: Muhammad-Jay
+#        Repository:       neuron
+#        Workflow file:    publish-executor-dotnet.yml  (must match exactly)
+#        Environment:      (leave empty unless a protected environment is used)
+#   2. Add a repository *variable* (not a secret) named NUGET_USER holding your
+#      nuget.org username. It is an identifier, not a credential.
+#        GitHub -> Settings -> Secrets and variables -> Actions -> Variables
+#
+# Release: push a tag named dotnet-v<semver>, e.g.
+#   `git tag dotnet-v0.1.0 && git push origin dotnet-v0.1.0`.
+
+name: Publish .NET Executor SDK
+
+on:
+  push:
+    tags:
+      - "dotnet-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish Neuron.Executor
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: packages/executor-sdks/dotnet/**/*.csproj
+
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#dotnet-v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not map to a valid semver version (${version})" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore packages/executor-sdks/dotnet/Neuron.Executor.slnx
+
+      - name: Build
+        run: >-
+          dotnet build packages/executor-sdks/dotnet/Neuron.Executor.slnx
+          -c Release --no-restore -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Test
+        run: >-
+          dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx
+          -c Release --no-build -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Pack
+        run: >-
+          dotnet pack packages/executor-sdks/dotnet/src/Neuron.Executor/Neuron.Executor.csproj
+          -c Release --no-build -p:Version=${{ steps.version.outputs.value }}
+          -o "${{ runner.temp }}/pack"
+
+      # Exchange the GitHub OIDC token for a short-lived NuGet API key.
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push to NuGet
+        run: >-
+          dotnet nuget push "${{ runner.temp }}/pack/*.nupkg"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

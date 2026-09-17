@@ -71,26 +71,14 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	id := utils.PathID(r.PathValue("id"))
 
-	i, ok := h.resolveInstance(r, id)
-	// i, ok := h.instances.GetByID(id)
-	if !ok {
-		// Not an instance ID: resolve the segment as a system key
-		// (systemID:version:hash[:env]) and lazily create the runtime from
-		// the registered system.
-		key, err := protocol.ParseKey(id)
-		if err != nil {
-			utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", id))
-			return
+	i, err := h.runningInstance(r, id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, storage.ErrNotFound) {
+			status = http.StatusNotFound
 		}
-		i, _, err = h.instances.GetOrCreate(r.Context(), key)
-		if err != nil {
-			status := http.StatusInternalServerError
-			if errors.Is(err, storage.ErrNotFound) {
-				status = http.StatusNotFound
-			}
-			utils.ErrorJSON(w, status, err)
-			return
-		}
+		utils.ErrorJSON(w, status, err)
+		return
 	}
 
 	var body struct {

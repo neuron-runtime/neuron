@@ -341,6 +341,7 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 | **Architecture**        | The canonical pipeline and the boundaries that never blur — [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
 | **Modules & executors** | The unified module model, packaging, resolution, and protocol — [docs/MODULES.md](./docs/MODULES.md)       |
 | **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
+| **Releasing**           | How each artifact is published, and the one-time registry setup — [docs/RELEASING.md](./docs/RELEASING.md) |
 | **TypeScript SDK**      | Define systems as typed, composable capabilities — [packages/system-sdks/typescript/README.md](./packages/system-sdks/typescript/README.md)      |
 | **Go executor SDK**     | Build production executors — [packages/executor-sdks/golang/README.md](./packages/executor-sdks/golang/README.md)            |
 | **.NET executor SDK**  | Build production executors with C#/.NET — [packages/executor-sdks/dotnet/README.md](./packages/executor-sdks/dotnet/README.md) |

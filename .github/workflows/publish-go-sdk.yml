@@ -1,0 +1,91 @@
+# Publish the Go modules via tags.
+#
+# Go has no package registry upload step: a module is published by pushing a
+# git tag whose prefix matches the module path. No credentials are involved.
+#
+#   shared module              -> tag shared/v<semver>
+#   executor SDK (golang)      -> tag packages/executor-sdks/golang/v<semver>
+#
+# This workflow validates the tagged module (format, vet, test, build) and
+# verifies the tag prefix matches the module path, so a mistyped tag cannot
+# silently declare a module version. The proxy will serve the tag once CI is
+# green.
+#
+# Release:
+#   git tag shared/v0.2.0 && git push origin shared/v0.2.0
+#   git tag packages/executor-sdks/golang/v0.2.0 && git push origin packages/executor-sdks/golang/v0.2.0
+
+name: Publish Go SDK
+
+on:
+  push:
+    tags:
+      - "shared/v*"
+      - "packages/executor-sdks/golang/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate tagged Go module
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Resolve module and version from tag
+        id: module
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in
+            shared/v*)
+              module="./shared/..."
+              path="shared"
+              prefix="shared/v"
+              ;;
+            packages/executor-sdks/golang/v*)
+              module="./packages/executor-sdks/golang/..."
+              path="packages/executor-sdks/golang"
+              prefix="packages/executor-sdks/golang/v"
+              ;;
+            *)
+              echo "unexpected tag ${tag}" >&2
+              exit 1
+              ;;
+          esac
+          version="${tag#"$prefix"}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "tag ${tag} does not map to a valid semver version (${version})" >&2
+            exit 1
+          fi
+          echo "module=$module" >> "$GITHUB_OUTPUT"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Formatting
+        run: |
+          files="$(gofmt -l "${{ steps.module.outputs.path }}")"
+          if [ -n "$files" ]; then
+            echo "gofmt required on:"; echo "$files"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ${{ steps.module.outputs.module }}
+
+      - name: Test
+        run: go test ${{ steps.module.outputs.module }}
+
+      - name: Build
+        run: go build ${{ steps.module.outputs.module }}
+
+      - name: Summary
+        run: |
+          echo "### Published ${{ steps.module.outputs.path }} v${{ steps.module.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "The Go module proxy will serve this tag: \`https://proxy.golang.org/github.com/!muhammad-!jay/neuron/${{ steps.module.outputs.path }}/@v/v${{ steps.module.outputs.version }}.info\`" >> "$GITHUB_STEP_SUMMARY"
