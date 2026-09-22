@@ -1,4 +1,5 @@
 import { Service, System } from "@neuron/sdk";
+import { http } from "@neuron/sdk/core";
 
 const sayHello = Service({
   name: "hello.say",

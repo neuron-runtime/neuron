@@ -5,5 +5,4 @@ use (
 	./nore
 	./packages/executor-sdks/golang
 	./shared
-	examples/simple_response
 )
