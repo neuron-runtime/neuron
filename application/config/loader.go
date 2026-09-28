@@ -123,7 +123,7 @@ func Load(opts Options) (Config, error) {
 	// (neuron.config.*). When --config selects a file, the root is that file's
 	// directory; otherwise it is the nearest ancestor of the working directory
 	// that holds a project config, falling back to the working directory. All
-	// project-relative paths (local executor roots, storage, entry) resolve
+	// project-relative paths (local capability runtime roots, storage, entry) resolve
 	// against this root.
 	cfg.ProjectDir = projectRootFor(opts, projectPath)
 
@@ -181,23 +181,23 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("inspector.enabled", cfg.Inspector.Enabled)
 	v.SetDefault("inspector.address", cfg.Inspector.Address)
 
-	if len(cfg.Executors.Registries) > 0 {
-		items := make([]map[string]any, 0, len(cfg.Executors.Registries))
-		for _, reg := range cfg.Executors.Registries {
+	if len(cfg.CapabilityRuntimes.Registries) > 0 {
+		items := make([]map[string]any, 0, len(cfg.CapabilityRuntimes.Registries))
+		for _, reg := range cfg.CapabilityRuntimes.Registries {
 			items = append(items, map[string]any{
 				"name": reg.Name,
 				"url":  reg.URL,
 			})
 		}
-		v.SetDefault("executors.registries", items)
+		v.SetDefault("capabilityRuntimes.registries", items)
 	}
 
-	v.SetDefault("executors.storeDir", cfg.Executors.StoreDir)
-	if len(cfg.Executors.DefaultRegistries) > 0 {
-		v.SetDefault("executors.defaultRegistries", cfg.Executors.DefaultRegistries)
+	v.SetDefault("capabilityRuntimes.storeDir", cfg.CapabilityRuntimes.StoreDir)
+	if len(cfg.CapabilityRuntimes.DefaultRegistries) > 0 {
+		v.SetDefault("capabilityRuntimes.defaultRegistries", cfg.CapabilityRuntimes.DefaultRegistries)
 	}
-	if len(cfg.Executors.LocalRoots) > 0 {
-		v.SetDefault("executors.localRoots", cfg.Executors.LocalRoots)
+	if len(cfg.CapabilityRuntimes.LocalRoots) > 0 {
+		v.SetDefault("capabilityRuntimes.localRoots", cfg.CapabilityRuntimes.LocalRoots)
 	}
 	v.SetDefault("dev.maxWorkers", cfg.Dev.MaxWorkers)
 	v.SetDefault("entry", cfg.Entry)
@@ -210,19 +210,19 @@ func resolvePaths(cfg *Config, projectDir string) {
 	cfg.Storage.Directory = Expand(cfg.Storage.Directory, projectDir)
 	cfg.Daemon.Socket = Expand(cfg.Daemon.Socket, projectDir)
 	cfg.Daemon.PIDFile = Expand(cfg.Daemon.PIDFile, projectDir)
-	cfg.Executors.StoreDir = Expand(cfg.Executors.StoreDir, projectDir)
+	cfg.CapabilityRuntimes.StoreDir = Expand(cfg.CapabilityRuntimes.StoreDir, projectDir)
 	cfg.Entry = Expand(cfg.Entry, projectDir)
 
 	if cfg.Daemon.NorePath != "" {
 		cfg.Daemon.NorePath = Expand(cfg.Daemon.NorePath, projectDir)
 	}
 
-	for i := range cfg.Executors.LocalRoots {
-		cfg.Executors.LocalRoots[i] = Expand(cfg.Executors.LocalRoots[i], projectDir)
+	for i := range cfg.CapabilityRuntimes.LocalRoots {
+		cfg.CapabilityRuntimes.LocalRoots[i] = Expand(cfg.CapabilityRuntimes.LocalRoots[i], projectDir)
 	}
 
-	for i := range cfg.Executors.Registries {
-		reg := &cfg.Executors.Registries[i]
+	for i := range cfg.CapabilityRuntimes.Registries {
+		reg := &cfg.CapabilityRuntimes.Registries[i]
 		if reg.Name == "local" && reg.URL != "" && reg.URL != "local://" {
 			reg.URL = Expand(reg.URL, projectDir)
 		}
@@ -231,7 +231,7 @@ func resolvePaths(cfg *Config, projectDir string) {
 
 // findProjectConfig locates the project configuration file by its modern name,
 // walking upward from projectDir until it finds one or reaches the user's home
-// directory or the filesystem root. The legacy neuron.yaml/neuron.yml names
+// directory or the fileassembly root. The legacy neuron.yaml/neuron.yml names
 // are deliberately not accepted. It returns the chosen file and any other
 // candidates found in the same directory so callers can warn about ambiguity.
 func findProjectConfig(projectDir string) (string, []string) {
@@ -315,9 +315,9 @@ func rejectInternalKeys(path string) error {
 		return fmt.Errorf("config %s: `storage` is managed by Neuron and cannot be configured here", filepath.Base(path))
 	}
 
-	if executors, ok := root["executors"].(map[string]any); ok {
-		if _, ok := executors["storeDir"]; ok {
-			return fmt.Errorf("config %s: `executors.storeDir` is managed by Neuron and cannot be configured here", filepath.Base(path))
+	if capabilityRuntimes, ok := root["capabilityRuntimes"].(map[string]any); ok {
+		if _, ok := capabilityRuntimes["storeDir"]; ok {
+			return fmt.Errorf("config %s: `capabilityRuntimes.storeDir` is managed by Neuron and cannot be configured here", filepath.Base(path))
 		}
 	}
 

@@ -9,7 +9,7 @@ import (
 
 // NormalizeInstanceTarget maps a user-facing target to the canonical string
 // for the REST API: instance IDs (inst_*) pass through unchanged; anything
-// else is parsed as a system key and converted to its colon-encoded form.
+// else is parsed as a assembly key and converted to its colon-encoded form.
 func NormalizeInstanceTarget(target string) (string, error) {
 
 	target = strings.TrimSpace(target)

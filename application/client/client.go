@@ -1,6 +1,6 @@
 // Package client provides the official SDK for interacting with the N.O.R.E. API.
 // It abstracts the underlying transport (local socket or remote HTTP) and
-// handles protocol serialization for systems, instances, and executions.
+// handles protocol serialization for assemblies, instances, and executions.
 package client
 
 import (
@@ -48,7 +48,7 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.conn.Health(ctx)
 }
 
-// ListInstances retrieves all currently registered systems instances from the server.
+// ListInstances retrieves all currently registered assemblies instances from the server.
 func (c *Client) ListInstances(ctx context.Context, queryPath string) ([]protocol.InstanceResponse, error) {
 	var response struct {
 		Data []protocol.InstanceResponse `json:"data"`
@@ -69,11 +69,11 @@ func (c *Client) ListInstances(ctx context.Context, queryPath string) ([]protoco
 	return response.Data, nil
 }
 
-// EnsureInstance verifies the existence of a systems instance by its key,
+// EnsureInstance verifies the existence of a assemblies instance by its key,
 // creating a new instance on the server if it does not already exist.
-func (c *Client) EnsureInstance(ctx context.Context, key protocol.InstanceKey, system *core.System) (protocol.InstanceResponse, error) {
-	if system == nil {
-		return protocol.InstanceResponse{}, fmt.Errorf("systems is required")
+func (c *Client) EnsureInstance(ctx context.Context, key protocol.InstanceKey, assembly *core.Assembly) (protocol.InstanceResponse, error) {
+	if assembly == nil {
+		return protocol.InstanceResponse{}, fmt.Errorf("assemblies is required")
 	}
 
 	var response struct {
@@ -81,8 +81,8 @@ func (c *Client) EnsureInstance(ctx context.Context, key protocol.InstanceKey, s
 	}
 
 	req := protocol.CreateInstanceRequest{
-		Key:    key,
-		System: system,
+		Key:      key,
+		Assembly: assembly,
 	}
 
 	if err := c.conn.Do(ctx, http.MethodPost, protocol.InstancesPath, req, &response); err != nil {
@@ -95,19 +95,19 @@ func (c *Client) EnsureInstance(ctx context.Context, key protocol.InstanceKey, s
 // Execute triggers a workflow execution on a specific instance using the provided input data.
 // If mode is "detach", it returns immediately with ExecuteResponse (HTTP 202).
 // Otherwise, it waits for completion and returns ExecutionResult (HTTP 200).
-func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, system *core.System, input map[string]any, mode string) (protocol.ExecutionResult, error) {
-	if instanceKey.SystemID == "" {
-		return protocol.ExecutionResult{}, fmt.Errorf("instance SystemID is required")
+func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, assembly *core.Assembly, input map[string]any, mode string) (protocol.ExecutionResult, error) {
+	if instanceKey.AssemblyID == "" {
+		return protocol.ExecutionResult{}, fmt.Errorf("instance AssemblyID is required")
 	}
 
-	instance, err := c.EnsureInstance(ctx, instanceKey, system)
+	instance, err := c.EnsureInstance(ctx, instanceKey, assembly)
 	if err != nil {
 		return protocol.ExecutionResult{}, err
 	}
 
 	req := protocol.ExecuteRequest{
-		Input: input,
-		Mode:  mode,
+		Params: input,
+		Mode:   mode,
 	}
 
 	endpoint := fmt.Sprintf(protocol.ExecutePath, instance.ID)
@@ -135,17 +135,17 @@ func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, 
 	return response.Data, nil
 }
 
-// ExecuteByKey triggers a workflow execution on the system identified by key,
-// without sending the system definition. The server lazily creates the instance
-// from the durable registered system on the first execution.
+// ExecuteByKey triggers a workflow execution on the assembly identified by key,
+// without sending the assembly definition. The server lazily creates the instance
+// from the durable registered assembly on the first execution.
 func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.InstanceKey, target string, input map[string]any, mode string) (protocol.ExecutionResult, error) {
-	if key.SystemID == "" && target == "" {
-		return protocol.ExecutionResult{}, fmt.Errorf("instance SystemID or Name is required")
+	if key.AssemblyID == "" && target == "" {
+		return protocol.ExecutionResult{}, fmt.Errorf("instance AssemblyID or Name is required")
 	}
 
 	req := protocol.ExecuteRequest{
-		Input: input,
-		Mode:  mode,
+		Params: input,
+		Mode:   mode,
 	}
 
 	k := target
@@ -288,7 +288,7 @@ func (c *Client) GetInstanceById(ctx context.Context, instanceID string) (protoc
 }
 
 // RemoveInstance stops and deletes the instance identified by target, which
-// may be an instance ID (inst_*) or a colon-encoded system key.
+// may be an instance ID (inst_*) or a colon-encoded assembly key.
 func (c *Client) RemoveInstance(ctx context.Context, target string) error {
 	if target == "" {
 		return fmt.Errorf("instance target is required")

@@ -1,6 +1,6 @@
 // The execution view model. Events fold into a small state structure that the
 // renderers present. The model holds only what presentation needs: which
-// services ran, their final state, and the execution result.
+// capabilities ran, their final state, and the execution result.
 package output
 
 import (
@@ -10,23 +10,23 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
-// ServiceState is the lifecycle state of a single service.
-type ServiceState int
+// CapabilityState is the lifecycle state of a single capability.
+type CapabilityState int
 
 const (
-	ServiceWaiting ServiceState = iota
-	ServiceRunning
-	ServiceCompleted
-	ServiceFailed
+	CapabilityWaiting CapabilityState = iota
+	CapabilityRunning
+	CapabilityCompleted
+	CapabilityFailed
 )
 
-// ServiceView is the presentation state of a single service execution.
-type ServiceView struct {
+// CapabilityView is the presentation state of a single capability execution.
+type CapabilityView struct {
 	ID    string
-	State ServiceState
-	// Output holds the service's result payload, shown once it completes.
+	State CapabilityState
+	// Output holds the capability's result payload, shown once it completes.
 	Output map[string]any
-	// Message is the failure message for failed services.
+	// Message is the failure message for failed capabilities.
 	Message string
 }
 
@@ -42,19 +42,19 @@ const (
 
 // ExecutionView is the presentation state of one execution.
 type ExecutionView struct {
-	System  string
-	Status  Status
-	Started time.Time
-	// Services preserves insertion (execution) order.
-	Services []*ServiceView
-	byID     map[string]*ServiceView
+	Assembly string
+	Status   Status
+	Started  time.Time
+	// Capabilities preserves insertion (execution) order.
+	Capabilities []*CapabilityView
+	byID         map[string]*CapabilityView
 	// Message is the terminal failure message, when present.
 	Message string
 }
 
-// NewExecutionView creates an empty view for the named system.
-func NewExecutionView(system string) *ExecutionView {
-	return &ExecutionView{System: system, byID: map[string]*ServiceView{}}
+// NewExecutionView creates an empty view for the named assembly.
+func NewExecutionView(assembly string) *ExecutionView {
+	return &ExecutionView{Assembly: assembly, byID: map[string]*CapabilityView{}}
 }
 
 // Duration returns the execution duration for a finished run.
@@ -71,21 +71,21 @@ func (v *ExecutionView) Fold(evt protocol.StreamEvent) error {
 		v.Started = time.Unix(0, evt.OccurredAt)
 	}
 
-	sv, ok := v.byID[string(evt.ServiceID)]
-	if !ok && evt.ServiceID != "" {
-		sv = &ServiceView{ID: string(evt.ServiceID), State: ServiceWaiting}
-		v.Services = append(v.Services, sv)
-		v.byID[string(evt.ServiceID)] = sv
+	sv, ok := v.byID[string(evt.CapabilityID)]
+	if !ok && evt.CapabilityID != "" {
+		sv = &CapabilityView{ID: string(evt.CapabilityID), State: CapabilityWaiting}
+		v.Capabilities = append(v.Capabilities, sv)
+		v.byID[string(evt.CapabilityID)] = sv
 	}
 
 	switch evt.Type {
-	case "service.ready", "service.started":
+	case "capability.ready", "capability.started":
 		if sv != nil {
-			sv.State = ServiceRunning
+			sv.State = CapabilityRunning
 		}
-	case "service.completed":
+	case "capability.completed":
 		if sv != nil {
-			sv.State = ServiceCompleted
+			sv.State = CapabilityCompleted
 			var p struct {
 				Output map[string]any `json:"Output"`
 			}
@@ -93,9 +93,9 @@ func (v *ExecutionView) Fold(evt protocol.StreamEvent) error {
 				sv.Output = p.Output
 			}
 		}
-	case "service.failed":
+	case "capability.failed":
 		if sv != nil {
-			sv.State = ServiceFailed
+			sv.State = CapabilityFailed
 			var p struct {
 				Message string `json:"Message"`
 			}

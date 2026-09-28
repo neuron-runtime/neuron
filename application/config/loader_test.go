@@ -33,11 +33,11 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Runtime.Execution.Timeout != "30m" {
 		t.Errorf("default timeout = %q, want 30m", cfg.Runtime.Execution.Timeout)
 	}
-	if len(cfg.Executors.Registries) != 0 {
-		t.Errorf("default registries = %d, want 0 (none compiled in)", len(cfg.Executors.Registries))
+	if len(cfg.CapabilityRuntimes.Registries) != 0 {
+		t.Errorf("default registries = %d, want 0 (none compiled in)", len(cfg.CapabilityRuntimes.Registries))
 	}
-	if len(cfg.Executors.DefaultRegistries) != 1 || cfg.Executors.DefaultRegistries[0] != "local" {
-		t.Errorf("default defaultRegistries = %v, want [local]", cfg.Executors.DefaultRegistries)
+	if len(cfg.CapabilityRuntimes.DefaultRegistries) != 1 || cfg.CapabilityRuntimes.DefaultRegistries[0] != "local" {
+		t.Errorf("default defaultRegistries = %v, want [local]", cfg.CapabilityRuntimes.DefaultRegistries)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestEntryExpandsAgainstProjectRoot(t *testing.T) {
 
 	write(t, dir, "neuron.config.yaml", `
 lang: typescript
-entry: system.ts
+entry: assembly.ts
 `)
 
 	cfg, err := Load(Options{
@@ -149,7 +149,7 @@ entry: system.ts
 		t.Fatal(err)
 	}
 
-	want := filepath.Join(dir, "system.ts")
+	want := filepath.Join(dir, "assembly.ts")
 	if cfg.Entry != want {
 		t.Errorf("entry = %q, want %q", cfg.Entry, want)
 	}
@@ -249,14 +249,14 @@ func TestDefaultVariablesEmpty(t *testing.T) {
 	}
 }
 
-func TestExecutorRegistriesFromProjectConfig(t *testing.T) {
+func TestCapabilityRuntimeRegistriesFromProjectConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	write(t, dir, "neuron.config.yaml", `
-executors:
+capabilityRuntimes:
   registries:
     - name: local
-      url: ./executors
+      url: ./capabilityRuntimes
     - name: github
       url: https://registry.neuron.dev
 `)
@@ -269,14 +269,14 @@ executors:
 		t.Fatal(err)
 	}
 
-	if len(cfg.Executors.Registries) != 2 {
-		t.Fatalf("registries = %d, want 2", len(cfg.Executors.Registries))
+	if len(cfg.CapabilityRuntimes.Registries) != 2 {
+		t.Fatalf("registries = %d, want 2", len(cfg.CapabilityRuntimes.Registries))
 	}
-	if cfg.Executors.Registries[0].Name != "local" || cfg.Executors.Registries[0].URL == "" {
-		t.Errorf("registries[0] = %#v, want named local", cfg.Executors.Registries[0])
+	if cfg.CapabilityRuntimes.Registries[0].Name != "local" || cfg.CapabilityRuntimes.Registries[0].URL == "" {
+		t.Errorf("registries[0] = %#v, want named local", cfg.CapabilityRuntimes.Registries[0])
 	}
-	if len(cfg.Executors.DefaultRegistries) != 1 || cfg.Executors.DefaultRegistries[0] != "local" {
-		t.Errorf("defaultRegistries = %v, want [local] preserved", cfg.Executors.DefaultRegistries)
+	if len(cfg.CapabilityRuntimes.DefaultRegistries) != 1 || cfg.CapabilityRuntimes.DefaultRegistries[0] != "local" {
+		t.Errorf("defaultRegistries = %v, want [local] preserved", cfg.CapabilityRuntimes.DefaultRegistries)
 	}
 }
 
@@ -301,13 +301,13 @@ func TestRejectStoreDirKey(t *testing.T) {
 	dir := t.TempDir()
 
 	write(t, dir, "neuron.config.yaml", `
-executors:
+capabilityRuntimes:
   storeDir: /somewhere
 `)
 
 	_, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectPath: filepath.Join(dir, "neuron.config.yaml")})
 	if err == nil {
-		t.Fatal("Load succeeded, want error for `executors.storeDir` in project config")
+		t.Fatal("Load succeeded, want error for `capabilityRuntimes.storeDir` in project config")
 	}
 	if !strings.Contains(err.Error(), "storeDir") {
 		t.Errorf("error = %v, want it to mention `storeDir`", err)
@@ -331,7 +331,7 @@ storage:
 func TestDiscoveryWalksUpward(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "neuron.config.json", `{"lang":"typescript"}`)
-	subDir := filepath.Join(root, "services", "orders")
+	subDir := filepath.Join(root, "capabilities", "orders")
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -386,39 +386,39 @@ func TestMultipleConfigCandidatesWarned(t *testing.T) {
 func TestLocalRootsExpandedAgainstProjectDir(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "neuron.config.json", `{
-  "executors": { "localRoots": ["./custom", "./myown"] }
+  "capabilityRuntimes": { "localRoots": ["./custom", "./myown"] }
 }`)
 
 	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Executors.LocalRoots) != 2 {
-		t.Fatalf("localRoots = %d, want 2", len(cfg.Executors.LocalRoots))
+	if len(cfg.CapabilityRuntimes.LocalRoots) != 2 {
+		t.Fatalf("localRoots = %d, want 2", len(cfg.CapabilityRuntimes.LocalRoots))
 	}
-	if cfg.Executors.LocalRoots[0] != filepath.Join(dir, "custom") {
-		t.Errorf("localRoots[0] = %q, want %q", cfg.Executors.LocalRoots[0], filepath.Join(dir, "custom"))
+	if cfg.CapabilityRuntimes.LocalRoots[0] != filepath.Join(dir, "custom") {
+		t.Errorf("localRoots[0] = %q, want %q", cfg.CapabilityRuntimes.LocalRoots[0], filepath.Join(dir, "custom"))
 	}
 }
 
 func TestLocalRegistryURLExpandedAgainstProjectDir(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "neuron.config.yaml", `
-executors:
+capabilityRuntimes:
   registries:
     - name: local
-      url: ./executors
+      url: ./capabilityRuntimes
 `)
 
 	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Executors.Registries) != 1 {
-		t.Fatalf("registries = %d, want 1", len(cfg.Executors.Registries))
+	if len(cfg.CapabilityRuntimes.Registries) != 1 {
+		t.Fatalf("registries = %d, want 1", len(cfg.CapabilityRuntimes.Registries))
 	}
-	if cfg.Executors.Registries[0].URL != filepath.Join(dir, "executors") {
-		t.Errorf("local registry url = %q, want %q", cfg.Executors.Registries[0].URL, filepath.Join(dir, "executors"))
+	if cfg.CapabilityRuntimes.Registries[0].URL != filepath.Join(dir, "capabilityRuntimes") {
+		t.Errorf("local registry url = %q, want %q", cfg.CapabilityRuntimes.Registries[0].URL, filepath.Join(dir, "capabilityRuntimes"))
 	}
 }
 

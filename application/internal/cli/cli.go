@@ -7,9 +7,9 @@ import (
 
 	"github.com/Muhammad-Jay/neuron/application/config"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/build"
+	"github.com/Muhammad-Jay/neuron/application/internal/cli/capabilityruntime"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/daemon"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/executor"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/initcmd"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/instance"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/register"
@@ -42,7 +42,7 @@ func Execute() error {
 
 func init() {
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "project config file (defaults to neuron.config.json, then neuron.config.yaml/yml)")
-	RootCmd.PersistentFlags().String("log-level", "info", "Set the systems logging level")
+	RootCmd.PersistentFlags().String("log-level", "info", "Set the assemblies logging level")
 	RootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output (shows N.O.R.E. daemon logs)")
 	RootCmd.PersistentFlags().String("remote", "", "Remote N.O.R.E. endpoint (e.g., https://api.nore.example.com)")
 	RootCmd.PersistentFlags().String("nore-path", "", "Path to the nore daemon binary")
@@ -67,9 +67,9 @@ func init() {
 		initcmd.New(),
 		build.New(),
 		register.New(),
-		executor.New(),
-		executor.NewAddCmd(),
-		executor.NewRemoveCmd(),
+		capabilityruntime.New(),
+		capabilityruntime.NewAddCmd(),
+		capabilityruntime.NewRemoveCmd(),
 		versioncmd.New(),
 	)
 }

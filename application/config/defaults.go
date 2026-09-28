@@ -33,9 +33,9 @@ func Defaults() Config {
 		},
 
 		// No registries are compiled in. A project that resolves external
-		// executors must declare them; the default registry list is only the
+		// capability runtimes must declare them; the default registry list is only the
 		// fallback for Requirements that name no registry.
-		Executors: ExecutorsConfig{
+		CapabilityRuntimes: CapabilityRuntimesConfig{
 			StoreDir:          DefaultStoreDir(),
 			DefaultRegistries: []string{"local"},
 		},

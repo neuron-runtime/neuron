@@ -2,40 +2,40 @@ package sdk
 
 import "github.com/Muhammad-Jay/neuron/shared/types/core"
 
-// Service creates a developer-facing Service declaration.
+// Capability creates a developer-facing Capability declaration.
 //
-// This does not replace core.Service. It is simply an ergonomic constructor
+// This does not replace core.Capability. It is simply an ergonomic constructor
 // that keeps application code readable.
-func Service(
+func Capability(
 	id string,
-	executorType core.ExecutorType,
-) core.Service {
-	return core.Service{
+	capabilityRuntimeType core.CapabilityRuntimeType,
+) core.Capability {
+	return core.Capability{
 		Metadata: core.Metadata{
 			ID:   core.ID(id),
 			Name: id,
 		},
-		Type:    executorType,
-		Inputs:  make([]core.Port, 0),
-		Outputs: make([]core.Port, 0),
-		ServiceConfigurations: make(
-			core.ServiceConfigurations,
+		Type:    capabilityRuntimeType,
+		Params:  make([]core.Port, 0),
+		Results: make([]core.Port, 0),
+		CapabilityConfigurations: make(
+			core.CapabilityConfigurations,
 		),
 	}
 }
 
-// NamedService creates a Service with a human-readable name.
-func NamedService(
+// NamedCapability creates a Capability with a human-readable name.
+func NamedCapability(
 	id string,
 	name string,
-	executorType core.ExecutorType,
-) core.Service {
-	service := Service(id, executorType)
-	service.Metadata.Name = name
-	return service
+	capabilityRuntimeType core.CapabilityRuntimeType,
+) core.Capability {
+	capability := Capability(id, capabilityRuntimeType)
+	capability.Metadata.Name = name
+	return capability
 }
 
-// Input creates a service input declaration.
+// Input creates a capability input declaration.
 func Input(
 	name string,
 	valueType core.ValueType,
@@ -48,7 +48,7 @@ func Input(
 	}
 }
 
-// Output creates a service output declaration.
+// Output creates a capability output declaration.
 func Output(
 	name string,
 	valueType core.ValueType,

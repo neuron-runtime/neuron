@@ -8,7 +8,7 @@ import (
 )
 
 // Load reads and decodes a manifest from the given path.
-func Load(path string) (*System, error) {
+func Load(path string) (*Assembly, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -17,7 +17,7 @@ func Load(path string) (*System, error) {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 
-	m := &System{}
+	m := &Assembly{}
 	if err := json.Unmarshal(data, m); err != nil {
 		return nil, fmt.Errorf("decode manifest %s: %w", path, err)
 	}
@@ -26,14 +26,14 @@ func Load(path string) (*System, error) {
 
 // LoadFromProjectRoot resolves and loads the canonical
 // .neuron/manifest.json for a project root.
-func LoadFromProjectRoot(projectRoot string) (*System, error) {
+func LoadFromProjectRoot(projectRoot string) (*Assembly, error) {
 	return Load(ManifestPath(projectRoot))
 }
 
 // Save serializes the manifest to the given path atomically.
 // The write uses a temp-file then rename to ensure consumers
 // never observe a half-written manifest.
-func Save(path string, m *System) error {
+func Save(path string, m *Assembly) error {
 	if m == nil {
 		return fmt.Errorf("manifest is nil")
 	}
@@ -59,6 +59,6 @@ func Save(path string, m *System) error {
 }
 
 // SaveToProjectRoot writes the canonical manifest for a project root.
-func SaveToProjectRoot(projectRoot string, m *System) error {
+func SaveToProjectRoot(projectRoot string, m *Assembly) error {
 	return Save(ManifestPath(projectRoot), m)
 }

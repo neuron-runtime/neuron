@@ -13,7 +13,7 @@ import (
 func Instances(instances []protocol.InstanceResponse) {
 	columns := []utils.Column{
 		{Title: "ID"},
-		{Title: "System ID"},
+		{Title: "Assembly ID"},
 		{Title: "Blueprint Name"},
 		{Title: "Status"},
 		{Title: "Version"},
@@ -25,7 +25,7 @@ func Instances(instances []protocol.InstanceResponse) {
 	for _, inst := range instances {
 		rows = append(rows, []string{
 			inst.ID,
-			inst.SystemID,
+			inst.AssemblyID,
 			inst.BlueprintMetadata.Name,
 			inst.Status,
 			inst.Version,

@@ -7,7 +7,7 @@ import (
 const (
 	// ManifestDir is the name of the .neuron output directory.
 	ManifestDir = ".neuron"
-	// ManifestFile is the canonical SystemManifest filename.
+	// ManifestFile is the canonical AssemblyManifest filename.
 	ManifestFile = "manifest.json"
 )
 

@@ -13,30 +13,30 @@ import (
 	"strings"
 	"time"
 
-	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
+	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
 const buildRecordFile = "build.json"
 
 // BuildRecord is the persisted outcome of a successful `neuron build`.
-// `neuron run` reads it to address the registered system and to detect
+// `neuron run` reads it to address the registered assembly and to detect
 // staleness: when the current authoring fingerprint differs from the recorded
 // one, the project must be rebuilt before it runs.
 type BuildRecord struct {
 	// Fingerprint is the content hash of the authoring inputs at build time
-	// (config file, System entry, project sources, local executor roots).
+	// (config file, Assembly entry, project sources, local capability runtime roots).
 	Fingerprint string `json:"fingerprint"`
 
-	// Key is the registered system key N.O.R.E. assigned.
+	// Key is the registered assembly key N.O.R.E. assigned.
 	Key protocol.InstanceKey `json:"key"`
 
 	// BuiltAt is when the build completed.
 	BuiltAt time.Time `json:"builtAt"`
 
-	// Executors is the frozen executor set resolved and installed for the
-	// System's executor requirements. Empty when the System is built-in only.
-	Executors []shadexec.ResolvedExecutor `json:"executors"`
+	// CapabilityRuntimes is the frozen capability runtime set resolved and installed for the
+	// Assembly's capability runtime requirements. Empty when the Assembly is built-in only.
+	CapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes"`
 }
 
 // BuildRecordPath returns the path of the persisted build record inside the
@@ -86,15 +86,15 @@ type FingerprintInputs struct {
 	// ConfigFile is the absolute path of the effective project config file.
 	ConfigFile string
 
-	// Entry is the System entry source file (system.ts, system.yaml, ...).
+	// Entry is the Assembly entry source file (assembly.ts, assembly.yaml, ...).
 	Entry string
 
-	// Sources are additional authoring inputs: service/ directory, local
-	// executor roots, any file whose change invalidates the built System.
+	// Sources are additional authoring inputs: capability/ directory, local
+	// capability runtime roots, any file whose change invalidates the built Assembly.
 	Sources []string
 
 	// Exclude are absolute paths whose content does NOT participate in the
-	// hash (for example local-executor build artifacts whose exact bytes are
+	// hash (for example local capability runtime build artifacts whose exact bytes are
 	// derived by build commands and would otherwise churn the fingerprint).
 	// A path that names a directory excludes that entire subtree. Files under
 	// an excluded directory never resolve it into a fingerprint input.

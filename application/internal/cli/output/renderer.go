@@ -33,11 +33,11 @@ const (
 type Options struct {
 	// Out is where rendered output is written.
 	Out io.Writer
-	// System is the system name, shown in the header.
-	System string
+	// Assembly is the assembly name, shown in the header.
+	Assembly string
 	// Mode selects the presentation strategy (ModeAuto by default).
 	Mode Mode
-	// Verbose renders services.log events and detailed payloads.
+	// Verbose renders capabilities.log events and detailed payloads.
 	Verbose bool
 }
 
@@ -70,10 +70,10 @@ func New(opts Options) (Renderer, error) {
 	case ModeJSON:
 		return &jsonRenderer{enc: newJSONEncoder(opts.Out)}, nil
 	case ModeVerbose:
-		return &staticRenderer{out: opts.Out, system: opts.System, verbose: true}, nil
+		return &staticRenderer{out: opts.Out, assembly: opts.Assembly, verbose: true}, nil
 	case ModeLive:
 		return newLiveRenderer(opts), nil
 	default:
-		return &staticRenderer{out: opts.Out, system: opts.System, verbose: opts.Verbose}, nil
+		return &staticRenderer{out: opts.Out, assembly: opts.Assembly, verbose: opts.Verbose}, nil
 	}
 }

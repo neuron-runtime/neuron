@@ -15,27 +15,27 @@ import (
 func writeProject(t *testing.T, dir string) {
 	t.Helper()
 
-	writeFile(t, filepath.Join(dir, "systems/hello/system.yaml"), `apiVersion: neuron/v1
-kind: System
+	writeFile(t, filepath.Join(dir, "assemblies/hello/assembly.yaml"), `apiVersion: neuron/v1
+kind: Assembly
 
 metadata:
   name: hello
   version: 0.1.0
 
-services:
+capabilities:
   - ref: greet
-    entry: ../../services/greet.yaml
+    entry: ../../capabilities/greet.yaml
 `)
 
-	writeFile(t, filepath.Join(dir, "services/greet.yaml"), `apiVersion: neuron/v1
-kind: Service
+	writeFile(t, filepath.Join(dir, "capabilities/greet.yaml"), `apiVersion: neuron/v1
+kind: Capability
 
 metadata:
   name: greet
   version: 0.1.0
 
 spec:
-  executor:
+  capability runtime:
     type: set
 
   mappings:
@@ -62,7 +62,7 @@ func TestYAMLBBuilderBuildProducesManifest(t *testing.T) {
 
 	if err := yamlpkg.New().Build(ctx, builder.Options{
 		Root:  dir,
-		Entry: filepath.Join("systems", "hello", "system.yaml"),
+		Entry: filepath.Join("assemblies", "hello", "assembly.yaml"),
 	}); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestYAMLBBuilderBuildProducesManifest(t *testing.T) {
 	if m.Metadata.Name != "hello" {
 		t.Errorf("manifest name = %q, want hello", m.Metadata.Name)
 	}
-	if len(m.Services) == 0 {
-		t.Error("expected at least one service in the manifest")
+	if len(m.Capabilities) == 0 {
+		t.Error("expected at least one capability in the manifest")
 	}
 	// Project variables come from the config (Builder options), not the YAML.
 	if len(m.Variables) != 0 {
@@ -95,7 +95,7 @@ func TestYAMLBBuilderCarriesVariables(t *testing.T) {
 
 	if err := yamlpkg.New().Build(ctx, builder.Options{
 		Root:      dir,
-		Entry:     filepath.Join("systems", "hello", "system.yaml"),
+		Entry:     filepath.Join("assemblies", "hello", "assembly.yaml"),
 		Variables: map[string]any{"environment": "staging"},
 	}); err != nil {
 		t.Fatalf("Build: %v", err)

@@ -72,7 +72,7 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 
 // NoreBinaryPath resolves the nore binary, honoring an explicit config path
 // first, then the bundled binary that ships next to the neuron executable, then
-// the system PATH, and finally a local development fallback.
+// the assembly PATH, and finally a local development fallback.
 //
 // Resolution order:
 //
@@ -81,7 +81,7 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 //  2. The bundled release binary: the product archive ships `neuron` and `nore`
 //     side by side, so the CLI prefers a `nore` executable in its own directory
 //     over anything on PATH.
-//  3. `nore` on the system PATH (globally installed runtime).
+//  3. `nore` on the assembly PATH (globally installed runtime).
 //  4. Development fallback for a local repository checkout.
 func NoreBinaryPath(cfg config.Config) (string, error) {
 	exe, err := os.Executable()

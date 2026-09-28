@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 )
 
-const executorsFile = "executors.json"
+const capabilityRuntimesFile = "capabilityRuntimes.json"
 
-// ExecutorPin pins one resolved executor requirement into a project. `neuron
-// add` writes these so a developer can record the exact version of an executor
+// CapabilityRuntimePin pins one resolved capability runtime requirement into a project. `neuron
+// add` writes these so a developer can record the exact version of an capability runtime
 // a project depends on, independently of the installed-artifact store.
-type ExecutorPin struct {
-	// Type is the executor logical name (e.g. github:read).
+type CapabilityRuntimePin struct {
+	// Type is the capability runtime logical name (e.g. github:read).
 	Type string `json:"type"`
 
 	// Version is the exact installed version that satisfied the requirement.
@@ -26,60 +26,60 @@ type ExecutorPin struct {
 	Digest string `json:"digest,omitempty"`
 }
 
-// ExecutorsFile is the project-pinned executor requirement record persisted to
-// .neuron/executors.json. Pins are ordered by insertion; a type appears once.
-type ExecutorsFile struct {
-	Pins []ExecutorPin `json:"pins"`
+// CapabilityRuntimesFile is the project-pinned capability runtime requirement record persisted to
+// .neuron/capabilityRuntimes.json. Pins are ordered by insertion; a type appears once.
+type CapabilityRuntimesFile struct {
+	Pins []CapabilityRuntimePin `json:"pins"`
 }
 
-// ExecutorsFilePath returns the path of the project's pinned-executor record
+// CapabilityRuntimesFilePath returns the path of the project's pinned-capabilityRuntime record
 // inside its .neuron directory.
-func ExecutorsFilePath(projectRoot string) string {
-	return filepath.Join(projectRoot, neuronDirectory, executorsFile)
+func CapabilityRuntimesFilePath(projectRoot string) string {
+	return filepath.Join(projectRoot, neuronDirectory, capabilityRuntimesFile)
 }
 
-// LoadExecutorsFile reads the pinned-executor record written by SaveExecutorsFile.
+// LoadCapabilityRuntimesFile reads the pinned-capabilityRuntime record written by SaveCapabilityRuntimesFile.
 // A missing record is not an error; it yields an empty file.
-func LoadExecutorsFile(projectRoot string) (ExecutorsFile, error) {
-	data, err := os.ReadFile(ExecutorsFilePath(projectRoot))
+func LoadCapabilityRuntimesFile(projectRoot string) (CapabilityRuntimesFile, error) {
+	data, err := os.ReadFile(CapabilityRuntimesFilePath(projectRoot))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ExecutorsFile{}, nil
+			return CapabilityRuntimesFile{}, nil
 		}
-		return ExecutorsFile{}, fmt.Errorf("read pinned executors: %w", err)
+		return CapabilityRuntimesFile{}, fmt.Errorf("read pinned capability runtimes: %w", err)
 	}
-	var file ExecutorsFile
+	var file CapabilityRuntimesFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return ExecutorsFile{}, fmt.Errorf("decode pinned executors: %w", err)
+		return CapabilityRuntimesFile{}, fmt.Errorf("decode pinned capability runtimes: %w", err)
 	}
 	if file.Pins == nil {
-		file.Pins = []ExecutorPin{}
+		file.Pins = []CapabilityRuntimePin{}
 	}
 	return file, nil
 }
 
-// SaveExecutorsFile persists a pinned-executor record for projectRoot.
-func SaveExecutorsFile(projectRoot string, file ExecutorsFile) error {
+// SaveCapabilityRuntimesFile persists a pinned-capabilityRuntime record for projectRoot.
+func SaveCapabilityRuntimesFile(projectRoot string, file CapabilityRuntimesFile) error {
 	if file.Pins == nil {
-		file.Pins = []ExecutorPin{}
+		file.Pins = []CapabilityRuntimePin{}
 	}
-	path := ExecutorsFilePath(projectRoot)
+	path := CapabilityRuntimesFilePath(projectRoot)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create .neuron directory: %w", err)
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode pinned executors: %w", err)
+		return fmt.Errorf("encode pinned capability runtimes: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write pinned executors: %w", err)
+		return fmt.Errorf("write pinned capability runtimes: %w", err)
 	}
 	return nil
 }
 
 // Upsert pins pin, replacing any existing pin for the same type or appending a
 // new entry when the type is not pinned yet.
-func (f *ExecutorsFile) Upsert(pin ExecutorPin) {
+func (f *CapabilityRuntimesFile) Upsert(pin CapabilityRuntimePin) {
 	for i := range f.Pins {
 		if f.Pins[i].Type == pin.Type {
 			f.Pins[i] = pin

@@ -18,16 +18,16 @@ import (
 //
 // It knows:
 //
-//	systems YAML
-//	service YAML
+//	assemblies YAML
+//	capability YAML
 //	entry references
 //
 // It does not know:
 //
-//	core.System
+//	core.Assembly
 //	planner
 //	runtime
-//	executors
+//	capability runtimes
 //	instances
 type Resolver struct {
 	root string
@@ -76,42 +76,42 @@ func (r *Resolver) Root() string {
 	return r.root
 }
 
-// ResolveSystem resolves the system source file at entry into a
+// ResolveAssembly resolves the assembly source file at entry into a
 // ResolvedProject.
 //
-// entry is an absolute (or project-relative) path to a `kind: System` YAML
-// file. An empty entry selects the default <root>/system.yaml.
+// entry is an absolute (or project-relative) path to a `kind: Assembly` YAML
+// file. An empty entry selects the default <root>/assembly.yaml.
 //
 // This performs:
 //
-// System
+// Assembly
 //
 //	↓
 //
-// Services
+// Capabilities
 //
 //	↓
 //
-// # Service entry references
+// # Capability entry references
 //
 // and produces a ResolvedProject.
-func (r *Resolver) ResolveSystem(entry string) (*ResolvedProject, error) {
+func (r *Resolver) ResolveAssembly(entry string) (*ResolvedProject, error) {
 	if strings.TrimSpace(entry) == "" {
-		entry = filepath.Join(r.root, "system.yaml")
+		entry = filepath.Join(r.root, "assembly.yaml")
 	}
 
-	systemPath, err := r.resolvePath(r.root, entry)
+	assemblyPath, err := r.resolvePath(r.root, entry)
 	if err != nil {
-		return nil, fmt.Errorf("resolve system entry: %w", err)
+		return nil, fmt.Errorf("resolve assembly entry: %w", err)
 	}
 
-	system, err := r.resolveSystem(systemPath)
+	assembly, err := r.resolveAssembly(assemblyPath)
 	if err != nil {
 		return nil, err
 	}
 
-	executorRequirements := collectExecutorRequirements(
-		system.Services,
+	capabilityRuntimeRequirements := collectCapabilityRuntimeRequirements(
+		assembly.Capabilities,
 	)
 
 	sourceFiles := make([]ResolvedSourceFile, 0, len(r.files))
@@ -124,137 +124,137 @@ func (r *Resolver) ResolveSystem(entry string) (*ResolvedProject, error) {
 		FormatVersion: "v1",
 		ResolvedAt:    nowUTC(),
 
-		System: *system,
+		Assembly: *assembly,
 
-		ExecutorRequirements: executorRequirements,
+		CapabilityRuntimeRequirements: capabilityRuntimeRequirements,
 
 		SourceFiles: sourceFiles,
 	}, nil
 }
 
-func (r *Resolver) resolveSystem(
+func (r *Resolver) resolveAssembly(
 	path string,
-) (*ResolvedSystem, error) {
+) (*ResolvedAssembly, error) {
 
-	var system SystemFile
+	var assembly AssemblyFile
 
-	if err := r.readYAML(path, &system); err != nil {
+	if err := r.readYAML(path, &assembly); err != nil {
 		return nil, fmt.Errorf(
-			"load systems %s: %w",
+			"load assemblies %s: %w",
 			displayPath(r.root, path),
 			err,
 		)
 	}
 
-	if system.Entry != "" {
+	if assembly.Entry != "" {
 		entryPath, err := r.resolvePath(
 			filepath.Dir(path),
-			system.Entry,
+			assembly.Entry,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		return r.resolveSystem(entryPath)
+		return r.resolveAssembly(entryPath)
 	}
 
-	if err := validateSystemBasic(system); err != nil {
+	if err := validateAssemblyBasic(assembly); err != nil {
 		return nil, fmt.Errorf(
 			"%w: %s: %v",
-			ErrInvalidSystem,
+			ErrInvalidAssembly,
 			displayPath(r.root, path),
 			err,
 		)
 	}
 
-	resolved := &ResolvedSystem{
-		Definition: system,
-		Services:   make([]ResolvedService, 0, len(system.Services)),
-		Connectors: make([]ResolvedConnector, 0, len(system.Connectors)),
+	resolved := &ResolvedAssembly{
+		Definition:   assembly,
+		Capabilities: make([]ResolvedCapability, 0, len(assembly.Capabilities)),
+		Bindings:     make([]ResolvedBinding, 0, len(assembly.Bindings)),
 	}
 
 	seenRefs := make(map[string]bool)
 
-	for _, ref := range system.Services {
+	for _, ref := range assembly.Capabilities {
 		if ref.Ref == "" {
 			return nil, fmt.Errorf(
-				"%w: empty service reference in %s",
-				ErrInvalidSystem,
+				"%w: empty capability reference in %s",
+				ErrInvalidAssembly,
 				displayPath(r.root, path),
 			)
 		}
 
 		if seenRefs[ref.Ref] {
 			return nil, fmt.Errorf(
-				"%w: duplicate service reference %q",
-				ErrInvalidSystem,
+				"%w: duplicate capability reference %q",
+				ErrInvalidAssembly,
 				ref.Ref,
 			)
 		}
 
 		seenRefs[ref.Ref] = true
 
-		servicePath, err := r.resolvePath(
+		capabilityPath, err := r.resolvePath(
 			filepath.Dir(path),
 			ref.Entry,
 		)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"resolve service %q: %w",
+				"resolve capability %q: %w",
 				ref.Ref,
 				err,
 			)
 		}
 
-		service, err := r.resolveService(servicePath)
+		capability, err := r.resolveCapability(capabilityPath)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"resolve service %q: %w",
+				"resolve capability %q: %w",
 				ref.Ref,
 				err,
 			)
 		}
 
-		resolved.Services = append(
-			resolved.Services,
-			ResolvedService{
+		resolved.Capabilities = append(
+			resolved.Capabilities,
+			ResolvedCapability{
 				Ref:        ref.Ref,
-				SourcePath: displayPath(r.root, servicePath),
-				Definition: *service,
+				SourcePath: displayPath(r.root, capabilityPath),
+				Definition: *capability,
 			},
 		)
 	}
 
-	connectors, err := r.resolveConnectors(path, system, seenRefs)
+	bindings, err := r.resolveBindings(path, assembly, seenRefs)
 	if err != nil {
 		return nil, err
 	}
-	resolved.Connectors = connectors
+	resolved.Bindings = bindings
 
 	return resolved, nil
 }
 
-func (r *Resolver) resolveConnectors(
-	systemPath string,
-	system SystemFile,
-	serviceRefs map[string]bool,
-) ([]ResolvedConnector, error) {
-	var resolved []ResolvedConnector
+func (r *Resolver) resolveBindings(
+	assemblyPath string,
+	assembly AssemblyFile,
+	capabilityRefs map[string]bool,
+) ([]ResolvedBinding, error) {
+	var resolved []ResolvedBinding
 
-	for _, connRef := range system.Connectors {
-		var connFile ConnectorFile
+	for _, connRef := range assembly.Bindings {
+		var connFile BindingFile
 		var sourcePath string
 
 		if connRef.Entry != "" {
 			entryPath, err := r.resolvePath(
-				filepath.Dir(systemPath),
+				filepath.Dir(assemblyPath),
 				connRef.Entry,
 			)
 			if err != nil {
-				return nil, fmt.Errorf("resolve connector entry %q: %w", connRef.Entry, err)
+				return nil, fmt.Errorf("resolve binding entry %q: %w", connRef.Entry, err)
 			}
 
-			connFile, err = r.resolveConnector(entryPath)
+			connFile, err = r.resolveBinding(entryPath)
 			if err != nil {
 				return nil, err
 			}
@@ -275,12 +275,12 @@ func (r *Resolver) resolveConnectors(
 				connFile.To = connRef.To
 			}
 		} else {
-			// Inline connector
-			connFile = ConnectorFile{
+			// Inline binding
+			connFile = BindingFile{
 				APIVersion: "neuron/v1",
-				Kind:       "Connector",
-				Metadata: ConnectorMetadata{
-					Name:    fmt.Sprintf("connector-%s-to-%s", connRef.From, connRef.To),
+				Kind:       "Binding",
+				Metadata: BindingMetadata{
+					Name:    fmt.Sprintf("binding-%s-to-%s", connRef.From, connRef.To),
 					Version: "1.0.0",
 				},
 				From:        connRef.From,
@@ -288,18 +288,18 @@ func (r *Resolver) resolveConnectors(
 				Mappings:    connRef.Mappings,
 				Validations: connRef.Validations,
 			}
-			sourcePath = displayPath(r.root, systemPath) + " (inline)"
+			sourcePath = displayPath(r.root, assemblyPath) + " (inline)"
 		}
 
-		// Validate from/to reference existing services
-		if !serviceRefs[connFile.From] {
-			return nil, fmt.Errorf("connector %q references unknown service %q", connFile.Metadata.Name, connFile.From)
+		// Validate from/to reference existing capabilities
+		if !capabilityRefs[connFile.From] {
+			return nil, fmt.Errorf("binding %q references unknown capability %q", connFile.Metadata.Name, connFile.From)
 		}
-		if !serviceRefs[connFile.To] {
-			return nil, fmt.Errorf("connector %q references unknown service %q", connFile.Metadata.Name, connFile.To)
+		if !capabilityRefs[connFile.To] {
+			return nil, fmt.Errorf("binding %q references unknown capability %q", connFile.Metadata.Name, connFile.To)
 		}
 
-		resolved = append(resolved, ResolvedConnector{
+		resolved = append(resolved, ResolvedBinding{
 			Ref:        connFile.Metadata.Name,
 			SourcePath: sourcePath,
 			Definition: connFile,
@@ -309,24 +309,24 @@ func (r *Resolver) resolveConnectors(
 	return resolved, nil
 }
 
-func (r *Resolver) resolveConnector(
+func (r *Resolver) resolveBinding(
 	path string,
-) (ConnectorFile, error) {
+) (BindingFile, error) {
 
-	var conn ConnectorFile
+	var conn BindingFile
 
 	if err := r.readYAML(path, &conn); err != nil {
-		return ConnectorFile{}, fmt.Errorf(
-			"load connector %s: %w",
+		return BindingFile{}, fmt.Errorf(
+			"load binding %s: %w",
 			displayPath(r.root, path),
 			err,
 		)
 	}
 
-	if err := validateConnectorFile(conn); err != nil {
-		return ConnectorFile{}, fmt.Errorf(
+	if err := validateBindingFile(conn); err != nil {
+		return BindingFile{}, fmt.Errorf(
 			"%w: %s: %v",
-			ErrInvalidConnector,
+			ErrInvalidBinding,
 			displayPath(r.root, path),
 			err,
 		)
@@ -335,42 +335,42 @@ func (r *Resolver) resolveConnector(
 	return conn, nil
 }
 
-func (r *Resolver) resolveService(
+func (r *Resolver) resolveCapability(
 	path string,
-) (*ServiceFile, error) {
+) (*CapabilityFile, error) {
 
-	var service ServiceFile
+	var capability CapabilityFile
 
-	if err := r.readYAML(path, &service); err != nil {
+	if err := r.readYAML(path, &capability); err != nil {
 		return nil, fmt.Errorf(
-			"load service %s: %w",
+			"load capability %s: %w",
 			displayPath(r.root, path),
 			err,
 		)
 	}
 
-	if service.Entry != "" {
+	if capability.Entry != "" {
 		entryPath, err := r.resolvePath(
 			filepath.Dir(path),
-			service.Entry,
+			capability.Entry,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		return r.resolveService(entryPath)
+		return r.resolveCapability(entryPath)
 	}
 
-	if err := validateServiceBasic(service); err != nil {
+	if err := validateCapabilityBasic(capability); err != nil {
 		return nil, fmt.Errorf(
 			"%w: %s: %v",
-			ErrInvalidService,
+			ErrInvalidCapability,
 			displayPath(r.root, path),
 			err,
 		)
 	}
 
-	return &service, nil
+	return &capability, nil
 }
 
 func (r *Resolver) readYAML(

@@ -25,10 +25,10 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	rec := BuildRecord{
 		Fingerprint: "abc123",
 		Key: protocol.InstanceKey{
-			SystemID: "demo",
-			Version:  "1.0.0",
-			Hash:     "h1",
-			Env:      "default",
+			AssemblyID: "demo",
+			Version:    "1.0.0",
+			Hash:       "h1",
+			Env:        "default",
 		},
 		BuiltAt: time.Now().UTC(),
 	}
@@ -62,8 +62,8 @@ func TestLoadBuildRecordMissingIsErrNotBuilt(t *testing.T) {
 
 func TestFingerprintStableAndContentSensitive(t *testing.T) {
 	root := t.TempDir()
-	entry := filepath.Join(root, "system.yaml")
-	writeFile(t, entry, "system:\n  name: demo\n")
+	entry := filepath.Join(root, "assembly.yaml")
+	writeFile(t, entry, "assembly:\n  name: demo\n")
 
 	a, err := ComputeFingerprint(FingerprintInputs{Entry: entry})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestFingerprintStableAndContentSensitive(t *testing.T) {
 		t.Fatalf("fingerprint not stable across identical inputs: %s vs %s", a, b)
 	}
 
-	writeFile(t, entry, "system:\n  name: demo2\n")
+	writeFile(t, entry, "assembly:\n  name: demo2\n")
 	c, err := ComputeFingerprint(FingerprintInputs{Entry: entry})
 	if err != nil {
 		t.Fatal(err)
@@ -89,13 +89,13 @@ func TestFingerprintStableAndContentSensitive(t *testing.T) {
 
 func TestFingerprintExcludesBuildOutputs(t *testing.T) {
 	root := t.TempDir()
-	execRoot := filepath.Join(root, "executors", "example", "echo", "1.0.0")
-	writeFile(t, filepath.Join(execRoot, "executor.json"), `{"metadata":{"name":"example:echo","version":"1.0.0"}}`)
+	execRoot := filepath.Join(root, "capabilityRuntimes", "example", "echo", "1.0.0")
+	writeFile(t, filepath.Join(execRoot, "runtime.json"), `{"metadata":{"name":"example:echo","version":"1.0.0"}}`)
 	writeFile(t, filepath.Join(execRoot, "main.go"), "package main\n")
 	writeFile(t, filepath.Join(execRoot, "echo"), "#!/bin/sh\n")
 
 	elusive := filepath.Join(execRoot, "echo")
-	opts := FingerprintInputs{Sources: []string{filepath.Join(root, "executors")}}
+	opts := FingerprintInputs{Sources: []string{filepath.Join(root, "capabilityRuntimes")}}
 	withOutput := opts
 	withOutput.Exclude = []string{elusive}
 
@@ -135,11 +135,11 @@ func TestFingerprintExcludesBuildOutputs(t *testing.T) {
 
 func TestFingerprintSkipsGeneratedDirs(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "services", "hello.yaml"), "service:\n  name: hello\n")
+	writeFile(t, filepath.Join(root, "capabilities", "hello.yaml"), "capability:\n  name: hello\n")
 	writeFile(t, filepath.Join(root, "node_modules", "pkg", "x"), "junk\n")
 	writeFile(t, filepath.Join(root, ".neuron", "manifest.json"), "junk\n")
 
-	fp, err := ComputeFingerprint(FingerprintInputs{Sources: []string{filepath.Join(root, "services")}})
+	fp, err := ComputeFingerprint(FingerprintInputs{Sources: []string{filepath.Join(root, "capabilities")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,10 +148,10 @@ func TestFingerprintSkipsGeneratedDirs(t *testing.T) {
 	}
 
 	// node_modules and .neuron are not part of the scanned inputs at all, so
-	// mutating them must not affect a hash over services/ — and adding a file
+	// mutating them must not affect a hash over capabilities/ — and adding a file
 	// to node_modules directly (it was never scanned) changes nothing.
 	writeFile(t, filepath.Join(root, "node_modules", "pkg", "y"), "more junk\n")
-	after, err := ComputeFingerprint(FingerprintInputs{Sources: []string{filepath.Join(root, "services")}})
+	after, err := ComputeFingerprint(FingerprintInputs{Sources: []string{filepath.Join(root, "capabilities")}})
 	if err != nil {
 		t.Fatal(err)
 	}

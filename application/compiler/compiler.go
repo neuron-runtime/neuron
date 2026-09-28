@@ -8,10 +8,10 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
-// Compiler transforms a canonical System manifest into the runtime
-// core.System representation consumed by N.O.R.E. It is source-language
+// Compiler transforms a canonical Assembly manifest into the runtime
+// core.Assembly representation consumed by N.O.R.E. It is source-language
 // agnostic: YAML, TypeScript, JSON, or any future frontend all converge
-// on manifest.System before reaching this stage.
+// on manifest.Assembly before reaching this stage.
 type Compiler struct{}
 
 // New returns a Compiler.
@@ -19,61 +19,61 @@ func New() *Compiler {
 	return &Compiler{}
 }
 
-// Compile converts a manifest into core.System.
-func (c *Compiler) Compile(m *manifest.System) (*core.System, error) {
+// Compile converts a manifest into core.Assembly.
+func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 	if m == nil {
 		return nil, fmt.Errorf("manifest is nil")
 	}
 
 	sysMeta := core.Metadata{
-		ID:          core.NewID("system_"),
+		ID:          core.NewID("assembly_"),
 		Name:        m.Metadata.Name,
 		Description: m.Metadata.Description,
 		Version:     m.Metadata.Version,
 	}
 
-	services := make([]core.Service, 0, len(m.Services))
-	serviceMap := make(map[string]core.Service)
+	capabilities := make([]core.Capability, 0, len(m.Capabilities))
+	capabilityMap := make(map[string]core.Capability)
 
-	for _, rs := range m.Services {
-		svc := convertService(rs)
-		serviceMap[rs.Name] = svc
-		services = append(services, svc)
+	for _, rs := range m.Capabilities {
+		svc := convertCapability(rs)
+		capabilityMap[rs.Name] = svc
+		capabilities = append(capabilities, svc)
 	}
 
-	connectors := make([]core.Connector, 0, len(m.Connectors))
-	for _, rc := range m.Connectors {
-		conn, err := convertConnector(rc, serviceMap)
+	bindings := make([]core.Binding, 0, len(m.Bindings))
+	for _, rc := range m.Bindings {
+		conn, err := convertBinding(rc, capabilityMap)
 		if err != nil {
 			return nil, err
 		}
-		connectors = append(connectors, conn)
+		bindings = append(bindings, conn)
 	}
 
-	return &core.System{
+	return &core.Assembly{
 		Metadata: sysMeta,
-		Specification: core.SystemSpec{
-			Services:   services,
-			Triggers:   nil,
-			Connectors: connectors,
+		Specification: core.AssemblySpec{
+			Capabilities: capabilities,
+			Triggers:     nil,
+			Bindings:     bindings,
 		},
 	}, nil
 }
 
 // InstanceKey computes the protocol.InstanceKey for a manifest.
-// The key identity is (systemID, version, hash, env). The hash is
-// derived from the compiled core.System. env is the execution
+// The key identity is (assemblyID, version, hash, env). The hash is
+// derived from the compiled core.Assembly. env is the execution
 // environment (e.g. "development", "detach") supplied by the caller
 // from the effective configuration.
-func (c *Compiler) InstanceKey(m *manifest.System, env string) (protocol.InstanceKey, error) {
+func (c *Compiler) InstanceKey(m *manifest.Assembly, env string) (protocol.InstanceKey, error) {
 	sys, err := c.Compile(m)
 	if err != nil || sys == nil {
 		return protocol.InstanceKey{}, fmt.Errorf("compile manifest for instance key: %w", err)
 	}
 
-	hash, err := protocol.HashSystem(*sys)
+	hash, err := protocol.HashAssembly(*sys)
 	if err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("hash system: %w", err)
+		return protocol.InstanceKey{}, fmt.Errorf("hash assembly: %w", err)
 	}
 
 	if env == "" {
@@ -81,24 +81,24 @@ func (c *Compiler) InstanceKey(m *manifest.System, env string) (protocol.Instanc
 	}
 
 	return protocol.InstanceKey{
-		SystemID: m.Metadata.Name,
-		Version:  m.Metadata.Version,
-		Hash:     hash,
-		Env:      env,
+		AssemblyID: m.Metadata.Name,
+		Version:    m.Metadata.Version,
+		Hash:       hash,
+		Env:        env,
 	}, nil
 }
 
-func convertService(s manifest.Service) core.Service {
-	var inputs, outputs []core.Port
-	for _, p := range s.Inputs {
-		inputs = append(inputs, core.Port{
+func convertCapability(s manifest.Capability) core.Capability {
+	var params, results []core.Port
+	for _, p := range s.Params {
+		params = append(params, core.Port{
 			Name:     p.Name,
 			Type:     core.ValueType(p.Type),
 			Required: p.Required,
 		})
 	}
-	for _, p := range s.Outputs {
-		outputs = append(outputs, core.Port{
+	for _, p := range s.Results {
+		results = append(results, core.Port{
 			Name:     p.Name,
 			Type:     core.ValueType(p.Type),
 			Required: p.Required,
@@ -114,29 +114,29 @@ func convertService(s manifest.Service) core.Service {
 		}
 	}
 
-	return core.Service{
+	return core.Capability{
 		Metadata: core.Metadata{
 			ID:          core.ID(s.Name),
 			Name:        s.Name,
 			Description: s.Description,
 			Version:     s.Version,
 		},
-		Type:                  core.ExecutorType(s.Executor.Name),
-		ServiceConfigurations: s.Config,
-		RuntimeConfigurations: rtConfig,
-		Inputs:                inputs,
-		Outputs:               outputs,
+		Type:                     core.CapabilityRuntimeType(s.CapabilityRuntime.Name),
+		CapabilityConfigurations: s.Config,
+		RuntimeConfigurations:    rtConfig,
+		Params:                   params,
+		Results:                  results,
 	}
 }
 
-func convertConnector(conn manifest.Connector, serviceMap map[string]core.Service) (core.Connector, error) {
-	fromSvc, ok := serviceMap[conn.From]
+func convertBinding(conn manifest.Binding, capabilityMap map[string]core.Capability) (core.Binding, error) {
+	fromSvc, ok := capabilityMap[conn.From]
 	if !ok {
-		return core.Connector{}, fmt.Errorf("connector from %q to %q: from service %q not found", conn.From, conn.To, conn.From)
+		return core.Binding{}, fmt.Errorf("binding from %q to %q: from capability %q not found", conn.From, conn.To, conn.From)
 	}
-	toSvc, ok := serviceMap[conn.To]
+	toSvc, ok := capabilityMap[conn.To]
 	if !ok {
-		return core.Connector{}, fmt.Errorf("connector from %q to %q: to service %q not found", conn.From, conn.To, conn.To)
+		return core.Binding{}, fmt.Errorf("binding from %q to %q: to capability %q not found", conn.From, conn.To, conn.To)
 	}
 
 	var mappings []core.MappingRule
@@ -155,16 +155,16 @@ func convertConnector(conn manifest.Connector, serviceMap map[string]core.Servic
 		})
 	}
 
-	return core.Connector{
+	return core.Binding{
 		Metadata: core.Metadata{
-			ID:   core.NewID("connector_"),
+			ID:   core.NewID("binding_"),
 			Name: conn.From + "->" + conn.To,
 		},
 		From: core.Endpoint{
-			ServiceID: fromSvc.Metadata.ID,
+			CapabilityID: fromSvc.Metadata.ID,
 		},
 		To: core.Endpoint{
-			ServiceID: toSvc.Metadata.ID,
+			CapabilityID: toSvc.Metadata.ID,
 		},
 		Mappings:    mappings,
 		Validations: validations,

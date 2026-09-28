@@ -2,15 +2,15 @@ package project
 
 import "errors"
 
-// ImplicitExecutorRoot is the canonical project-scoped directory for
-// locally-authored executors. It is always a local executor search root, so
-// executors placed there resolve without any registry configuration.
-const ImplicitExecutorRoot = "neuron/executors"
+// ImplicitCapabilityRuntimeRoot is the canonical project-scoped directory for
+// locally-authored capability runtimes. It is always a local capability runtime search root, so
+// capability runtimes placed there resolve without any registry configuration.
+const ImplicitCapabilityRuntimeRoot = "neuron/capabilityRuntimes"
 
 var (
-	ErrInvalidSystem     = errors.New("invalid systems definition")
-	ErrInvalidService    = errors.New("invalid service definition")
-	ErrInvalidConnector  = errors.New("invalid connector definition")
+	ErrInvalidAssembly   = errors.New("invalid assemblies definition")
+	ErrInvalidCapability = errors.New("invalid capability definition")
+	ErrInvalidBinding    = errors.New("invalid binding definition")
 	ErrCircularReference = errors.New("circular project reference")
 	ErrNotRegistered     = errors.New("project is not registered")
 	ErrNotBuilt          = errors.New("project has not been built")

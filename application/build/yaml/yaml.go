@@ -1,5 +1,5 @@
 // Package yaml implements the Builder for YAML-authored Neuron projects. It
-// resolves the project layout (systems/, services/, connectors/) and converts
+// resolves the project layout (assemblies/, capabilities/, bindings/) and converts
 // it into the canonical .neuron/manifest.json.
 package yaml
 
@@ -49,7 +49,7 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 
 	sys := manifest.FromResolvedProject(result.Project, opts.Variables)
 	// Canonicalize is identity for YAML-authored manifests but keeps the
-	// canonicalization invariant (snake_case connector keys) uniform.
+	// canonicalization invariant (snake_case binding keys) uniform.
 	if err := manifest.SaveToProjectRoot(root, manifest.Canonicalize(sys)); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}

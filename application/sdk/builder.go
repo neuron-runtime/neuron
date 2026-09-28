@@ -6,174 +6,174 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-type System struct {
-	system        *core.System
-	dslConnectors []*Connector // Tracks pointers so mappings are preserved
+type Assembly struct {
+	assembly    *core.Assembly
+	dslBindings []*Binding // Tracks pointers so mappings are preserved
 }
 
-func NewSystem(metadata core.Metadata) *System {
-	return &System{
-		system: &core.System{
+func NewAssembly(metadata core.Metadata) *Assembly {
+	return &Assembly{
+		assembly: &core.Assembly{
 			Metadata: metadata,
-			Specification: core.SystemSpec{
-				Services:   make([]core.Service, 0),
-				Triggers:   make([]core.Trigger, 0),
-				Connectors: make([]core.Connector, 0),
+			Specification: core.AssemblySpec{
+				Capabilities: make([]core.Capability, 0),
+				Triggers:     make([]core.Trigger, 0),
+				Bindings:     make([]core.Binding, 0),
 			},
 		},
-		dslConnectors: make([]*Connector, 0),
+		dslBindings: make([]*Binding, 0),
 	}
 }
 
-// New creates a new systems.
+// New creates a new assemblies.
 //
 // Example:
 //
 //	var sys = mvp.New("Customer Platform", "1.0")
-func New(name, version string) *System {
-	return NewSystem(core.Metadata{
-		ID:      core.NewID("system_"),
+func New(name, version string) *Assembly {
+	return NewAssembly(core.Metadata{
+		ID:      core.NewID("assembly_"),
 		Name:    name,
 		Version: version,
 	})
 }
 
-// AddServices adds a group of services.
-func (s *System) AddServices(services ...core.Service) *System {
-	s.system.Specification.Services = append(
-		s.system.Specification.Services,
-		services...,
+// AddCapabilities adds a group of capabilities.
+func (s *Assembly) AddCapabilities(capabilities ...core.Capability) *Assembly {
+	s.assembly.Specification.Capabilities = append(
+		s.assembly.Specification.Capabilities,
+		capabilities...,
 	)
 	return s
 }
 
-// AddService adds one service.
-func (s *System) AddService(service core.Service) *System {
-	return s.AddServices(service)
+// AddCapability adds one capability.
+func (s *Assembly) AddCapability(capability core.Capability) *Assembly {
+	return s.AddCapabilities(capability)
 }
 
-// Services creates a grouped service declaration.
-func (s *System) Services(services ...core.Service) *System {
-	return s.AddServices(services...)
+// Capabilities creates a grouped capability declaration.
+func (s *Assembly) Capabilities(capabilities ...core.Capability) *Assembly {
+	return s.AddCapabilities(capabilities...)
 }
 
-// Connector creates a transition between two services.
-func (s *System) Connector(
-	source core.Service,
-	target core.Service,
-) *Connector {
-	connector := NewConnector(
+// Binding creates a transition between two capabilities.
+func (s *Assembly) Binding(
+	source core.Capability,
+	target core.Capability,
+) *Binding {
+	binding := NewBinding(
 		source.Metadata.ID,
 		target.Metadata.ID,
 	)
 
 	// FIX: Track the pointer so subsequent AddMappings() calls are saved.
-	s.dslConnectors = append(s.dslConnectors, connector)
+	s.dslBindings = append(s.dslBindings, binding)
 
-	return connector
+	return binding
 }
 
-// AddConnectors adds already-created types.Connectors.
-func (s *System) AddConnectors(
-	connectors ...core.Connector,
-) *System {
-	s.system.Specification.Connectors = append(
-		s.system.Specification.Connectors,
-		connectors...,
+// AddBindings adds already-created types.Bindings.
+func (s *Assembly) AddBindings(
+	bindings ...core.Binding,
+) *Assembly {
+	s.assembly.Specification.Bindings = append(
+		s.assembly.Specification.Bindings,
+		bindings...,
 	)
 	return s
 }
 
-// AddConnector adds already-created single core.Connector.
-func (s *System) AddConnector(
-	connector core.Connector,
-) *System {
-	s.system.Specification.Connectors = append(
-		s.system.Specification.Connectors,
-		connector,
+// AddBinding adds already-created single core.Binding.
+func (s *Assembly) AddBinding(
+	binding core.Binding,
+) *Assembly {
+	s.assembly.Specification.Bindings = append(
+		s.assembly.Specification.Bindings,
+		binding,
 	)
 	return s
 }
 
-// Trigger registers a Service as a System entry point.
-func (s *System) Trigger(service core.Service) *System {
-	s.system.Specification.Triggers = append(
-		s.system.Specification.Triggers,
-		core.Trigger{Service: service},
+// Trigger registers a Capability as a Assembly entry point.
+func (s *Assembly) Trigger(capability core.Capability) *Assembly {
+	s.assembly.Specification.Triggers = append(
+		s.assembly.Specification.Triggers,
+		core.Trigger{Capability: capability},
 	)
 	return s
 }
 
 // Build returns the immutable specification consumed by N.O.R.E.
-func (s *System) Build() *core.System {
-	if s == nil || s.system == nil {
-		panic("mvp: nil systems")
+func (s *Assembly) Build() *core.Assembly {
+	if s == nil || s.assembly == nil {
+		panic("mvp: nil assemblies")
 	}
 
-	// Compile all the tracked DSL connectors right before building.
+	// Compile all the tracked DSL bindings right before building.
 	// This ensures all AddMappings() and AddValidations() are captured.
-	var finalConnectors []core.Connector
-	finalConnectors = append(finalConnectors, s.system.Specification.Connectors...)
-	for _, dslConn := range s.dslConnectors {
-		finalConnectors = append(finalConnectors, dslConn.Core())
+	var finalBindings []core.Binding
+	finalBindings = append(finalBindings, s.assembly.Specification.Bindings...)
+	for _, dslConn := range s.dslBindings {
+		finalBindings = append(finalBindings, dslConn.Core())
 	}
-	s.system.Specification.Connectors = finalConnectors
+	s.assembly.Specification.Bindings = finalBindings
 
-	// Clear dslConnectors to make Build() safe to call multiple times
-	s.dslConnectors = nil
+	// Clear dslBindings to make Build() safe to call multiple times
+	s.dslBindings = nil
 
-	if s.system.Metadata.Name == "" {
-		panic("mvp: systems name is required")
+	if s.assembly.Metadata.Name == "" {
+		panic("mvp: assemblies name is required")
 	}
-	if s.system.Metadata.Version == "" {
-		panic("mvp: systems version is required")
+	if s.assembly.Metadata.Version == "" {
+		panic("mvp: assemblies version is required")
 	}
-	if len(s.system.Specification.Services) == 0 {
-		panic("mvp: systems must contain at least one service")
+	if len(s.assembly.Specification.Capabilities) == 0 {
+		panic("mvp: assemblies must contain at least one capability")
 	}
 
-	return s.system
+	return s.assembly
 }
 
-func (s *System) MustBuild() *core.System {
+func (s *Assembly) MustBuild() *core.Assembly {
 	return s.Build()
 }
 
-// Metadata allows changing systems metadata without exposing core.System.
-func (s *System) Metadata(name, version string) *System {
-	s.system.Metadata.Name = name
-	s.system.Metadata.Version = version
+// Metadata allows changing assemblies metadata without exposing core.Assembly.
+func (s *Assembly) Metadata(name, version string) *Assembly {
+	s.assembly.Metadata.Name = name
+	s.assembly.Metadata.Version = version
 	return s
 }
 
-// Description sets the System description.
-func (s *System) Description(description string) *System {
-	s.system.Metadata.Description = description
+// Description sets the Assembly description.
+func (s *Assembly) Description(description string) *Assembly {
+	s.assembly.Metadata.Description = description
 	return s
 }
 
-// Label adds a System label.
-func (s *System) Label(key, value string) *System {
-	if s.system.Metadata.Labels == nil {
-		s.system.Metadata.Labels = make(map[string]string)
+// Label adds a Assembly label.
+func (s *Assembly) Label(key, value string) *Assembly {
+	if s.assembly.Metadata.Labels == nil {
+		s.assembly.Metadata.Labels = make(map[string]string)
 	}
-	s.system.Metadata.Labels[key] = value
+	s.assembly.Metadata.Labels[key] = value
 	return s
 }
 
 // Validate performs only DSL-level structural checks.
-func (s *System) Validate() error {
-	if s == nil || s.system == nil {
-		return fmt.Errorf("systems is nil")
+func (s *Assembly) Validate() error {
+	if s == nil || s.assembly == nil {
+		return fmt.Errorf("assemblies is nil")
 	}
-	if s.system.Metadata.Name == "" {
-		return fmt.Errorf("systems name is required")
+	if s.assembly.Metadata.Name == "" {
+		return fmt.Errorf("assemblies name is required")
 	}
-	if s.system.Metadata.Version == "" {
-		return fmt.Errorf("systems version is required")
+	if s.assembly.Metadata.Version == "" {
+		return fmt.Errorf("assemblies version is required")
 	}
-	if len(s.system.Specification.Services) == 0 {
-		return fmt.Errorf("systems must contain at least one service")
+	if len(s.assembly.Specification.Capabilities) == 0 {
+		return fmt.Errorf("assemblies must contain at least one capability")
 	}
 	return nil
 }

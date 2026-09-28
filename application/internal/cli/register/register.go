@@ -19,8 +19,8 @@ func New() *cobra.Command {
 		Use:   command.Register,
 		Short: "Deprecated: use `neuron build`",
 		Long: "Build the project for the given authoring language, compile the resulting " +
-			".neuron/manifest.json to a core.System, resolve and freeze the exact executor set, " +
-			"and register the compiled system with N.O.R.E. " +
+			".neuron/manifest.json to a core.Assembly, resolve and freeze the exact capability runtime set, " +
+			"and register the compiled assembly with N.O.R.E. " +
 			"\n\nDeprecated: this command is an alias of `neuron build` and will be removed.",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

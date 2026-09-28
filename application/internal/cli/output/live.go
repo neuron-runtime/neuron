@@ -1,6 +1,6 @@
 // Live renderer: a redrawn terminal region. The execution view is re-rendered
 // in place as events arrive (uilive tracks and clears the previous lines).
-// Service completions are folded into the same region rather than printed
+// Capability completions are folded into the same region rather than printed
 // permanently, so the final view is stable.
 package output
 
@@ -38,7 +38,7 @@ func newLiveRenderer(opts Options) *liveRenderer {
 	ul.RefreshInterval = liveRefresh
 	return &liveRenderer{
 		ul:      ul,
-		view:    NewExecutionView(opts.System),
+		view:    NewExecutionView(opts.Assembly),
 		stop:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
@@ -72,26 +72,26 @@ func (r *liveRenderer) spinner() string {
 
 func (r *liveRenderer) render() string {
 	var b strings.Builder
-	b.WriteString(r.view.System)
+	b.WriteString(r.view.Assembly)
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("\u2500", ruleWidth))
 	b.WriteString("\n")
 
-	if len(r.view.Services) == 0 {
+	if len(r.view.Capabilities) == 0 {
 		fmt.Fprintf(&b, "\n  %s starting\n", r.spinner())
 	}
-	for _, sv := range r.view.Services {
+	for _, sv := range r.view.Capabilities {
 		switch sv.State {
-		case ServiceCompleted:
+		case CapabilityCompleted:
 			fmt.Fprintf(&b, "\n  %s %s\n", glyphCheck, sv.ID)
 			if len(sv.Output) > 0 {
 				var ob strings.Builder
 				dataWriter(&ob, "      ", "output", sv.Output)
 				b.WriteString(ob.String())
 			}
-		case ServiceFailed:
+		case CapabilityFailed:
 			fmt.Fprintf(&b, "\n  %s %s  %s\n", glyphCross, sv.ID, sv.Message)
-		case ServiceRunning:
+		case CapabilityRunning:
 			fmt.Fprintf(&b, "\n  %s %s\n", r.spinner(), sv.ID)
 		default:
 			fmt.Fprintf(&b, "\n  %s %s\n", glyphCircle, sv.ID)
