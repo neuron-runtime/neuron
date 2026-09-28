@@ -1,4 +1,4 @@
-package executor
+package capabilityruntime
 
 import (
 	"path/filepath"
@@ -17,14 +17,14 @@ func TestEntrypointPath(t *testing.T) {
 		{
 			name:       "nested entrypoint uses native separators",
 			rootDir:    root,
-			entrypoint: "bin/executor",
-			want:       filepath.Join(root, "bin", "executor"),
+			entrypoint: "bin/capability-runtime",
+			want:       filepath.Join(root, "bin", "capability-runtime"),
 		},
 		{
 			name:       "empty root returns entrypoint unchanged",
 			rootDir:    "",
-			entrypoint: "executor.sh",
-			want:       "executor.sh",
+			entrypoint: "capability-runtime.sh",
+			want:       "capability-runtime.sh",
 		},
 		{
 			name:       "empty entrypoint returns empty",
@@ -36,7 +36,7 @@ func TestEntrypointPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &ResolvedExecutor{
+			r := &ResolvedCapabilityRuntime{
 				RootDir: tt.rootDir,
 				Runtime: RuntimeInfo{Entrypoint: tt.entrypoint},
 			}

@@ -1,6 +1,5 @@
 package core
 
-type ExecutorType string
 type ResourceType string
 type ValueType string
 
@@ -20,6 +19,6 @@ type Port struct {
 }
 
 type Endpoint struct {
-	ServiceID ID
-	Port      string
+	CapabilityID ID
+	Port         string
 }

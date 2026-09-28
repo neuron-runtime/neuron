@@ -9,14 +9,15 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-// HashSystem returns a deterministic content hash for a System.
+// HashAssembly returns a deterministic content hash for an Assembly.
 //
-// The parser generates random IDs (system and connector metadata IDs) on every
-// parse, so the raw struct cannot be hashed directly. HashSystem normalizes
-// the system first: generated IDs are dropped, services and connectors are
-// sorted, and map marshaling (key-sorted by encoding/json) stays stable.
-func HashSystem(system core.System) (string, error) {
-	data, err := json.Marshal(normalizeSystem(system))
+// The parser generates random IDs (assembly and binding metadata IDs) on
+// every parse, so the raw struct cannot be hashed directly. HashAssembly
+// normalizes the assembly first: generated IDs are dropped, capabilities and
+// bindings are sorted, and map marshaling (key-sorted by encoding/json)
+// stays stable.
+func HashAssembly(assembly core.Assembly) (string, error) {
+	data, err := json.Marshal(normalizeAssembly(assembly))
 	if err != nil {
 		return "", err
 	}
@@ -24,31 +25,31 @@ func HashSystem(system core.System) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// SystemKey derives the identity of a System from its metadata. Hash is
-// computed deterministically via HashSystem.
-func SystemKey(system core.System, env string) (InstanceKey, error) {
-	hash, err := HashSystem(system)
+// AssemblyKey derives the identity of an Assembly from its metadata. Hash is
+// computed deterministically via HashAssembly.
+func AssemblyKey(assembly core.Assembly, env string) (InstanceKey, error) {
+	hash, err := HashAssembly(assembly)
 	if err != nil {
 		return InstanceKey{}, err
 	}
-	id := system.Metadata.Name
+	id := assembly.Metadata.Name
 	if id == "" {
-		id = "system"
+		id = "assembly"
 	}
-	version := system.Metadata.Version
+	version := assembly.Metadata.Version
 	if version == "" {
 		version = "latest"
 	}
 	if env == "" {
 		env = "development"
 	}
-	return InstanceKey{SystemID: id, Version: version, Hash: hash, Env: env}, nil
+	return InstanceKey{AssemblyID: id, Version: version, Hash: hash, Env: env}, nil
 }
 
-type normalizedSystem struct {
-	Metadata   normalizedMetadata    `json:"metadata"`
-	Services   []normalizedService   `json:"services"`
-	Connectors []normalizedConnector `json:"connectors"`
+type normalizedAssembly struct {
+	Metadata     normalizedMetadata     `json:"metadata"`
+	Capabilities []normalizedCapability `json:"capabilities"`
+	Bindings     []normalizedBinding    `json:"bindings"`
 }
 
 type normalizedMetadata struct {
@@ -58,81 +59,81 @@ type normalizedMetadata struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 }
 
-type normalizedService struct {
-	ID          string            `json:"id"`
-	Type        core.ExecutorType `json:"type"`
-	Config      map[string]any    `json:"config"`
-	Inputs      []core.Port       `json:"inputs,omitempty"`
-	Outputs     []core.Port       `json:"outputs,omitempty"`
-	Timeout     string            `json:"timeout,omitempty"`
-	MaxAttempts int               `json:"max_attempts,omitempty"`
-	Backoff     string            `json:"backoff,omitempty"`
+type normalizedCapability struct {
+	ID          string                     `json:"id"`
+	Type        core.CapabilityRuntimeType `json:"type"`
+	Config      map[string]any             `json:"config"`
+	Params      []core.Port                `json:"params,omitempty"`
+	Results     []core.Port                `json:"results,omitempty"`
+	Timeout     string                     `json:"timeout,omitempty"`
+	MaxAttempts int                        `json:"max_attempts,omitempty"`
+	Backoff     string                     `json:"backoff,omitempty"`
 }
 
-type normalizedConnector struct {
+type normalizedBinding struct {
 	From        string                `json:"from"`
 	To          string                `json:"to"`
 	Mappings    []core.MappingRule    `json:"mappings,omitempty"`
 	Validations []core.ValidationRule `json:"validations,omitempty"`
 }
 
-func normalizeSystem(system core.System) normalizedSystem {
-	m := system.Metadata
-	services := make([]normalizedService, 0, len(system.Specification.Services)+len(system.Specification.Triggers))
-	for _, trigger := range system.Specification.Triggers {
-		services = append(services, normalizedService{
+func normalizeAssembly(assembly core.Assembly) normalizedAssembly {
+	m := assembly.Metadata
+	capabilities := make([]normalizedCapability, 0, len(assembly.Specification.Capabilities)+len(assembly.Specification.Triggers))
+	for _, trigger := range assembly.Specification.Triggers {
+		capabilities = append(capabilities, normalizedCapability{
 			ID:          string(trigger.Metadata.ID),
 			Type:        trigger.Type,
-			Config:      trigger.ServiceConfigurations,
-			Inputs:      append([]core.Port(nil), trigger.Inputs...),
-			Outputs:     append([]core.Port(nil), trigger.Outputs...),
+			Config:      trigger.CapabilityConfigurations,
+			Params:      append([]core.Port(nil), trigger.Params...),
+			Results:     append([]core.Port(nil), trigger.Results...),
 			Timeout:     trigger.RuntimeConfigurations.Timeout,
 			MaxAttempts: trigger.RuntimeConfigurations.Retry.MaxAttempts,
 			Backoff:     trigger.RuntimeConfigurations.Retry.Backoff,
 		})
 	}
-	for _, svc := range system.Specification.Services {
-		services = append(services, normalizedService{
-			ID:          string(svc.Metadata.ID),
-			Type:        svc.Type,
-			Config:      svc.ServiceConfigurations,
-			Inputs:      append([]core.Port(nil), svc.Inputs...),
-			Outputs:     append([]core.Port(nil), svc.Outputs...),
-			Timeout:     svc.RuntimeConfigurations.Timeout,
-			MaxAttempts: svc.RuntimeConfigurations.Retry.MaxAttempts,
-			Backoff:     svc.RuntimeConfigurations.Retry.Backoff,
+	for _, cap := range assembly.Specification.Capabilities {
+		capabilities = append(capabilities, normalizedCapability{
+			ID:          string(cap.Metadata.ID),
+			Type:        cap.Type,
+			Config:      cap.CapabilityConfigurations,
+			Params:      append([]core.Port(nil), cap.Params...),
+			Results:     append([]core.Port(nil), cap.Results...),
+			Timeout:     cap.RuntimeConfigurations.Timeout,
+			MaxAttempts: cap.RuntimeConfigurations.Retry.MaxAttempts,
+			Backoff:     cap.RuntimeConfigurations.Retry.Backoff,
 		})
 	}
-	sort.Slice(services, func(i, j int) bool { return services[i].ID < services[j].ID })
+	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i].ID < capabilities[j].ID })
 
-	connectors := make([]normalizedConnector, 0, len(system.Specification.Connectors))
-	for _, conn := range system.Specification.Connectors {
-		mappings := append([]core.MappingRule(nil), conn.Mappings...)
+	bindings := make([]normalizedBinding, 0, len(assembly.Specification.Bindings))
+	for _, b := range assembly.Specification.Bindings {
+		mappings := append([]core.MappingRule(nil), b.Mappings...)
 		sort.Slice(mappings, func(i, j int) bool { return mappings[i].TargetPath < mappings[j].TargetPath })
-		validations := append([]core.ValidationRule(nil), conn.Validations...)
+		validations := append([]core.ValidationRule(nil), b.Validations...)
 		sort.Slice(validations, func(i, j int) bool { return validations[i].Expression < validations[j].Expression })
-		connectors = append(connectors, normalizedConnector{
-			From:        string(conn.From.ServiceID),
-			To:          string(conn.To.ServiceID),
+		bindings = append(bindings, normalizedBinding{
+			From:        string(b.From.CapabilityID),
+			To:          string(b.To.CapabilityID),
 			Mappings:    mappings,
 			Validations: validations,
 		})
 	}
-	sort.Slice(connectors, func(i, j int) bool {
-		if connectors[i].From != connectors[j].From {
-			return connectors[i].From < connectors[j].From
+	sort.Slice(bindings, func(i, j int) bool {
+		if bindings[i].From != bindings[j].From {
+			return bindings[i].From < bindings[j].From
 		}
-		return connectors[i].To < connectors[j].To
+		return bindings[i].To < bindings[j].To
 	})
 
-	return normalizedSystem{
+	return normalizedAssembly{
 		Metadata: normalizedMetadata{
 			Name:        m.Name,
 			Version:     m.Version,
 			Description: m.Description,
 			Labels:      m.Labels,
 		},
-		Services:   services,
-		Connectors: connectors,
+		Capabilities: capabilities,
+		Bindings:     bindings,
 	}
 }
