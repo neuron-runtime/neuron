@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Grpc.Net.Client;
 using Neuron.Executor.Conversion;
-using Neuron.Executor.V1;
+using Neuron.CapabilityRuntime.V1;
 
 namespace Neuron.Executor.Tests;
 
@@ -25,7 +25,7 @@ public class GrpcServerTests : IAsyncLifetime
     {
         Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", _socketPath);
         Environment.SetEnvironmentVariable("NEURON_EXECUTOR_READY", _readyFile);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/executor-v1");
+        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/capability-runtime-v1");
         return Task.CompletedTask;
     }
 
@@ -60,17 +60,17 @@ public class GrpcServerTests : IAsyncLifetime
             Initialize = (_, _, _) => new ValueTask<InitializeResult>(
                 new InitializeResult { ProtocolVersion = string.Empty }),
             Execute = (input, _, _) => new ValueTask<ExecutionResult>(
-                new ExecutionResult { Output = input }),
+                new ExecutionResult { Result = input }),
         });
 
         var client = await ConnectAsync();
         var response = await client.InitializeAsync(new InitializeRequest
         {
-            ProtocolVersion = "neuron/executor-v1",
+            ProtocolVersion = "neuron/capability-runtime-v1",
             Metadata = { ["executor_type"] = "example:echo", ["executor_version"] = "1.0.0" },
         });
 
-        Assert.Equal("neuron/executor-v1", response.ProtocolVersion);
+        Assert.Equal("neuron/capability-runtime-v1", response.ProtocolVersion);
 
         await RequestShutdownAsync(client);
     }
@@ -82,11 +82,11 @@ public class GrpcServerTests : IAsyncLifetime
         {
             Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult()),
             Execute = (input, _, _) => new ValueTask<ExecutionResult>(
-                new ExecutionResult { Output = input }),
+                new ExecutionResult { Result = input }),
         });
 
         var client = await ConnectAsync();
-        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = "neuron/executor-v1" });
+        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = "neuron/capability-runtime-v1" });
 
         var request = new ExecuteRequest
         {
@@ -94,22 +94,22 @@ public class GrpcServerTests : IAsyncLifetime
             TimeoutMs = 5000,
             CorrelationId = "corr-1",
         };
-        request.Input["name"] = ValueConverter.ToValue("Ada");
-        request.Input["count"] = ValueConverter.ToValue(42);
-        request.Input["ratio"] = ValueConverter.ToValue(0.5);
-        request.Input["flag"] = ValueConverter.ToValue(true);
-        request.Input["nothing"] = ValueConverter.ToValue(null);
-        request.Input["items"] = ValueConverter.ToValue(new object?[] { 1L });
+        request.Params["name"] = ValueConverter.ToValue("Ada");
+        request.Params["count"] = ValueConverter.ToValue(42);
+        request.Params["ratio"] = ValueConverter.ToValue(0.5);
+        request.Params["flag"] = ValueConverter.ToValue(true);
+        request.Params["nothing"] = ValueConverter.ToValue(null);
+        request.Params["items"] = ValueConverter.ToValue(new object?[] { 1L });
 
         var response = await client.ExecuteAsync(request);
 
         Assert.Empty(response.Error);
-        Assert.Equal("Ada", response.Output["name"].StringValue);
-        Assert.Equal(42L, response.Output["count"].NumberValue);
-        Assert.Equal(0.5, response.Output["ratio"].NumberValue);
-        Assert.True(response.Output["flag"].BoolValue);
-        Assert.Equal(Value.KindOneofCase.NullValue, response.Output["nothing"].KindCase);
-        Assert.Equal(1.0, response.Output["items"].ListValue.Values[0].NumberValue);
+        Assert.Equal("Ada", response.Result["name"].StringValue);
+        Assert.Equal(42L, response.Result["count"].NumberValue);
+        Assert.Equal(0.5, response.Result["ratio"].NumberValue);
+        Assert.True(response.Result["flag"].BoolValue);
+        Assert.Equal(Value.KindOneofCase.NullValue, response.Result["nothing"].KindCase);
+        Assert.Equal(1.0, response.Result["items"].ListValue.Values[0].NumberValue);
 
         await RequestShutdownAsync(client);
     }
@@ -125,12 +125,12 @@ public class GrpcServerTests : IAsyncLifetime
         });
 
         var client = await ConnectAsync();
-        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = "neuron/executor-v1" });
+        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = "neuron/capability-runtime-v1" });
 
         var response = await client.ExecuteAsync(new ExecuteRequest { ExecutionId = "exec-1" });
 
         Assert.Equal("threshold not met", response.Error);
-        Assert.Empty(response.Output);
+        Assert.Empty(response.Result);
 
         await RequestShutdownAsync(client);
     }
@@ -197,7 +197,7 @@ public class GrpcServerTests : IAsyncLifetime
         }
     }
 
-    private async Task<ExecutorService.ExecutorServiceClient> ConnectAsync()
+    private async Task<CapabilityRuntimeService.CapabilityRuntimeServiceClient> ConnectAsync()
     {
         AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
@@ -224,10 +224,10 @@ public class GrpcServerTests : IAsyncLifetime
             new GrpcChannelOptions { HttpHandler = handler });
         _channels.Add(channel);
 
-        return new ExecutorService.ExecutorServiceClient(channel);
+        return new CapabilityRuntimeService.CapabilityRuntimeServiceClient(channel);
     }
 
-    private async Task RequestShutdownAsync(ExecutorService.ExecutorServiceClient client)
+    private async Task RequestShutdownAsync(CapabilityRuntimeService.CapabilityRuntimeServiceClient client)
     {
         await client.ShutdownAsync(new ShutdownRequest());
         await Task.WhenAny(_serverTask ?? Task.CompletedTask, Task.Delay(TimeSpan.FromSeconds(10)));

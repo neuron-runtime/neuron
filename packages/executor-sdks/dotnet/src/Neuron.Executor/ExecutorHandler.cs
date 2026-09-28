@@ -2,7 +2,7 @@ namespace Neuron.Executor;
 
 /// <summary>
 /// Business logic of an executor. It is the contract executor authors
-/// implement; the SDK wraps it with the <c>neuron/executor-v1</c> gRPC
+/// implement; the SDK wraps it with the <c>neuron/capability-runtime-v1</c> gRPC
 /// transport and lifecycle management.
 /// </summary>
 public sealed class ExecutorHandler

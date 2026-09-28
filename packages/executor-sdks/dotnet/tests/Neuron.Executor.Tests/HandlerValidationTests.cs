@@ -54,7 +54,7 @@ public class HandlerValidationTests : IDisposable
         };
 
         Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", "/tmp/neuron-test.sock");
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/executor-v1-json");
+        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/capability-runtime-v1-json");
 
         await Assert.ThrowsAsync<ExecutorConfigurationException>(() => ExecutorServer.RunAsync(handler));
     }

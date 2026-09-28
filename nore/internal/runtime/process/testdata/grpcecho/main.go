@@ -1,7 +1,7 @@
 // Command grpcecho is a gRPC executor used to exercise the process runtime's
 // long-lived worker pool over Unix domain sockets. It is built only for
 // tests (see nore/internal/runtime/process/runtime_test.go). It implements
-// the ExecutorService contract directly against the shared protobuf types.
+// the CapabilityRuntimeService contract directly against the shared protobuf types.
 package main
 
 import (
@@ -12,33 +12,33 @@ import (
 	"net"
 	"os"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/executor/v1"
+	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
 	"google.golang.org/grpc"
 )
 
 var socket = flag.String("socket", "", "unix socket path")
 
 type server struct {
-	v1.UnimplementedExecutorServiceServer
+	v1.UnimplementedCapabilityRuntimeServiceServer
 	typeName string
 }
 
 func (s *server) Initialize(ctx context.Context, req *v1.InitializeRequest) (*v1.InitializeResponse, error) {
 	return &v1.InitializeResponse{
 		ProtocolVersion: req.ProtocolVersion,
-		Capabilities:    []string{},
+		Features:        []string{},
 	}, nil
 }
 
 func (s *server) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.ExecuteResponse, error) {
-	out := make(map[string]*v1.Value, len(req.Input)+3)
-	for k, v := range req.Input {
+	out := make(map[string]*v1.Value, len(req.Params)+3)
+	for k, v := range req.Params {
 		out[k] = v
 	}
 	out["type"] = toValue(s.typeName)
 	out["protocol"] = toValue("grpc-test")
 	out["version"] = toValue("1.0.0")
-	return &v1.ExecuteResponse{Output: out}, nil
+	return &v1.ExecuteResponse{Result: out}, nil
 }
 
 func (s *server) Health(ctx context.Context, req *v1.HealthRequest) (*v1.HealthResponse, error) {
@@ -72,7 +72,7 @@ func main() {
 		}
 	}
 	srv := grpc.NewServer()
-	v1.RegisterExecutorServiceServer(srv, &server{typeName: os.Getenv("NEURON_EXECUTOR_TYPE")})
+	v1.RegisterCapabilityRuntimeServiceServer(srv, &server{typeName: os.Getenv("NEURON_EXECUTOR_TYPE")})
 	fmt.Fprintln(os.Stderr, "grpcecho serving on", addr)
 	if err := srv.Serve(ln); err != nil {
 		log.Fatal(err)

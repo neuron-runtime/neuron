@@ -28,13 +28,13 @@ const (
 	// ProtocolV1 is the canonical wire protocol spoken by executor processes
 	// over gRPC (Unix domain sockets). Executors must declare this (or a
 	// newer compatible protocol) in their manifest runtime.protocol.
-	ProtocolV1 = "neuron/executor-v1"
+	ProtocolV1 = "neuron/capability-runtime-v1"
 
 	// ProtocolJSONV1 is the legacy stdin/stdout JSON protocol spoken by
 	// one-shot executor processes and WASI modules (WASI has no socket
 	// interface, so gRPC is unavailable there). Executors that cannot host a
 	// gRPC server MUST declare this protocol in their manifest.
-	ProtocolJSONV1 = "neuron/executor-v1-json"
+	ProtocolJSONV1 = "neuron/capability-runtime-v1-json"
 
 	// ManifestFile is the mandatory manifest file inside every executor
 	// package and every installed executor directory.

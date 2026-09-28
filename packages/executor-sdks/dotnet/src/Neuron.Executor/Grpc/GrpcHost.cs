@@ -8,7 +8,7 @@ namespace Neuron.Executor.Grpc;
 
 /// <summary>
 /// Builds the gRPC host that listens on a Unix domain socket using HTTP/2,
-/// the transport N.O.R.E. connects to for <c>neuron/executor-v1</c>.
+/// the transport N.O.R.E. connects to for <c>neuron/capability-runtime-v1</c>.
 /// </summary>
 internal static class GrpcHost
 {

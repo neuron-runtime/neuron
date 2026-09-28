@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/executor/v1"
+	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -272,7 +272,7 @@ type worker struct {
 	type_      string
 	version    string
 	conn       *grpc.ClientConn
-	client     v1.ExecutorServiceClient
+	client     v1.CapabilityRuntimeServiceClient
 	healthy    atomic.Bool
 	logger     *slog.Logger
 }
@@ -306,7 +306,7 @@ func (w *worker) connect(ctx context.Context) error {
 		return fmt.Errorf("dial executor: %w", err)
 	}
 	w.conn = conn
-	w.client = v1.NewExecutorServiceClient(conn)
+	w.client = v1.NewCapabilityRuntimeServiceClient(conn)
 	return nil
 }
 
@@ -332,7 +332,7 @@ func (w *worker) initialize(ctx context.Context, protocol string) error {
 
 	w.logger.Info("initialized executor",
 		"protocol", resp.ProtocolVersion,
-		"capabilities", resp.Capabilities,
+		"features", resp.Features,
 	)
 
 	w.healthy.Store(true)
@@ -346,10 +346,10 @@ func (w *worker) execute(ctx context.Context, req *shadexec.Request) (*shadexec.
 	}
 
 	execReq := &v1.ExecuteRequest{
-		Input: make(map[string]*v1.Value, len(req.Input)),
+		Params: make(map[string]*v1.Value, len(req.Input)),
 	}
 	for k, v := range req.Input {
-		execReq.Input[k] = makeProtoValue(v)
+		execReq.Params[k] = makeProtoValue(v)
 	}
 
 	resp, err := w.client.Execute(ctx, execReq)
@@ -358,10 +358,10 @@ func (w *worker) execute(ctx context.Context, req *shadexec.Request) (*shadexec.
 	}
 
 	out := &shadexec.Response{
-		Output: make(map[string]any, len(resp.Output)),
+		Output: make(map[string]any, len(resp.Result)),
 		Error:  resp.Error,
 	}
-	for k, v := range resp.Output {
+	for k, v := range resp.Result {
 		out.Output[k] = makeGoValue(v)
 	}
 
