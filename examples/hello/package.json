@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@neuron/sdk": "file:../../packages/system-sdks/typescript"
+    "@neuron/sdk": "file:../../packages/assembly-sdks/typescript"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

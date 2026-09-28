@@ -1,6 +1,6 @@
 # N.O.R.E. — Neuron Operational Runtime Engine
 
-**N.O.R.E.** is the runtime engine of Neuron: where Systems are registered, instantiated, operated, and connected to the capabilities they require.
+**N.O.R.E.** is the runtime engine of Neuron: where Assemblies are registered, instantiated, operated, and connected to the capabilities they require.
 
 This reference is **maintainer-focused** and describes what N.O.R.E. is, how it is structured, how to run it, and how it behaves. Users interact with N.O.R.E. exclusively through the `neuron` CLI; see [application/README.md](../application/README.md).
 
@@ -8,10 +8,10 @@ This reference is **maintainer-focused** and describes what N.O.R.E. is, how it 
 flowchart TB
     CLI[neuron CLI] -->|register / run / events| API[N.O.R.E. API]
     API --> IM[Instance Manager]
-    API --> SR[System Repository]
+    API --> SR[Assembly Repository]
     IM --> EE[Execution Engine]
     EE --> EB[Event Bus]
-    EE --> ER[Executor Runtime Registry]
+    EE --> ER[Capability Runtime Registry]
     EB --> ST[Storage Provider]
     EE --> Sched[Scheduler]
     Sched --> Res[CEL Resolver]
@@ -25,12 +25,12 @@ N.O.R.E. owns the operational side of Neuron:
 
 | Concern | Responsibility |
 | --- | --- |
-| **Registration** | Receiving compiled System definitions from the CLI and persisting them |
-| **Execution planning** | Compiling the registered system and its frozen executor set into a plan over an event bus |
-| **Instances** | Creating, running, pausing, restarting, and removing living realizations of Systems |
-| **Executors** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM backends) |
-| **Scheduling** | Advancing executions, evaluating connector mappings and validations, handling cancellations |
-| **Persistence** | Durable storage of registered systems, instances, executions, and events through an interchangeable storage provider (SQLite by default) |
+| **Registration** | Receiving compiled Assembly definitions from the CLI and persisting them |
+| **Execution planning** | Compiling the registered assembly and its frozen capability runtime set into a plan over an event bus |
+| **Instances** | Creating, running, pausing, restarting, and removing living realizations of Assemblies |
+| **Capability runtimes** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM backends) |
+| **Scheduling** | Advancing executions, evaluating binding mappings and validations, handling cancellations |
+| **Persistence** | Durable storage of registered assemblies, instances, executions, and events through an interchangeable storage provider (SQLite by default) |
 | **API** | The local HTTP/JSON transport over which the CLI talks to the runtime |
 
 N.O.R.E. deliberately does **not**:
@@ -39,7 +39,7 @@ N.O.R.E. deliberately does **not**:
 - resolve or install external modules (the CLI does that and freezes the result),
 - understand the business meaning of the modules it operates.
 
-The canonical manifest is compiled by the CLI; N.O.R.E. receives the compiled core system representation.
+The canonical manifest is compiled by the CLI; N.O.R.E. receives the compiled core assembly representation.
 
 ---
 
@@ -62,7 +62,7 @@ With no flags this binds a Unix socket (`~/.neuron/nore.sock`) and uses `~/.neur
 -port string       TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)
 -socket string     Unix socket for local CLI clients; empty disables Unix socket
                    (default: $NEURON_SOCKET or ~/.neuron/nore.sock)
--workers int       executor worker count (default 8)
+-workers int       capability runtime worker count (default 8)
 -data-dir string   persistent data directory (default: $NEURON_DATA_DIR or ~/.neuron/nore)
 -version           print the N.O.R.E. version and exit
 ```
@@ -92,7 +92,7 @@ flowchart TD
     subgraph startup
         A[start] --> B[initialize storage SQLite]
         B --> C[recover persisted instances<br/>and their live executions]
-        C --> D[start executor runtimes<br/>process / WASM backends]
+        C --> D[start capability runtimes<br/>process / WASM backends]
         D --> E[serve API on configured listeners]
     end
     E --> F1[GET /health]
@@ -111,7 +111,7 @@ flowchart TD
 | Endpoint | Operation |
 | --- | --- |
 | `GET /health` | Health check (used by the CLI bootstrap) |
-| `POST /v1/register` | Register a compiled System |
+| `POST /v1/register` | Register a compiled Assembly |
 | `GET /v1/instances` | List Instances |
 | `POST /v1/instances` | Create an Instance and begin execution |
 | `DELETE /v1/instances` | Remove all Instances |
@@ -126,7 +126,7 @@ flowchart TD
 
 ### Execution
 
-When an Instance is created, the planner compiles the registered System into an execution plan over the event bus. The scheduler advances the execution across the System's services and connectors, evaluates mappings and validations through the CEL resolver, and drives service executions through the executor layer.
+When an Instance is created, the planner compiles the registered Assembly into an execution plan over the event bus. The scheduler advances the execution across the Assembly's capabilities and bindings, evaluates mappings and validations through the CEL resolver, and drives capability executions through the capability runtime layer.
 
 ```mermaid
 sequenceDiagram
@@ -134,18 +134,18 @@ sequenceDiagram
     participant IM as Instance Manager
     participant S as Scheduler
     participant EB as Event Bus
-    participant EX as Executor Engine
-    participant RT as Executor Runtime
+    participant EX as Capability Runtime Engine
+    participant RT as Capability Runtime
 
     C->>IM: POST /v1/instances
     IM->>S: create execution
     S->>EB: emit execution.started
-    loop over services via connectors
+    loop over capabilities via bindings
         S->>EX: evaluate mappings + validations (CEL)
         EX->>RT: Execute(request)
         RT-->>EX: Response
-        EX-->>S: service outcome
-        S->>EB: emit service.completed
+        EX-->>S: capability outcome
+        S->>EB: emit capability.completed
     end
     S->>EB: emit execution.completed
     EB-->>C: streamed events
@@ -159,8 +159,8 @@ Live events are streamed over the WebSocket endpoint (`WS /v1/ws`); the SSE stre
 stateDiagram-v2
     [*] --> Started: instance created
     Started --> Scheduling: execution plan ready
-    Scheduling --> Running: service dispatched
-    Running --> Running: next service
+    Scheduling --> Running: capability dispatched
+    Running --> Running: next capability
     Running --> Completed: terminal success
     Running --> Failed: transport or controlled error
     Running --> Cancelled: cancellation requested
@@ -183,11 +183,11 @@ flowchart TB
         inst[instance<br/>lifecycle manager]
         exec[execution<br/>state machine · scheduler · engine]
         ev[event<br/>event bus · durable log]
-        rt[runtime<br/>executor runtime abstraction]
-        pl[planner<br/>system → execution plan]
+        rt[backend<br/>capability runtime abstraction]
+        pl[planner<br/>assembly → execution plan]
         rv[resolver<br/>CEL expressions]
         st[storage<br/>provider + SQLite]
-        sys[system<br/>registered system repository]
+        sys[assembly<br/>registered assembly repository]
         plugin[plugin<br/>frozen records → adapters]
     end
 
@@ -207,44 +207,44 @@ flowchart TB
 | Package | Responsibility |
 | --- | --- |
 | `cmd/nore` | Daemon entry point — flags, listeners, shutdown |
-| `api` | HTTP/JSON API — transport only: validates requests, calls the instance manager and system repository, serializes responses and streams. Never interprets system semantics |
+| `api` | HTTP/JSON API — transport only: validates requests, calls the instance manager and assembly repository, serializes responses and streams. Never interprets assembly semantics |
 | `instance` | Lifecycle — create/remove/clear, restoration on startup, registry of live instances |
-| `execution` | State machine — scheduler transitions, snapshotting, wait-for-completion, the executor engine that drives module calls |
+| `execution` | State machine — scheduler transitions, snapshotting, wait-for-completion, the capability runtime engine that drives module calls |
 | `event` | Single source of truth for state transitions; the durable event log used for persistence and streaming |
-| `runtime` | Executor backend abstraction — one interface, multiple backends (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
-| `planner` | Compiles the registered System + frozen executors into an executable plan. Source-language agnostic; owns no HTTP clients, registries, or file downloads |
-| `resolver` | CEL expression resolver — connector mappings and validations |
-| `storage` | Provider interface + SQLite implementation — systems, instances, executions, events |
-| `plugin` | Boundary between frozen executor records and the runtime backends — thin adapters, no process/socket/WASM machinery itself |
-| `system` | Registered system repository and indexing |
+| `backend` | Capability runtime backend abstraction — one interface, multiple backends (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
+| `planner` | Compiles the registered Assembly + frozen capability runtimes into an executable plan. Source-language agnostic; owns no HTTP clients, registries, or file downloads |
+| `resolver` | CEL expression resolver — binding mappings and validations |
+| `storage` | Provider interface + SQLite implementation — assemblies, instances, executions, events |
+| `plugin` | Boundary between frozen capability runtime records and the runtime backends — thin adapters, no process/socket/WASM machinery itself |
+| `assembly` | Registered assembly repository and indexing |
 
-### The executor runtime boundary
+### The capability runtime boundary
 
-The runtime boundary inside N.O.R.E. is the **executor runtime** abstraction. One interface, multiple backends:
+The runtime boundary inside N.O.R.E. is the **capability runtime** abstraction. One interface, multiple backends:
 
 ```mermaid
 flowchart TB
-    ER[Executor Runtime] --> PROC[Process Runtime]
+    ER[Capability Runtime] --> PROC[Process Runtime]
     ER --> WASM[WASM Runtime]
     ER --> CONT[Container Runtime]
     ER --> REM[Remote Runtime]
-    PROC -->|neuron/executor-v1 · gRPC over Unix socket| W[long-lived worker processes]
-    WASM -->|neuron/executor-v1-json · stdio| MOD[wasm32-wasi modules]
+    PROC -->|neuron/capability-runtime-v1 · gRPC over Unix socket| W[long-lived worker processes]
+    WASM -->|neuron/capability-runtime-v1-json · stdio| MOD[wasm32-wasi modules]
     CONT -. planned .-> OCI[OCI images]
-    REM -. planned .-> HOST[Remote executor hosts]
+    REM -. planned .-> HOST[Remote capability runtime hosts]
 ```
 
-A backend owns starting the executor, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that. See [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) and [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md).
+A backend owns starting the capability runtime, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that. See [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) and [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md).
 
 ### Built-in modules
 
-N.O.R.E. ships a small set of in-process modules for common operations. They run inside the runtime engine and require no installation or resolution. Referencing one in a system (YAML entry file or TS via the SDK) is a plain module reference; N.O.R.E. dispatches it directly to the in-process implementation.
+N.O.R.E. ships a small set of in-process modules for common operations. They run inside the runtime engine and require no installation or resolution. Referencing one in an assembly (YAML entry file or TS via the SDK) is a plain module reference; N.O.R.E. dispatches it directly to the in-process implementation.
 
-### External modules (executors)
+### External modules (capability runtimes)
 
-External modules are hosted out-of-process. After the CLI resolves, verifies, and installs a module and freezes its exact version into the registered system, N.O.R.E. launches it through the matching runtime backend:
+External modules are hosted out-of-process. After the CLI resolves, verifies, and installs a module and freezes its exact version into the registered assembly, N.O.R.E. launches it through the matching runtime backend:
 
-- **Process backend** — a long-lived native worker, spawned per instance, communicating over the Neuron executor protocol (gRPC over a Unix socket), with health checks, request deadlines, cancellation, and clean termination. See [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md).
+- **Process backend** — a long-lived native worker, spawned per instance, communicating over the Neuron capability runtime protocol (gRPC over a Unix socket), with health checks, request deadlines, cancellation, and clean termination. See [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md).
 - **WASM backend** — a WebAssembly module loaded into the runtime in an isolated context. See [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md).
 
 The full module model, protocol, and archive contract live in [docs/MODULES.md](../docs/MODULES.md).
@@ -253,12 +253,12 @@ The full module model, protocol, and archive contract live in [docs/MODULES.md](
 
 ## Safe Shutdown
 
-On `SIGINT`/`SIGTERM`, N.O.R.E. closes its listeners and then **gracefully stops all live instances** before exiting (`srv.StopInstances()`). This gives executor-backed resources — worker processes and WASM modules — a clean shutdown instead of being torn down mid-operation by process exit.
+On `SIGINT`/`SIGTERM`, N.O.R.E. closes its listeners and then **gracefully stops all live instances** before exiting (`srv.StopInstances()`). This gives capability-runtime-backed resources — worker processes and WASM modules — a clean shutdown instead of being torn down mid-operation by process exit.
 
 ```mermaid
 flowchart LR
     A[SIGINT / SIGTERM] --> B[close listeners]
-    B --> C[stop live instances<br/>clean executor shutdown]
+    B --> C[stop live instances<br/>clean capability runtime shutdown]
     C --> D[flush in-flight executions to storage]
     D --> E[close storage]
     E --> F[exit]
@@ -272,7 +272,7 @@ Instances survive runtime restarts: on startup, N.O.R.E. restores persisted inst
 
 - The default transport is a Unix socket with mode `0600` — local to the owning user, no network exposure.
 - TCP is opt-in and the API currently has **no authentication**. Do not expose a TCP listener on an untrusted network.
-- External executors are treated as untrusted code. They are verified and installed by the CLI before registration and are hosted out-of-process, isolating the runtime from third-party crashes and malicious behavior.
+- External capability runtimes are treated as untrusted code. They are verified and installed by the CLI before registration and are hosted out-of-process, isolating the runtime from third-party crashes and malicious behavior.
 - Capability declarations in module manifests are metadata, not permissions. Permissions are enforced by the runtime backends.
 
 > [!WARNING]
@@ -282,7 +282,7 @@ Instances survive runtime restarts: on startup, N.O.R.E. restores persisted inst
 
 ## Performance Characteristics
 
-Concurrency is bounded by the executor worker pool (`-workers`, default 8). Long-lived workers are reused across requests rather than respawning per invocation, which keeps warm execution latency dominated by the executor protocol call itself rather than process startup. For deeper discussion of pool sizing, cold-start, and throughput validation, see [docs/RUNTIME.md](../docs/RUNTIME.md).
+Concurrency is bounded by the capability runtime worker pool (`-workers`, default 8). Long-lived workers are reused across requests rather than respawning per invocation, which keeps warm execution latency dominated by the capability runtime protocol call itself rather than process startup. For deeper discussion of pool sizing, cold-start, and throughput validation, see [docs/RUNTIME.md](../docs/RUNTIME.md).
 
 ---
 
@@ -290,10 +290,10 @@ Concurrency is bounded by the executor worker pool (`-workers`, default 8). Long
 
 | | |
 | --- | --- |
-| **Runtime deep dive** | How N.O.R.E. executes services end to end — [docs/RUNTIME.md](../docs/RUNTIME.md) |
-| **Process runtime** | The process executor backend — [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) |
-| **WASM runtime** | The WASM executor backend — [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md) |
-| **Modules & executors** | The unified module model — [docs/MODULES.md](../docs/MODULES.md) |
+| **Runtime deep dive** | How N.O.R.E. executes capabilities end to end — [docs/RUNTIME.md](../docs/RUNTIME.md) |
+| **Process runtime** | The process capability runtime backend — [docs/RUNTIME_PROCESS.md](../docs/RUNTIME_PROCESS.md) |
+| **WASM runtime** | The WASM capability runtime backend — [docs/RUNTIME_WASM.md](../docs/RUNTIME_WASM.md) |
+| **Modules & capability runtimes** | The unified module model — [docs/MODULES.md](../docs/MODULES.md) |
 | **CLI** | The `neuron` CLI, the user-facing surface — [application/README.md](../application/README.md) |
 
 ---

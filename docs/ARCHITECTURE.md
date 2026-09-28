@@ -20,15 +20,15 @@ This leads to a deliberately small set of primitives:
 
 | Primitive | Responsibility | What it never knows |
 | --- | --- | --- |
-| **System** | Defines what exists and how it is connected | How capabilities are implemented |
+| **Assembly** | Defines what exists and how it is connected | How capabilities are implemented |
 | **Module** | An executable capability packaged for Neuron | The composition it belongs to |
-| **Service** | Exposes one executable capability | How the capability is executed |
-| **Executor** | Provides the machinery that runs a Service | The composition of the System |
-| **Connector** | Defines how two capabilities communicate | The business meaning of the data |
-| **Instance** | A living realization of a System | Implementation details of its Services |
-| **N.O.R.E.** | Operates registered Systems — instantiate, schedule, execute | What any capability actually means |
+| **Capability** | Exposes one executable capability | How the capability is executed |
+| **Capability Runtime** | Provides the machinery that runs a Capability | The composition of the Assembly |
+| **Binding** | Defines how two capabilities communicate | The business meaning of the data |
+| **Instance** | A living realization of an Assembly | Implementation details of its Capabilities |
+| **N.O.R.E.** | Operates registered Assemblies — instantiate, schedule, execute | What any capability actually means |
 
-The separation between **Service** and **Executor** is the load-bearing wall. It is what lets Neuron host capabilities implemented in any technology without turning the core into a collection of special cases: the Service stays logical, the Executor stays mechanical, and the runtime only ever sees the executor boundary.
+The separation between **Capability** and **Capability Runtime** is the load-bearing wall. It is what lets Neuron host capabilities implemented in any technology without turning the core into a collection of special cases: the Capability stays logical, the Capability Runtime stays mechanical, and the runtime only ever sees the capability runtime boundary.
 
 ---
 
@@ -39,11 +39,11 @@ In priority order:
 1. **Correctness** — behavior is defined, bounded, and tested at the right boundary.
 2. **Architectural integrity** — one authoritative place for every important domain behavior, no competing models.
 3. **Isolation** — source languages never leak into the runtime; the runtime never parses author input.
-4. **Security** — external executors are untrusted code and are hosted accordingly.
+4. **Security** — external capability runtimes are untrusted code and are hosted accordingly.
 5. **Performance** — concurrency and worker reuse are first-class, measured, not assumed.
 6. **Scalability** — the primitive model composes from one service to distributed systems.
 7. **Maintainability** — packages own a single responsibility and are named after it.
-8. **Clear public APIs** — the SDK, the executor protocol, and the CLI are contracts.
+8. **Clear public APIs** — the SDK, the capability runtime protocol, and the CLI are contracts.
 9. **Testability** — behavior is exercised through stable boundaries.
 10. **Documentation** — intent and constraints are explained where they matter.
 
@@ -56,15 +56,15 @@ All authoring surfaces converge on one canonical representation before anything 
 ```mermaid
 flowchart TB
     A[Source language<br/>YAML · TypeScript · future] --> B[Language-specific loader]
-    B --> C[Canonical system manifest]
+    B --> C[Canonical assembly manifest]
     C --> D[Validation]
     D --> E[Compiler]
-    E --> F[Core system]
+    E --> F[Core assembly]
     F --> G[Execution plan]
     G --> H[Runtime<br/>N.O.R.E.]
 ```
 
-Nothing downstream of the **canonical manifest** knows how a system was authored. YAML systems and TypeScript systems produce the same manifest, compile through the same compiler, and run on the same runtime.
+Nothing downstream of the **canonical manifest** knows how an assembly was authored. YAML assemblies and TypeScript assemblies produce the same manifest, compile through the same compiler, and run on the same runtime.
 
 ---
 
@@ -76,11 +76,11 @@ The repository is a monorepo organized into strictly separated Go modules:
 | --- | --- |
 | `application/` | The `neuron` CLI — authoring, building, module resolution, client, daemon bootstrap |
 | `nore/` | N.O.R.E. — the Neuron Operational Runtime Engine |
-| `shared/` | Canonical types, executor contract, version — agreed on by both Go modules |
-| `packages/system-sdks/typescript/` | `@neuron/sdk` — TypeScript system-definition language |
-| `packages/executor-sdks/golang/` | Go SDK for authoring Neuron modules (executors) |
+| `shared/` | Canonical types, capability runtime contract, version — agreed on by both Go modules |
+| `packages/assembly-sdks/typescript/` | `@neuron/sdk` — TypeScript assembly-definition language |
+| `packages/executor-sdks/golang/` | Go SDK for authoring Neuron modules (capability runtimes) |
 | `packages/executor-sdks/dotnet/` | .NET SDK for authoring Neuron modules (`Neuron.Executor`) |
-| `examples/` | Runnable example systems and reference modules |
+| `examples/` | Runnable example assemblies and reference modules |
 | `docs/` | Architecture, getting started, installation, module, and runtime docs |
 | `scripts/` | Workspace development and release helpers |
 
@@ -94,7 +94,7 @@ flowchart LR
     end
     subgraph sh["shared module"]
         CAN[canonical types]
-        PRO[executor protocol]
+        PRO[capability runtime protocol]
         VER[version]
     end
     subgraph nore["nore module"]
@@ -110,43 +110,43 @@ The version reported by `neuron version` and `nore --version` comes from a singl
 
 ---
 
-## System definition
+## Assembly definition
 
-A **System** is a composition of capabilities and the explicit relationships between them. The canonical YAML form mirrors the manifest structure in `examples/ecommerce_order`:
+An **Assembly** is a composition of capabilities and the explicit relationships between them. The canonical YAML form mirrors the manifest structure in `examples/ecommerce_order`:
 
 ```yaml
-# systems/order-processing/system.yaml
+# assemblies/order-processing/assembly.yaml
 apiVersion: neuron/v1
-kind: System
+kind: Assembly
 
 metadata:
   name: order-processing
   version: 1.0.0
   description: Order processing pipeline
 
-services:
+capabilities:
   - ref: validate-order
-    entry: ../../services/validate-order.yaml
+    entry: ../../capabilities/validate-order.yaml
   - ref: parse-order
-    entry: ../../services/parse-order.yaml
+    entry: ../../capabilities/parse-order.yaml
 
-connectors:
+bindings:
   - from: validate-order
     to: parse-order
     mappings:
       - target: validation_data
-        expression: "source.output"
+        expression: "source.result"
     validations:
-      - expression: "source.output.valid == true"
+      - expression: "source.result.valid == true"
         message: "Order validation failed"
 ```
 
-A **Service** names the logical capability and the module that provides it:
+A **Capability** names the logical unit and the module that provides it:
 
 ```yaml
-# services/validate-order.yaml
+# capabilities/validate-order.yaml
 apiVersion: neuron/v1
-kind: Service
+kind: Capability
 
 metadata:
   name: validate-order
@@ -154,7 +154,7 @@ metadata:
   description: Validate incoming order request
 
 spec:
-  executor:
+  capability runtime:
     type: neuron:core:set
 
   config:
@@ -163,7 +163,7 @@ spec:
 
   mappings:
     - direction: input
-      source: execution.input.order
+      source: execution.params.order
       target: order
 
   execution:
@@ -171,7 +171,7 @@ spec:
     timeout: 5s
 ```
 
-Execution flows along the connectors. Each connector defines what data flows between the two services (`mappings`, expressed in CEL) and optionally which conditions must hold (`validations`). Execution input is available to expressions as `execution.input`; the upstream service's output as `source.output`.
+Execution flows along the bindings. Each binding defines what data flows between the two capabilities (`mappings`, expressed in CEL) and optionally which conditions must hold (`validations`). Execution params are available to expressions as `execution.params`; the upstream capability's result as `source.result`.
 
 ---
 
@@ -179,37 +179,37 @@ Execution flows along the connectors. Each connector defines what data flows bet
 
 ### YAML
 
-The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: System` entry file (`system.yaml` by default). `neuron init --lang yaml` scaffolds it, and `neuron build` consumes it. See `examples/ecommerce_order` for a complete project.
+The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: Assembly` entry file (`assembly.yaml` by default). `neuron init --lang yaml` scaffolds it, and `neuron build` consumes it. See `examples/ecommerce_order` for a complete project.
 
 ### TypeScript — the SDK
 
-The TypeScript SDK (`@neuron/sdk`) is the same capability: a typed, always-autocompleted way to describe systems in TypeScript, converging on the same canonical manifest.
+The TypeScript SDK (`@neuron/sdk`) is the same capability: a typed, always-autocompleted way to describe assemblies in TypeScript, converging on the same canonical manifest.
 
 ```ts
-// system.ts
-import { Service, System } from "@neuron/sdk";
+// assembly.ts
+import { Capability, Assembly } from "@neuron/sdk";
 
-const validate = Service({
+const validate = Capability({
   name: "validate-order",
   version: "1.0.0",
   description: "Validate an incoming order",
 })
-  .executor({ name: "neuron:core:set" })
-  .inputSchema<{ order: object }>()
-  .outputSchema<{ order: object; valid: boolean }>();
+  .capabilityRuntime({ name: "neuron:core:set" })
+  .paramsSchema<{ order: object }>()
+  .resultSchema<{ order: object; valid: boolean }>();
 
-export default System({
+export default Assembly({
   name: "order-processing",
   version: "1.0.0",
 })
-  .inputSchema<{ order: object }>()
-  .withParams((input) =>
-    validate.withInput({ order: input.order })
+  .paramsSchema<{ order: object }>()
+  .withParams((data) =>
+    validate.withParams({ order: data.order })
   )
   .toManifest();
 ```
 
-The SDK is a **definition tool**. It describes systems; it does not execute them, and it must never become a runtime. The Go side remains responsible for parsing, validating, compiling, and running the canonical representation. See [packages/system-sdks/typescript/README.md](../packages/system-sdks/typescript/README.md).
+The SDK is a **definition tool**. It describes assemblies; it does not execute them, and it must never become a runtime. The Go side remains responsible for parsing, validating, compiling, and running the canonical representation. See [packages/assembly-sdks/typescript/README.md](../packages/assembly-sdks/typescript/README.md).
 
 ---
 
@@ -224,8 +224,8 @@ flowchart TB
     A[project<br/>neuron.config.*] --> B[loader<br/>per authoring language]
     B --> C[canonical manifest<br/>.neuron/manifest.json]
     C --> D[validator]
-    D --> E[compiler<br/>core.System]
-    E --> F[executor resolution + freezing]
+    D --> E[compiler<br/>core.Assembly]
+    E --> F[capability runtime resolution + freezing]
     F --> G[N.O.R.E. registration<br/>POST /v1/register]
 ```
 
@@ -240,26 +240,26 @@ The TypeScript loader delegates the actual build to the SDK CLI (`neuron-sdk bui
 The compiler transforms the canonical manifest into the runtime/core structures N.O.R.E. consumes.
 
 > [!WARNING]
-> The compiler MUST remain source-language agnostic. It MUST NOT parse YAML or TypeScript, resolve GitHub repositories, download or install executors, launch processes, execute services, own HTTP clients, or contain registry-specific behavior.
+> The compiler MUST remain source-language agnostic. It MUST NOT parse YAML or TypeScript, resolve GitHub repositories, download or install capability runtimes, launch processes, execute capabilities, own HTTP clients, or contain registry-specific behavior.
 
-Those responsibilities belong to their own layers. The compiler is pure transformation: canonical manifest in, core system out.
+Those responsibilities belong to their own layers. The compiler is pure transformation: canonical manifest in, core assembly out.
 
 ---
 
-## The module & executor model
+## The module & capability runtime model
 
-A module is the public word for a capability packaged for Neuron. Within the model, an executor is distilled through a chain of distinct responsibilities:
+A module is the public word for a capability packaged for Neuron. Within the model, a capability runtime is distilled through a chain of distinct responsibilities:
 
 ```mermaid
 flowchart TB
-    A[Executor Requirement<br/>who + what version constraint] --> B[Executor Registry<br/>where packages are obtained]
-    B --> C[Executor Resolver<br/>which version satisfies the requirement]
-    C --> D[Executor Package<br/>immutable, self-describing artifact set]
+    A[Capability Runtime Requirement<br/>who + what version constraint] --> B[Capability Runtime Registry<br/>where packages are obtained]
+    B --> C[Capability Runtime Resolver<br/>which version satisfies the requirement]
+    C --> D[Capability Runtime Package<br/>immutable, self-describing artifact set]
     D --> E[Verification<br/>cryptographic checks]
-    E --> F[Executor Installation<br/>install the selected artifact securely]
-    F --> G[Executor Store<br/>where the immutable artifact lives]
-    G --> H[Executor Runtime<br/>process · wasm · future]
-    H --> I[Executor Instance<br/>a live running realization]
+    E --> F[Capability Runtime Installation<br/>install the selected artifact securely]
+    F --> G[Capability Runtime Store<br/>where the immutable artifact lives]
+    G --> H[Capability Runtime<br/>process · wasm · future]
+    H --> I[Capability Runtime Instance<br/>a live running realization]
 ```
 
 No two steps merge:
@@ -269,10 +269,10 @@ No two steps merge:
 | **Registry** | *Where* | Providers (`github`, `local`, future registries) |
 | **Resolver** | *Which* | Best version by semantic versioning, above the providers; prefers already-installed artifacts so running instances stay independent of the network |
 | **Installer** | *How* | Verifying and installing the selected package archive |
-| **Store** | *Where it lives* | The immutable installed artifact, keyed by name and exact version, under `~/.neuron/executors` |
-| **Runtime** | *How it executes* | Spawning, supervising, and terminating executor workers |
+| **Store** | *Where it lives* | The immutable installed artifact, keyed by name and exact version, under `~/.neuron/capabilityRuntimes` |
+| **Runtime** | *How it executes* | Spawning, supervising, and terminating capability runtime workers |
 
-The CLI runs this pipeline during `neuron build` and then **freezes** the exact resolved versions into the build record. N.O.R.E. therefore never resolves modules itself — it receives a closed set of resolved executors and launches instances from them.
+The CLI runs this pipeline during `neuron build` and then **freezes** the exact resolved versions into the build record. N.O.R.E. therefore never resolves modules itself — it receives a closed set of resolved capability runtimes and launches instances from them.
 
 Built-in modules are the exception that proves the rule: they run in-process inside N.O.R.E., so resolution skips them and the runtime dispatches them directly. See [docs/MODULES.md](./MODULES.md) for the full model.
 
@@ -280,43 +280,43 @@ Built-in modules are the exception that proves the rule: they run in-process ins
 
 ## N.O.R.E. — the runtime engine
 
-**N.O.R.E. (Neuron Operational Runtime Engine)** is the daemon that registers systems, creates instances, executes them, and persists their records.
+**N.O.R.E. (Neuron Operational Runtime Engine)** is the daemon that registers assemblies, creates instances, executes them, and persists their records.
 
 ```mermaid
 flowchart TB
     API[API<br/>HTTP/JSON over Unix socket · TCP opt-in<br/>WebSocket for live events] --> IM[Instance Manager]
-    API --> SR[System Repository]
+    API --> SR[Assembly Repository]
     IM --> EE[Execution Engine]
     EE --> EB[Event Bus]
-    EE --> ER[Executor Runtimes]
+    EE --> ER[Capability Runtimes]
     EB --> ST[Storage<br/>provider interface · SQLite]
     EE --> RE[CEL Resolver]
     ER --> PROC[Process backend]
     ER --> WASM[WASM backend]
 ```
 
-The runtime boundary inside N.O.R.E. is the **executor runtime** abstraction. One interface, multiple backends:
+The runtime boundary inside N.O.R.E. is the **capability runtime** abstraction. One interface, multiple backends:
 
 ```mermaid
 flowchart TB
-    ER[Executor Runtime] --> PROC[Process Runtime<br/>long-lived workers · gRPC over Unix socket]
+    ER[Capability Runtime] --> PROC[Process Runtime<br/>long-lived workers · gRPC over Unix socket]
     ER --> WASM[WASM Runtime<br/>WASI modules in an isolated context]
     ER -. future .-> CONT[Container Runtime]
     ER -. future .-> REM[Remote Runtime]
 ```
 
-A backend owns starting the executor, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that.
+A backend owns starting the capability runtime, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that.
 
 ### Instance lifecycle
 
-A System definition is static. An **Instance** is a living realization with its own state. Instances are created from a registered system, and each creation plans and runs the system across its services:
+An Assembly definition is static. An **Instance** is a living realization with its own state. Instances are created from a registered assembly, and each creation plans and runs the assembly across its capabilities:
 
 ```mermaid
 flowchart LR
-    A[register system] --> B[create instance]
+    A[register assembly] --> B[create instance]
     B --> C[plan execution]
     C --> D[schedule over event bus]
-    D --> E[execute services through executor runtimes]
+    D --> E[execute capabilities through capability runtimes]
     E --> F[terminal execution state]
     F --> G[events streamed over WebSocket · SSE fallback]
 ```
@@ -325,28 +325,28 @@ Instances survive runtime restarts: on startup, N.O.R.E. restores persisted inst
 
 ### Safe shutdown
 
-On `SIGINT`/`SIGTERM`, N.O.R.E. closes listeners and **gracefully stops live instances** before exiting, so executor-backed resources (worker processes, WASM modules) receive a clean shutdown.
+On `SIGINT`/`SIGTERM`, N.O.R.E. closes listeners and **gracefully stops live instances** before exiting, so capability-runtime-backed resources (worker processes, WASM modules) receive a clean shutdown.
 
 ---
 
-## The executor protocol
+## The capability runtime protocol
 
-The runtime never assumes an executor is written in Go, compiled to WASM, or launched as a process. Executors speak a **stable, language-neutral protocol**:
+The runtime never assumes a capability runtime is written in Go, compiled to WASM, or launched as a process. Capability runtimes speak a **stable, language-neutral protocol**:
 
 | Protocol | Transport | Workers |
 | --- | --- | --- |
-| `neuron/executor-v1` | gRPC (protobuf) | Long-lived workers |
-| `neuron/executor-v1-json` | Line-delimited JSON over stdio | One-shot workers |
+| `neuron/capability-runtime-v1` | gRPC (protobuf) | Long-lived workers |
+| `neuron/capability-runtime-v1-json` | Line-delimited JSON over stdio | One-shot workers |
 
-The gRPC surface is defined in `shared/protocol/executor/v1`. It covers handshake, protocol version, identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. For a simple one-shot module, the JSON variant keeps the barrier to entry at "read a line, write a line."
+The gRPC surface is defined in `shared/protocol/capabilityruntime/v1`. It covers handshake, protocol version, identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. For a simple one-shot module, the JSON variant keeps the barrier to entry at "read a line, write a line."
 
-The transport detail lives behind the executor runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring an executor is covered by the Go SDK in `packages/executor-sdks/golang` and by the .NET SDK in `packages/executor-sdks/dotnet`; a reference module is shipped in `examples/executors/echo`, compiled for both runtimes from the same source.
+The transport detail lives behind the capability runtime abstraction, which is why the same logical module can be hosted as a process or as WASM without the rest of the system caring. Authoring a capability runtime is covered by the Go SDK in `packages/executor-sdks/golang` and by the .NET SDK in `packages/executor-sdks/dotnet`; a reference module is shipped in `examples/capability-runtimes/echo`, compiled for both runtimes from the same source.
 
 ---
 
 ## Persistence
 
-N.O.R.E. persists registered systems, instances, executions, and the event log through a small storage provider interface (`storage.Store`), implemented today by SQLite under the configured data directory (`~/.neuron/nore`).
+N.O.R.E. persists registered assemblies, instances, executions, and the event log through a small storage provider interface (`storage.Store`), implemented today by SQLite under the configured data directory (`~/.neuron/nore`).
 
 Executions are kept in a memory-backed store that mirrors records into persistent storage, so live executions are fully in-memory for speed and durable for recovery. On restart, N.O.R.E. restores persisted instances and their in-flight executions.
 
@@ -357,7 +357,7 @@ Execution history and retention are intended to become a **configurable storage 
 ## Security & isolation
 
 - **Default transport is local.** N.O.R.E. listens on a Unix socket (mode `0600`) owned by the local user. TCP is opt-in and the API is unauthenticated — exposing it over an untrusted network is unsupported.
-- **External executors are untrusted.** They are verified by digest before install, hosted out-of-process, and never loaded into the N.O.R.E. address space (with the deliberate exception of modules shipped as part of N.O.R.E. itself).
+- **External capability runtimes are untrusted.** They are verified by digest before install, hosted out-of-process, and never loaded into the N.O.R.E. address space (with the deliberate exception of modules shipped as part of N.O.R.E. itself).
 - **Capabilities are metadata, not permissions.** A module manifest may declare capabilities; the runtime enforces actual permissions at the execution boundary.
 - **GitHub is a distribution source, not a security boundary.** Release artifacts are verified by digest before installation.
 
@@ -365,7 +365,7 @@ Execution history and retention are intended to become a **configurable storage 
 
 ## Performance principles
 
-- Concurrency is bounded by an executor worker pool; long-lived workers are reused across requests rather than respawned per call.
+- Concurrency is bounded by a capability runtime worker pool; long-lived workers are reused across requests rather than respawned per call.
 - Resolution prefers already-installed artifacts, so instance execution stays local and offline once modules are in the store.
 - Optimization follows measurement, not assumption — see [docs/RUNTIME.md](./RUNTIME.md).
 
@@ -378,9 +378,9 @@ Execution history and retention are intended to become a **configurable storage 
 
 | | |
 | --- | --- |
-| **Modules & executors** | The unified module model in detail — [docs/MODULES.md](./MODULES.md) |
+| **Modules & capability runtimes** | The unified module model in detail — [docs/MODULES.md](./MODULES.md) |
 | **Runtime deep dive** | The runtime execution model (maintainer-focused) — [docs/RUNTIME.md](./RUNTIME.md) |
 | **CLI** | The `neuron` CLI — [application/README.md](../application/README.md) |
 | **Runtime engine** | N.O.R.E. reference (maintainer-focused) — [nore/README.md](../nore/README.md) |
-| **TypeScript SDK** | The system-definition language — [packages/system-sdks/typescript/README.md](../packages/system-sdks/typescript/README.md) |
-| **Getting started** | Build and run your first system — [docs/GETTING_STARTED.md](./GETTING_STARTED.md) |
+| **TypeScript SDK** | The assembly-definition language — [packages/assembly-sdks/typescript/README.md](../packages/assembly-sdks/typescript/README.md) |
+| **Getting started** | Build and run your first assembly — [docs/GETTING_STARTED.md](./GETTING_STARTED.md) |

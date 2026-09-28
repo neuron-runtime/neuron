@@ -9,7 +9,7 @@
 #     └── neuron         (application CLI binary)
 #     └── nore           (N.O.R.E. daemon binary)
 #     └── nore-daemon    (alias of the daemon binary)
-#     └── echo-executor  (reference executor, when built)
+#     └── echo-executor  (reference capability runtime, when built)
 #
 # then exposes them from ~/.local/bin via symlinks so the commands are usable
 # from any directory without copying binaries into the system and without
@@ -24,7 +24,7 @@
 # script) updates the installed commands in place)Skip stale copies.
 #
 # The installation is intentionally NON-destructive to user state: it never
-# touches ~/.neuron/ (future executor store / execution state). Use
+# touches ~/.neuron/ (future capability runtime store / execution state). Use
 # clean-dev.sh for a full reset of user-owned Neuron state.
 #
 # Prerequisites: Go 1.26.5+, git. ~/.local/bin must be on PATH (a hint is
@@ -71,12 +71,12 @@ echo "==> Building N.O.R.E. daemon"
 # it up when locating the runtime). Both names point at the same dev binary.
 ln -sfn "nore" "$DEV_DIR/nore-daemon"
 
-# The reference echo executor is optional; build it when it compiles so the
-# first e2e smoke test has a real executor to install.
+# The reference echo capability runtime is optional; build it when it compiles
+# so the first e2e smoke test has a real capability runtime to install.
 if (cd "$ROOT/examples/executors/echo" && GOWORK=off go build -o "$DEV_DIR/echo-executor" .) 2>/dev/null; then
-  echo "==> Built reference echo executor (examples/executors/echo)"
+  echo "==> Built reference echo capability runtime (examples/executors/echo)"
 else
-  echo "==> Skipped reference echo executor (does not compile; not required)"
+  echo "==> Skipped reference echo capability runtime (does not compile; not required)"
 fi
 
 # ---------------------------------------------------------------------------

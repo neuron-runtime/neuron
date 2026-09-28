@@ -1,0 +1,97 @@
+apiVersion: neuron/v1
+kind: Assembly
+
+metadata:
+  name: order-processing
+  version: 1.0.0
+  description: Order processing pipeline
+
+capabilities:
+  - ref: validate-order
+    entry: ../../capabilities/validate-order.yaml
+  - ref: parse-order
+    entry: ../../capabilities/parse-order.yaml
+  - ref: enrich-customer
+    entry: ../../capabilities/enrich-customer.yaml
+  - ref: calculate-totals
+    entry: ../../capabilities/calculate-totals.yaml
+  - ref: authorize-payment
+    entry: ../../capabilities/authorize-payment.yaml
+  - ref: capture-payment
+    entry: ../../capabilities/capture-payment.yaml
+  - ref: create-shipment
+    entry: ../../capabilities/create-shipment.yaml
+  - ref: send-confirmation
+    entry: ../../capabilities/send-confirmation.yaml
+
+bindings:
+  - from: validate-order
+    to: parse-order
+    mappings:
+      - target: validation_data
+        expression: "source.result"
+    validations:
+      - expression: "source.result.valid == true"
+        message: "Order validation failed"
+
+  - from: parse-order
+    to: enrich-customer
+    mappings:
+      - target: customer_id
+        expression: "source.result.validation_data.order.customer_id"
+
+  - from: enrich-customer
+    to: calculate-totals
+    mappings:
+      - target: items
+        expression: "execution.params.order.items"
+      - target: customer_tier
+        expression: "source.result.customer_data.tier"
+      - target: shipping_state
+        expression: "source.result.customer_data.shipping_address.state"
+      - target: email
+        expression: "source.result.customer_data.email"
+
+  - from: calculate-totals
+    to: authorize-payment
+    mappings:
+      - target: amount_cents
+        expression: "execution.params.order.total"
+      - target: currency
+        expression: "execution.params.order.currency"
+      - target: email
+        expression: "source.result.email"
+
+  - from: authorize-payment
+    to: capture-payment
+    mappings:
+      - target: payment_intent_id
+        expression: "source.result.payment_intent.id"
+    validations:
+      - expression: "source.result.payment_intent.status == 'requires_capture'"
+        message: "Payment not authorized"
+
+  - from: capture-payment
+    to: create-shipment
+    mappings:
+      - target: order
+        expression: "execution.params.order"
+      - target: shipping_address
+        expression: "execution.params.order.shipping_address"
+      - target: email
+        expression: "execution.params.order.customer_email"
+    validations:
+      - expression: "source.result.capture_result.status == 'succeeded'"
+        message: "Payment capture failed"
+
+  - from: create-shipment
+    to: send-confirmation
+    mappings:
+      - target: tracking_number
+        expression: "source.result.shipment.tracking_number"
+      - target: carrier
+        expression: "source.result.shipment.carrier"
+      - target: email
+        expression: "source.result.email"
+      - target: grand_total
+        expression: "execution.params.order.total"

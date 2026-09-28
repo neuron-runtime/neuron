@@ -16,7 +16,7 @@ func buildTransitionEnvironment(execution *exec.Execution, sourceNode types.Exec
 	return resolver.Environment{
 		Source: map[string]any{
 			"id": string(capability.Metadata.ID), "name": capability.Metadata.Name, "type": string(capability.Type),
-			"input": data.SnakeMap(execution.Params(capability.Metadata.ID)), "output": data.SnakeMap(output),
+			"params": data.SnakeMap(execution.Params(capability.Metadata.ID)), "result": data.SnakeMap(output),
 			"metadata": map[string]any{
 				"id": string(capability.Metadata.ID), "name": capability.Metadata.Name,
 				"description": capability.Metadata.Description, "version": capability.Metadata.Version,
@@ -24,7 +24,7 @@ func buildTransitionEnvironment(execution *exec.Execution, sourceNode types.Exec
 		},
 		Execution: map[string]any{
 			"id": string(execution.ID), "correlation_id": string(execution.CorrelationID),
-			"input": data.SnakeMap(execution.InitialParams()),
+			"params": data.SnakeMap(execution.InitialParams()),
 			"blueprint": map[string]any{
 				"id": string(execution.Blueprint.Metadata.ID), "name": execution.Blueprint.Metadata.Name,
 				"version": execution.Blueprint.Metadata.Version,

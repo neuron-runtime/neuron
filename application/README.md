@@ -1,6 +1,6 @@
 # Neuron Command Line Reference
 
-The `neuron` CLI is the single user-facing interface to Neuron: author projects, build and register systems, manage external modules, create instances, execute systems, and stream execution events while it manages the N.O.R.E. runtime engine (the daemon) for you in the background.
+The `neuron` CLI is the single user-facing interface to Neuron: author projects, build and register assemblies, manage external modules, create instances, execute assemblies, and stream execution events while it manages the N.O.R.E. runtime engine (the daemon) for you in the background.
 
 > [!IMPORTANT]
 > You never interact with the N.O.R.E. daemon directly. The CLI starts it, checks its health, talks to it over a local Unix socket, and stops it. From the user's perspective there is a single product: `neuron`.
@@ -12,7 +12,7 @@ sequenceDiagram
     participant U as User
     participant C as neuron CLI
     participant D as N.O.R.E. daemon
-    participant S as Executor Store
+    participant S as Capability Runtime Store
 
     U->>C: neuron build
     C->>C: build project → canonical manifest
@@ -21,8 +21,8 @@ sequenceDiagram
     alt not running
         C->>D: start bundled nore (Unix socket + data dir)
     end
-    C->>D: POST /v1/register (compiled system + frozen executors)
-    D-->>C: system key
+    C->>D: POST /v1/register (compiled assembly + frozen capability runtimes)
+    D-->>C: assembly key
     C-->>U: built and registered with key
 
     U->>C: neuron run --input '{...}'
@@ -129,14 +129,14 @@ Flags:
   -l, --lang string   project authoring language (ts, typescript, yaml, yml) (default "ts")
 ```
 
-`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and scaffolds a runnable project: a `neuron.config.json`, and — for the default TypeScript authoring surface — a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a starter `system.ts`, and the canonical local executor root `neuron/executors/`.
+`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and scaffolds a runnable project: a `neuron.config.json`, and — for the default TypeScript authoring surface — a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a starter `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`.
 
 ```bash
-# Create ./my-system as a TypeScript project (default)
-neuron init my-system
+# Create ./my-assembly as a TypeScript project (default)
+neuron init my-assembly
 
-# Create ./my-system as a YAML project
-neuron init my-system --lang yaml
+# Create ./my-assembly as a YAML project
+neuron init my-assembly --lang yaml
 ```
 
 The scaffolded config declares the authoring language and entry file:
@@ -144,16 +144,16 @@ The scaffolded config declares the authoring language and entry file:
 ```json
 {
   "lang": "typescript",
-  "entry": "system.ts",
+  "entry": "assembly.ts",
   "runtime": { "execution": { "mode": "wait", "timeout": "30m" } },
-  "executors": { "localRoots": ["./neuron/executors"] },
+  "capabilityRuntimes": { "localRoots": ["./neuron/capabilityRuntimes"] },
   "inspector": { "enabled": true, "address": "127.0.0.1:7433" }
 }
 ```
 
 ### `neuron build`
 
-Build the current project and register the system with N.O.R.E.
+Build the current project and register the assembly with N.O.R.E.
 
 ```
 Usage:
@@ -169,9 +169,9 @@ Flags:
 | Step         | Responsibility                                                                                                                                                                                                                             |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Build**    | The project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`                                                                                                                                                    |
-| **Compile**  | The canonical manifest is compiled into a runtime system representation                                                                                                                                                                    |
+| **Compile**  | The canonical manifest is compiled into a runtime assembly representation                                                                                                                                                                   |
 | **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the build record. Built-in modules are skipped — they run in-process inside N.O.R.E. |
-| **Register** | The compiled system and its frozen module set are sent to N.O.R.E., which persists it and returns a system key                                                                                                                             |
+| **Register** | The compiled assembly and its frozen module set are sent to N.O.R.E., which persists it and returns an assembly key                                                                                                                          |
 
 The CLI records the registration key in `.neuron/register.json` and prints it on success:
 
@@ -186,21 +186,21 @@ neuron build
 # Force a language and a different project root
 neuron build --lang typescript --root ./pipeline
 
-# Replace any previously registered version of this system
+# Replace any previously registered version of this assembly
 neuron build --force
 ```
 
-After the build, `neuron run` executes the registered system.
+After the build, `neuron run` executes the registered assembly.
 
 > `neuron register` is a deprecated alias of `neuron build`, hidden from help, kept for existing workflows. It will be removed.
 
 ### `neuron run`
 
-Run a Neuron System.
+Run a Neuron Assembly.
 
 ```
 Usage:
-  neuron run [instance-id|system-key] [flags]
+  neuron run [instance-id|assembly-key] [flags]
 
 Flags:
       --detach         Return execution handles immediately without streaming live events
@@ -208,21 +208,21 @@ Flags:
   -v, --verbose        Enable verbose output to display event payloads
 ```
 
-`neuron run` asks N.O.R.E. to create an instance and execute a system, then streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
+`neuron run` asks N.O.R.E. to create an instance and execute an assembly, then streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
 
-Without an argument, `neuron run` runs the registered system: it loads the registration key recorded by `neuron build` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
+Without an argument, `neuron run` runs the registered assembly: it loads the registration key recorded by `neuron build` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
 
 | Target form             | Example                             | Meaning                                  |
 | ----------------------- | ----------------------------------- | ---------------------------------------- |
 | Instance ID             | `inst_ab12cd`                       | Run the instance with that exact ID      |
-| Key, colon form         | `order-processing:1.0.0`            | Run the system at that version           |
+| Key, colon form         | `order-processing:1.0.0`            | Run the assembly at that version         |
 | Key, at form            | `order-processing@1.0.0`            | Same as the colon form                   |
 | Bare name               | `order-processing`                  | Run the key's latest registered version  |
 
-Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as a system key and normalized to its colon-encoded wire form. When no argument is given and the project is not built, the command stops with a message pointing you at `neuron build`.
+Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as an assembly key and normalized to its colon-encoded wire form. When no argument is given and the project is not built, the command stops with a message pointing you at `neuron build`.
 
 ```bash
-# Run the registered system with no input, streaming events
+# Run the registered assembly with no input, streaming events
 neuron run
 
 # Provide input
@@ -231,7 +231,7 @@ neuron run --input '{"order": {"id": "ord_123", "total": 4250, "currency": "USD"
 # Re-run a specific instance
 neuron run inst_ab12cd
 
-# Run the latest registered version of a named system
+# Run the latest registered version of a named assembly
 neuron run order-processing
 
 # Show event payloads
@@ -241,11 +241,11 @@ neuron run -v
 neuron run --detach
 ```
 
-The command always asks N.O.R.E. to accept the execution asynchronously (HTTP `202`, returning execution ID, instance ID, and status), and then decides how to present it: by default it streams live events until the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`), while `--detach` prints the returned handles and returns immediately so you can follow progress with `neuron instance list`. `service.log` events render their level and message inline; other event payloads are shown only with `-v`, which also attaches the daemon's output.
+The command always asks N.O.R.E. to accept the execution asynchronously (HTTP `202`, returning execution ID, instance ID, and status), and then decides how to present it: by default it streams live events until the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`), while `--detach` prints the returned handles and returns immediately so you can follow progress with `neuron instance list`. `capability.log` events render their level and message inline; other event payloads are shown only with `-v`, which also attaches the daemon's output.
 
 ### `neuron add`
 
-Resolve and install an external module (executor) into the local store.
+Resolve and install an external module (capability runtime) into the local store.
 
 ```
 Usage:
@@ -265,11 +265,11 @@ neuron add example:echo@1.0.0
 neuron add example:echo@^1.0.0
 ```
 
-Installed modules are stored immutably under the executor store directory (`~/.neuron/executors` by default). See [Module Resolution](#module-resolution) and [docs/MODULES.md](../docs/MODULES.md).
+Installed modules are stored immutably under the capability runtime store directory (`~/.neuron/capabilityRuntimes` by default). See [Module Resolution](#module-resolution) and [docs/MODULES.md](../docs/MODULES.md).
 
 ### `neuron remove`
 
-Remove an installed external module (executor).
+Remove an installed external module (capability runtime).
 
 ```
 Usage:
@@ -282,59 +282,59 @@ neuron remove example:echo@1.0.0
 
 
 
-### `neuron executor`
+### `neuron capability-runtime`
 
-Manage external executor (module) packages installed in the local store.
+Manage external capability runtime (module) packages installed in the local store.
 
 ```
 Usage:
-  neuron executor [flags]
-  neuron executor [command]
+  neuron capability-runtime [flags]
+  neuron capability-runtime [command]
 
 Available Commands:
-  inspect     Inspect an installed executor
-  list        List installed executors
+  inspect     Inspect an installed capability runtime
+  list        List installed capability runtimes
 ```
 
 
 
-#### `neuron executor list`
+#### `neuron capability-runtime list`
 
-List installed executors.
+List installed capability runtimes.
 
 ```
 Flags:
-  -t, --type string   filter by executor type
+  -t, --type string   filter by capability runtime type
 ```
 
 ```bash
 # List everything installed
-neuron executor list
+neuron capability-runtime list
 
-# Only show executors of one type
-neuron executor list --type process
+# Only show capability runtimes of one type
+neuron capability-runtime list --type process
 ```
 
 
 
-#### `neuron executor inspect`
+#### `neuron capability-runtime inspect`
 
-Inspect an installed executor.
+Inspect an installed capability runtime.
 
 ```
 Usage:
-  neuron executor inspect [name@version] [flags]
+  neuron capability-runtime inspect [name@version] [flags]
 ```
 
 ```bash
-neuron executor inspect example:echo@1.0.0
+neuron capability-runtime inspect example:echo@1.0.0
 ```
 
 
 
 ### `neuron instance`
 
-Create, list, and manage running system instances.
+Create, list, and manage running assembly instances.
 
 ```
 Usage:
@@ -347,7 +347,7 @@ Available Commands:
   remove      Remove an instance and its executions and events
 ```
 
-An instance is a living realization of a registered system. `neuron run` creates one implicitly.
+An instance is a living realization of a registered assembly. `neuron run` creates one implicitly.
 
 #### `neuron instance list`
 
@@ -385,7 +385,7 @@ Remove an instance and its executions and events.
 
 ```
 Usage:
-  neuron instance remove [instance-id|system-key] [flags]
+  neuron instance remove [instance-id|assembly-key] [flags]
 
 Aliases:
   remove, rm
@@ -460,15 +460,15 @@ The CLI resolves configuration from several layers, later layers overriding earl
 ```json
 {
   "lang": "typescript",
-  "entry": "system.ts",
+  "entry": "assembly.ts",
   "runtime": {
     "execution": {
       "mode": "wait",
       "timeout": "30m"
     }
   },
-  "executors": {
-    "localRoots": ["./neuron/executors"]
+  "capabilityRuntimes": {
+    "localRoots": ["./neuron/capabilityRuntimes"]
   },
   "inspector": {
     "enabled": true,
@@ -485,23 +485,23 @@ The CLI resolves configuration from several layers, later layers overriding earl
 | Key                         | Default               | Meaning                                                                                                    |
 | --------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `lang`                      | `typescript`          | Project authoring language (`yaml`, `yml`, `typescript`, `ts`)                                             |
-| `entry`                     | `index.ts` / `system.yaml` | Path to the project's entry system definition (defaults: `index.ts` for TypeScript, `system.yaml` for YAML) |
-| `variables`                 | —                     | Free-form variables carried into the compiled system manifest (e.g. environment-specific settings)          |
+| `entry`                     | `index.ts` / `assembly.yaml` | Path to the project's entry assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
+| `variables`                 | —                     | Free-form variables carried into the compiled assembly manifest (e.g. environment-specific settings)        |
 | `runtime.execution.mode`    | `wait`                | Execution mode (`wait` for a blocking result, `detach` for asynchronous)                                   |
 | `runtime.execution.timeout` | `30m`                 | Execution timeout                                                                                          |
-| `runtime.workers.min`       | `1`                   | Minimum executor workers                                                                                   |
-| `runtime.workers.max`       | `8`                   | Maximum executor workers                                                                                   |
+| `runtime.workers.min`       | `1`                   | Minimum capability runtime workers                                                                          |
+| `runtime.workers.max`       | `8`                   | Maximum capability runtime workers                                                                          |
 | `daemon.socket`             | `~/.neuron/nore.sock` | Local Unix socket for the daemon                                                                           |
 | `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                                                    |
 | `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                                                           |
-| `executors.storeDir`        | `~/.neuron/executors` | Where resolved modules are installed                                                                       |
-| `executors.localRoots`      | `./neuron/executors`  | Project-scoped directories treated as implicit `local` registries for resolution                           |
-| `executors.registries`      | none                  | Registries used to resolve external modules; with no block, only built-in executors are available          |
+| `capabilityRuntimes.storeDir` | `~/.neuron/capabilityRuntimes` | Where resolved modules are installed                                                                 |
+| `capabilityRuntimes.localRoots` | `./neuron/capabilityRuntimes` | Project-scoped directories treated as implicit `local` registries for resolution                      |
+| `capabilityRuntimes.registries` | none              | Registries used to resolve external modules; with no block, only built-in capability runtimes are available |
 | `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
 | `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
 
 > [!NOTE]
-> Runtime internals — `storage.provider`, `storage.directory`, and `executors.storeDir` — are managed by Neuron and rejected from project configuration files. The daemon data directory is controlled with `NEURON_DATA_DIR`.
+> Runtime internals — `storage.provider`, `storage.directory`, and `capabilityRuntimes.storeDir` — are managed by Neuron and rejected from project configuration files. The daemon data directory is controlled with `NEURON_DATA_DIR`.
 
 
 
@@ -519,37 +519,37 @@ Environment variables can also be used for any configuration value with the `NEU
 
 ### Project layout
 
-`neuron init <project>` scaffolds a **TypeScript** project by default: `neuron.config.json` (`lang: typescript`, `entry: system.ts`), `package.json`, `tsconfig.json`, `system.ts`, and `neuron/executors/`. `neuron init <project> --lang yaml` scaffolds the canonical YAML layout instead (as shipped in `examples/ecommerce_order`):
+`neuron init <project>` scaffolds a **TypeScript** project by default: `neuron.config.json` (`lang: typescript`, `entry: assembly.ts`), `package.json`, `tsconfig.json`, `assembly.ts`, and `neuron/capabilityRuntimes/`. `neuron init <project> --lang yaml` scaffolds the canonical YAML layout instead (as shipped in `examples/ecommerce_order`):
 
 ```text
 <project>
 ├── neuron.config.json   project configuration (lang, entry, runtime)
-└── system.yaml          system definition (the entry file)
+└── assembly.yaml        assembly definition (the entry file)
 ```
 
-The system file lists its services either by `entry:` reference or inline, and connectors are declared **inline** in the system file (mappings and validations) — there is no separate `connectors/` directory.
+The assembly file lists its capabilities either by `entry:` reference or inline, and bindings are declared **inline** in the assembly file (mappings and validations) — there is no separate `bindings/` directory.
 
 `neuron build` resolves this layout, produces the canonical manifest into `.neuron/manifest.json`, compiles it, and registers the result. The TypeScript authoring surface produces the same canonical manifest from SDK definitions.
 
 ## Module Resolution
 
-When a system references an external module (for example `example:echo@1.0.0`), the CLI resolves it as follows:
+When an assembly references an external module (for example `example:echo@1.0.0`), the CLI resolves it as follows:
 
 ```mermaid
 flowchart LR
     A[Requirement<br/>logical name + version constraint] --> B[Resolution<br/>registries queried · semver match]
     B --> C[Verification<br/>canonical archive + digest]
-    C --> D[Installation<br/>immutable executor store]
-    D --> E[Freezing<br/>exact versions pinned in the system]
+    C --> D[Installation<br/>immutable capability runtime store]
+    D --> E[Freezing<br/>exact versions pinned in the assembly]
 ```
 
 
 
-1. **Requirement** — the system declares the module by logical name (`owner:path`) and optionally a version constraint.
+1. **Requirement** — the assembly declares the module by logical name (`owner:path`) and optionally a version constraint.
 2. **Resolution** — the configured registries are queried for available versions; the best matching version is chosen using semantic versioning (an empty constraint selects the latest version).
-3. **Verification** — the selected package archive is verified (canonical archive `<name>-<version>-executor.neuron.tar.gz`, cryptographic digest).
-4. **Installation** — the artifact is installed immutably into the executor store.
-5. **Freezing** — the exact resolved versions are frozen into the registered system, so the runtime can launch instances without resolving anything itself.
+3. **Verification** — the selected package archive is verified (canonical archive `<name>-<version>-capability-runtime.neuron.tar.gz`, cryptographic digest).
+4. **Installation** — the artifact is installed immutably into the capability runtime store.
+5. **Freezing** — the exact resolved versions are frozen into the registered assembly, so the runtime can launch instances without resolving anything itself.
 
 Built-in modules shipped inside N.O.R.E. are skipped during resolution; they run in-process. Everything else travels the resolution + installation + freezing path.
 
@@ -571,9 +571,9 @@ The release pipeline passes the release version through `-ldflags` so `neuron ve
 
 |                         |                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------- |
-| **Getting started**     | Run your first system — [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)               |
+| **Getting started**     | Run your first assembly — [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)             |
 | **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](../docs/INSTALLATION.md) |
-| **Modules & executors** | The unified module model — [docs/MODULES.md](../docs/MODULES.md)                            |
+| **Modules & capability runtimes** | The unified module model — [docs/MODULES.md](../docs/MODULES.md)                    |
 | **N.O.R.E.**            | The runtime engine in depth — [nore/README.md](../nore/README.md)                           |
 | **Architecture**        | Canonical pipeline and boundaries — [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)         |
 

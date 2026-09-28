@@ -181,21 +181,21 @@ Remove the binary from your PATH:
 sudo rm /usr/local/bin/neuron
 ```
 
-If you want to remove local state created by the CLI and the runtime (registered systems, instances, installed modules, and the daemon socket/data), delete the Neuron directory under your home folder:
+If you want to remove local state created by the CLI and the runtime (registered assemblies, instances, installed modules, and the daemon socket/data), delete the Neuron directory under your home folder:
 
 ```bash
 rm -r ~/.neuron
 ```
 
 > [!WARNING]
-> Removing `~/.neuron` destroys installed modules, registered systems, and execution history. Do it only if you really want a clean slate.
+> Removing `~/.neuron` destroys installed modules, registered assemblies, and execution history. Do it only if you really want a clean slate.
 
 ---
 
 ## System requirements
 
 - A 64-bit operating system from the [supported table](#supported-platforms).
-- Disk space for the binaries (tens of megabytes) plus whatever space registered systems, installed modules, and execution records occupy under `~/.neuron`.
+- Disk space for the binaries (tens of megabytes) plus whatever space registered assemblies, installed modules, and execution records occupy under `~/.neuron`.
 - On Linux, the executable bit must be set (true after extraction from a release archive).
 
 External modules are hosted out-of-process by the runtime; executing them has the same system requirements as the module's own platform target.
@@ -259,5 +259,5 @@ The CLI recreates it on the next run.
 | --- | --- |
 | **Getting started** | The full run-through — [docs/GETTING_STARTED.md](./GETTING_STARTED.md) |
 | **CLI reference** | Every `neuron` command and flag — [application/README.md](../application/README.md) |
-| **Modules & executors** | The unified module model — [docs/MODULES.md](./MODULES.md) |
+| **Modules & capability runtimes** | The unified module model — [docs/MODULES.md](./MODULES.md) |
 | **Status** | What is supported in this version — [docs/STATUS.md](./STATUS.md) |

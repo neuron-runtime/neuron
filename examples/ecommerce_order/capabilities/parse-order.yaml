@@ -1,0 +1,23 @@
+apiVersion: neuron/v1
+kind: Capability
+
+metadata:
+  name: parse-order
+  version: 1.0.0
+  description: Parse and normalize order data
+
+spec:
+  capability runtime:
+    type: neuron:core:set
+
+  config:
+    currency: USD
+
+  mappings:
+    - direction: input
+      source: validation_data
+      target: validation_data
+
+  execution:
+    mode: wait
+    timeout: 5s

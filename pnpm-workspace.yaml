@@ -1,4 +1,4 @@
 packages:
-  - "packages/system-sdks/*"
+  - "packages/assembly-sdks/*"
   - "packages/executor-sdks/*"
   - "examples/*"

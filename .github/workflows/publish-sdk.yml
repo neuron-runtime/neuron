@@ -57,7 +57,7 @@ jobs:
         run: pnpm --filter @neuron/sdk build
 
       - name: Set version from tag
-        working-directory: packages/system-sdks/typescript
+        working-directory: packages/assembly-sdks/typescript
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#sdk-v}"
@@ -69,5 +69,5 @@ jobs:
 
       # OIDC is exchanged automatically; no NODE_AUTH_TOKEN is needed.
       - name: Publish
-        working-directory: packages/system-sdks/typescript
+        working-directory: packages/assembly-sdks/typescript
         run: npm publish --access public --provenance --ignore-scripts

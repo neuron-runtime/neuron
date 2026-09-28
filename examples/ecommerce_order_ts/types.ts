@@ -22,7 +22,7 @@ export interface OrderInput {
   shippingAddress: Address;
 }
 
-export interface SystemInput {
+export interface AssemblyInput {
   order: OrderInput;
 }
 

@@ -16,7 +16,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
 - [ ] **Worker crash/restart recovery.** Exercise worker-pool restart behavior after repeated
   ```
-  executor failures under load; fix whatever explodes.
+  capability runtime failures under load; fix whatever explodes.
   ```
 - [ ] **Windows daemon lifecycle.** Verify socket-path handling and `neuron daemon` start/stop
   ```
@@ -27,21 +27,21 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   `./.neuron/data`) that are resolved against the daemon's working directory; resolve them
   against the project root and pass an absolute path to `--data-dir`.
   ```
-- [x] **Two-config-file problem for TS projects with external executors.** TS authoring is
+- [x] **Two-config-file problem for TS projects with external capability runtimes.** TS authoring is
   ```
-  `neuron.config.ts` but executor resolution reads `neuron.yaml`; `config.executorRegistries`
+  `neuron.config.ts` but capability runtime resolution reads `neuron.yaml`; `config.executorRegistries`
   is compiled into the manifest (`application/compiler/config.go`) and never consulted at
   resolution time (`executorctl.BuildCatalog`). Decide: make one the single source, or make
   the manifest path fully functional. (docs/FIRST_EXECUTOR.md A1)
   RESOLVED (UX convergence, 2026-09-13): the SDK config surface (`neuron.config.ts`,
   `defineConfig`) was removed; `neuron.config.*` is the single source of truth; the
-  manifest no longer transports a `config`/`ProjectConfig` block (system `variables` come
+  manifest no longer transports a `config`/`ProjectConfig` block (assembly `variables` come
   from config); resolution reads `cfg.Executors.Registries`.
   ```
 - [x] **`local://` dead default registry.** `defaults.go` ships `{name: local, url: local://}`
   ```
   but `BuildCatalog` silently filters entries with URL `local://`. Fresh projects are
-  pre-broken for external executors from `local`. Remove the default or make it functional;
+  pre-broken for external capability runtimes from `local`. Remove the default or make it functional;
   explode loudly on unknown registry names instead of dropping them. (A2/A4)
   RESOLVED (UX convergence, 2026-09-13): the bundled `local://` default was removed from
   `Defaults()`; only registries declared in `neuron.config.*` are consulted. The remaining
@@ -50,25 +50,26 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 - [ ] **Unknown registry names silently dropped in `BuildCatalog`.** Only `github` and
   ```
   `local` are recognized; anything else is ignored without a warning, surfacing later as
-  "executor registry not configured". (A4)
+  "capability runtime registry not configured". (A4)
   ```
 - [ ] **`defaultRegistries` never populated.** Declared in `config.go` and used as the
   ```
   requirement fallback but `Defaults()` never sets it; requirements without an explicit
-  `registry` get no fallback and a confusing "no executor registries" error. Ship
+  `registry` get no fallback and a confusing "no capability runtime registries" error. Ship
   `["local", "github"]` defaults and make the error state the exact fix. (A3)
   PARTIAL (UX convergence, 2026-09-13): `Defaults()` ships `["local"]`; `github` is
   deliberately opt-in. Confirm the fallback path resolves correctly for the shipped
   value and tighten the error to name the exact fix.
   ```
-- [x] **SDK default executor name = service name.** Services without `.executor()` get an
+- [x] **SDK default capability runtime name = capability name.** Capabilities without
   ```
-  executor name equal to the service name (e.g. `content.extract`), which fails
-  `ParseType` at registration ("must contain at least one ':' separator"). Validate in the
-  SDK or relax `ParseType`; document the `owner:capability:sub` convention. (B1)
-  RESOLVED (2026-09-13): a service without `.executor()` now defaults to the built-in
-  `neuron:core:set` (in-process, no resolution). The `owner:capability:sub` convention is
-  documented in the SDK README.
+  `.capabilityRuntime()` get a capability runtime name equal to the capability name
+  (e.g. `content.extract`), which fails `ParseType` at registration
+  ("must contain at least one ':' separator"). Validate in the SDK or relax `ParseType`;
+  document the `owner:capability:sub` convention. (B1)
+  RESOLVED (2026-09-13): a capability without `.capabilityRuntime()` now defaults to the
+  built-in `neuron:core:set` (in-process, no resolution). The `owner:capability:sub`
+  convention is documented in the SDK README.
   ```
 - [ ] **Local-registry identity reconciliation skipped.** The installer verifies
   ```
@@ -80,9 +81,9 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
   `stopped`; restored instances show `failed`. Persist terminal status on shutdown. (D5)
   ```
-- [ ] **Orphaned executor processes on daemon SIGKILL.** Spawned executors have no
+- [ ] **Orphaned capability runtime processes on daemon SIGKILL.** Spawned capability runtimes have no
   ```
-  kill-on-parent-death process group; gRPC executors with no connection-loss watcher block
+  kill-on-parent-death process group; gRPC capability runtimes with no connection-loss watcher block
   in `Serve` forever. Add Pdeathsig/setsid handling or connection-loss detection. (D7)
   ```
 - [ ] **Stale socket file left on shutdown.** The daemon closes the listener but never
@@ -99,7 +100,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   implement websocket connection 
   with room subscribtions and structure json data.
   ```
-- [x] **Single config surface decision.** Pick one source of truth for executor-registry
+- [x] **Single config surface decision.** Pick one source of truth for capability runtime-registry
   ```
   config: either consume the manifest's `executorRegistries` at resolution time, or make
   `neuron.yaml` the documented single source and drop the misleading TS path. "Both, with
@@ -110,13 +111,13 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
 - [x] **`neuron init --lang ts` scaffolding.** Generate a runnable TS project (package.json,
   ```
-  `system.ts`, `neuron.config.json` with `lang: typescript`, `entry: system.ts`, and a
-  `local` registry block) so fresh projects are not pre-broken for external executors.
+  `assembly.ts`, `neuron.config.json` with `lang: typescript`, `entry: assembly.ts`, and a
+  `local` registry block) so fresh projects are not pre-broken for external capability runtimes.
   (F4)
   RESOLVED (2026-09-13): TypeScript is the default scaffold (`neuron init`), producing
-  `neuron.config.json` (`lang: typescript`, `entry: system.ts`), `package.json` with
-  `@neuron/sdk`, `tsconfig.json`, a runnable `system.ts`, and the implicit executor root
-  `neuron/executors/` via `executors.localRoots`.
+  `neuron.config.json` (`lang: typescript`, `entry: assembly.ts`), `package.json` with
+  `@neuron/sdk`, `tsconfig.json`, a runnable `assembly.ts`, and the implicit capability runtime
+  root `neuron/capabilityRuntimes/` via `capabilityRuntimes.localRoots`.
   ```
 - [ ] **`neuron daemon status` command.** Show running/stopped, PID, data dir, socket path,
   ```
@@ -136,7 +137,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   `Project.entryFile` (`cli/project.ts:33`, recomputed in `build.ts:15`), and
   `storage.provider` (file-based today; example ships `postgres`). Delete or wire up. (C2/C3/E2)
   ```
-- [ ] **SDK manifest validation.** Validate the built `SystemManifest` shape before writing
+- [ ] **SDK manifest validation.** Validate the built `AssemblyManifest` shape before writing
   ```
   `.neuron/manifest.json`; today only the default-export presence is checked and malformed
   manifests fail later in the Go compiler. (C5)
@@ -145,16 +146,16 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
   `neuron.config.*` candidates exist; last-found-wins is silent today. (C4)
   ```
-- [ ] **Clarify or enforce `services[]` in `executor.json`.** It is required-by-schema but
+- [ ] **Clarify or enforce `capabilities[]` in `runtime.json`.** It is required-by-schema but
   ```
-  never matched against System service names; both examples repeat the executor name inside
-  it, reinforcing the service/executor conflation. (B3)
+  never matched against assembly capability names; both examples repeat the capability runtime
+  name inside it, reinforcing the capability/capability-runtime conflation. (B3)
   ```
-- [ ] **Path-resolution consistency.** Expand `executors.registries[].url` (local) against
+- [ ] **Path-resolution consistency.** Expand `capabilityRuntimes.registries[].url` (local) against
   ```
   the project root like `storage.directory`/`storeDir`, not the CLI working directory. (F2)
   ```
-- [ ] **Config slice merge semantics.** Viper replaces `executors.registries` instead of
+- [ ] **Config slice merge semantics.** Viper replaces `capabilityRuntimes.registries` instead of
   ```
   merging, silently dropping the default `github` registry when a user declares `local`.
   (F3)
@@ -173,7 +174,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
   executions across instances (currently only visible via `neuron instance list`).
   ```
-- [ ] **Per-executor resource limits.** CPU, memory, file count, and runtime limits in the
+- [ ] **Per-capability-runtime resource limits.** CPU, memory, file count, and runtime limits in the
   ```
   process runtime.
   ```
@@ -187,11 +188,14 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   model vs. internal use.
   ```
 - [ ] **TLS for the opt-in TCP endpoint.** Document client-side verification.
-- [ ] **Protocol negotiation.** Add explicit `neuron/executor-v1` version/capability negotiation
+- [ ] **Protocol negotiation.** Add explicit `neuron/capability-runtime-v1` version/capability negotiation
   ```
   checks in the runtimes' handshake.
   ```
-- [ ] **Executor-go examples.** Add gRPC-only, JSON-only, and two-runtime reference executors.
+- [ ] **Capability runtime examples (Go).** Add gRPC-only, JSON-only, and two-runtime reference
+  ```
+  capability runtimes.
+  ```
 - [ ] **Request deadlines end-to-end.** Propagate CLI-provided execution deadlines through the
   ```
   whole execution path instead of relying on transport timeouts.
@@ -201,12 +205,12 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 ## Distribution
 
-- [x] **Build and publish first executor**
+- [x] **Build and publish first capability runtime**
   ```
-  Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the executor should be written in .NET, and it should contain the typescript Service package in it repo,
+  Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the capability runtime should be written in .NET, and it should contain the typescript Capability package in it repo,
   Not yet pushed to GitHub / not yet published to a registry:
   - packages/executor-sdks/dotnet/Neuron.Executor: builds, 26 tests green, packs as NuGet. Referenced by ProjectReference from the content-extract repo.
-  - content-extract repo (Desktop/content-extract): .NET executor (neuron/executor-v1 gRPC), executor.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron build` + `neuron run` through the local catalog.
+  - content-extract repo (Desktop/content-extract): .NET capability runtime (neuron/capability-runtime-v1 gRPC), runtime.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron build` + `neuron run` through the local catalog.
   - Remaining for a public release: push content-extract to GitHub, create v1.0.0 tag, publish Neuron.Executor to NuGet, replace the sibling-checkout ProjectReference/file: dependency with versioned package references.
   ```
 
@@ -223,7 +227,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
   reachable by the default `github` registry; document catalog conventions.
   ```
-- [ ] **Additional registry runtimes.** Progress on `oci` and `remote` executor runtimes.
+- [ ] **Additional registry runtimes.** Progress on `oci` and `remote` capability runtimes.
 
 
 
@@ -231,7 +235,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
 
 - [x] **Stale event names in GETTING_STARTED.** The guide shows `service.evaluating`;
   ```
-  the real events are `service.started`/`service.completed`/`execution.completed`
+  the real events are `capability.started`/`capability.completed`/`execution.completed`
   (`nore/internal/event/event_types.go`). Align the shipped runnable transcripts. (E1)
   RESOLVED (2026-09-13): transcripts throughout GETTING_STARTED use the live event names.
   ```
@@ -253,20 +257,20 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   RESOLVED (2026-09-13): `neuron.config.ts` is gone and both examples ship clean
   `neuron.config.*` files; the `official` registry block no longer exists.
   ```
-- [x] **Create or remove `docs/executors/2026-09-05-*.md`.** Referenced by the item below
+- [x] **Create or remove `docs/capability-runtimes/2026-09-05-*.md`.** Referenced by the item below
   ```
   but the directory does not exist. (E5)
-  RESOLVED (2026-09-13): the case study moved to `docs/executors/2026-09-05-first-executor.md`.
+  RESOLVED (2026-09-13): the case study moved to `docs/capability-runtimes/2026-09-05-first-capability-runtime.md`.
   ```
-- [x] **Document executor naming + config requirement.** Explain `owner:capability:sub` and
+- [x] **Document capability runtime naming + config requirement.** Explain `owner:capability:sub` and
   ```
-  that `neuron.yaml` `executors.registries` is required for external executors even in TS
-  projects, in the SDK README and MODULES.md. (A1/B1/F1)
+  that `neuron.yaml` `capabilityRuntimes.registries` is required for external capability runtimes
+  even in TS projects, in the SDK README and MODULES.md. (A1/B1/F1)
   RESOLVED (2026-09-13): the SDK README documents `owner:capability:sub`, the built-in
   `neuron:core:set` default, and points at MODULES.md; GETTING_STARTED Part 3 states the
-  `executors.registries` requirement for external modules.
+  `capabilityRuntimes.registries` requirement for external modules.
   ```
-- [ ] **Design-notes sync.** `docs/executors/2026-09-05-*.md` must never contradict shipped
+- [ ] **Design-notes sync.** `docs/capability-runtimes/2026-09-05-*.md` must never contradict shipped
   ```
   registry/installer behavior; update as the ecosystem evolves.
   ```

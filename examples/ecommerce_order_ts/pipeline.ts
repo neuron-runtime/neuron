@@ -8,81 +8,82 @@ import {
   capturePayment,
   createShipment,
   sendConfirmation,
-} from "./services/index.js";
-import type { SystemInput } from "./types.js";
+} from "./capabilities/index.js";
+import type { AssemblyInput } from "./types.js";
 
 /**
- * Builds the order-processing pipeline from the system input.
+ * Builds the order-processing pipeline from the assembly input.
  *
- * `SystemInput` (execution context) is passed in as `input`, so the original
- * order is reachable from any step via `input.order` (compiled to
- * `execution.input.order`). Each service also forwards the order through its
- * own output, so in-flight maps read it back from the previous step's output
- * (`source.output.order`).
+ * `AssemblyInput` (execution context) is passed in as `data`, so the original
+ * order is reachable from any step via `data.order` (compiled to
+ * `execution.params.order`). Each capability also forwards the order through
+ * its own result, so in-flight mappings read it back from the previous step's
+ * result (`source.result.order`).
  *
- * Every executor is `neuron:core:set`, which echoes the service input (plus
- * config), so a service only outputs the data its input carried. Bindings are
- * therefore kept to fields the previous step actually emits, and gateway
- * conditions test order data rather than domain objects no mock step produces.
+ * Every capability runtime is `neuron:core:set`, which echoes the capability
+ * input (plus config), so a capability only results the data its input
+ * carried. Bindings are therefore kept to fields the previous step actually
+ * emits, and gateway conditions test order data rather than domain objects no
+ * mock step produces.
  */
-export function buildPipeline(input: Expressionify<{ order: SystemInput["order"] }>) {
+export function buildPipeline(data: Expressionify<{ order: AssemblyInput["order"] }>) {
   return validateOrder
-    .withInput({
-      order: input.order,
+    .withParams({
+      order: data.order,
     })
-    .next(
-      parseOrder.withInput({
-        order: validateOrder.output.order,
-        validationData: validateOrder.output,
+    .bind(
+      parseOrder.withParams({
+        order: validateOrder.result.order,
+        validationData: validateOrder.result,
       })
     )
-    .next(
-      enrichCustomer.withInput({
-        order: parseOrder.output.order,
-        customerId: parseOrder.output.order.customerId,
+    .bind(
+      enrichCustomer.withParams({
+        order: parseOrder.result.order,
+        customerId: parseOrder.result.order.customerId,
       })
     )
-    .next(
-      calculateTotals.withInput({
-        order: parseOrder.output.order,
-        items: parseOrder.output.order.items,
-        email: parseOrder.output.order.customerEmail,
+    .bind(
+      calculateTotals.withParams({
+        order: parseOrder.result.order,
+        items: parseOrder.result.order.items,
+        email: parseOrder.result.order.customerEmail,
       })
     )
-    .next(
-      authorizePayment.withInput({
-        order: parseOrder.output.order,
-        amountCents: parseOrder.output.order.total,
-        currency: parseOrder.output.order.currency,
-        email: parseOrder.output.order.customerEmail,
+    .bind(
+      authorizePayment.withParams({
+        order: parseOrder.result.order,
+        amountCents: parseOrder.result.order.total,
+        currency: parseOrder.result.order.currency,
+        email: parseOrder.result.order.customerEmail,
       })
     )
-    .next(
-      capturePayment.withInput({
-        order: authorizePayment.output.order,
-        amountCents: authorizePayment.output.amountCents,
+    .bind(
+      capturePayment.withParams({
+        order: authorizePayment.result.order,
+        amountCents: authorizePayment.result.amountCents,
       }),
       {
-        when: authorizePayment.output.amountCents.greaterThanOrEqualTo(1000),
+        when: authorizePayment.result.amountCents.greaterThanOrEqualTo(1000),
         message: "Payment not authorized",
       }
     )
-    .next(
-      createShipment.withInput({
-        order: input.order,
-        shippingAddress: input.order.shippingAddress,
-        email: input.order.customerEmail,
+    .bind(
+      createShipment.withParams({
+        order: data.order,
+        shippingAddress: data.order.shippingAddress,
+        email: data.order.customerEmail,
       }),
       {
-        when: capturePayment.output.amountCents.greaterThanOrEqualTo(1000),
+        when: capturePayment.result.amountCents.greaterThanOrEqualTo(1000),
         message: "Payment capture failed",
       }
     )
-    .next(
-      sendConfirmation.withInput({
-        order: createShipment.output.order,
-        email: createShipment.output.email,
-        grandTotal: createShipment.output.order.total,
+    .bind(
+      sendConfirmation.withParams({
+        order: createShipment.result.order,
+        email: createShipment.result.email,
+        grandTotal: createShipment.result.order.total,
       })
     );
 }

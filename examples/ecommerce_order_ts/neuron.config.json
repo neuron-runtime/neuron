@@ -1,6 +1,6 @@
 {
   "lang": "typescript",
-  "entry": "system.ts",
+  "entry": "assembly.ts",
   "runtime": {
     "execution": {
       "mode": "wait",
