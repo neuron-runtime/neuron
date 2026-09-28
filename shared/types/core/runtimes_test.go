@@ -3,7 +3,7 @@ package core
 import "testing"
 
 func TestCoreName(t *testing.T) {
-	cases := map[string]ExecutorType{
+	cases := map[string]CapabilityRuntimeType{
 		"set":     "neuron:core:set",
 		"ai":      "neuron:core:ai",
 		"command": "neuron:core:command",
@@ -15,8 +15,8 @@ func TestCoreName(t *testing.T) {
 	}
 }
 
-func TestIsCoreExecutorType(t *testing.T) {
-	core := []ExecutorType{
+func TestIsCoreRuntimeType(t *testing.T) {
+	core := []CapabilityRuntimeType{
 		"neuron:core:set",
 		"neuron:core:ai",
 		"neuron:core:log",
@@ -29,12 +29,12 @@ func TestIsCoreExecutorType(t *testing.T) {
 		"command",
 	}
 	for _, tt := range core {
-		if !IsCoreExecutorType(tt) {
-			t.Errorf("IsCoreExecutorType(%q) = false, want true", tt)
+		if !IsCoreRuntimeType(tt) {
+			t.Errorf("IsCoreRuntimeType(%q) = false, want true", tt)
 		}
 	}
 
-	notCore := []ExecutorType{
+	notCore := []CapabilityRuntimeType{
 		"neuron:set",
 		"neuron:ai",
 		"github:read",
@@ -46,8 +46,8 @@ func TestIsCoreExecutorType(t *testing.T) {
 		"neuron:core",
 	}
 	for _, tt := range notCore {
-		if IsCoreExecutorType(tt) {
-			t.Errorf("IsCoreExecutorType(%q) = true, want false", tt)
+		if IsCoreRuntimeType(tt) {
+			t.Errorf("IsCoreRuntimeType(%q) = true, want false", tt)
 		}
 	}
 }

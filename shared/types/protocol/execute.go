@@ -16,10 +16,10 @@ type ExecutionItem struct {
 }
 
 type EventItem struct {
-	ID        core.ID `json:"id"`
-	Type      string  `json:"type"`
-	ServiceID core.ID `json:"service_id"`
-	Payload   any     `json:"payload"`
+	ID           core.ID `json:"id"`
+	Type         string  `json:"type"`
+	CapabilityID core.ID `json:"capability_id"`
+	Payload      any     `json:"payload"`
 }
 
 // StreamEvent is the canonical wire shape for both historical replay and live
@@ -28,7 +28,7 @@ type StreamEvent struct {
 	ID            core.ID         `json:"id"`
 	Type          string          `json:"type"`
 	CorrelationID core.ID         `json:"correlation_id,omitempty"`
-	ServiceID     core.ID         `json:"service_id,omitempty"`
+	CapabilityID  core.ID         `json:"capability_id,omitempty"`
 	OccurredAt    int64           `json:"occurred_at"`
 	Payload       json.RawMessage `json:"payload,omitempty"`
 }

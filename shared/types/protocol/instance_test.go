@@ -7,15 +7,15 @@ func TestParseUserKey(t *testing.T) {
 		in   string
 		want InstanceKey
 	}{
-		{"order-processing", InstanceKey{SystemID: "order-processing", Version: VersionLatest}},
-		{"order-processing@1.0.0", InstanceKey{SystemID: "order-processing", Version: "1.0.0"}},
+		{"order-processing", InstanceKey{AssemblyID: "order-processing", Version: VersionLatest}},
+		{"order-processing@1.0.0", InstanceKey{AssemblyID: "order-processing", Version: "1.0.0"}},
 		{"order-processing@1.0.0#abc123:dev",
-			InstanceKey{SystemID: "order-processing", Version: "1.0.0", Hash: "abc123", Env: "dev"}},
+			InstanceKey{AssemblyID: "order-processing", Version: "1.0.0", Hash: "abc123", Env: "dev"}},
 		{"order-processing@1.0.0#abc123",
-			InstanceKey{SystemID: "order-processing", Version: "1.0.0", Hash: "abc123"}},
-		{"order-processing:2.0.0", InstanceKey{SystemID: "order-processing", Version: "2.0.0"}},
+			InstanceKey{AssemblyID: "order-processing", Version: "1.0.0", Hash: "abc123"}},
+		{"order-processing:2.0.0", InstanceKey{AssemblyID: "order-processing", Version: "2.0.0"}},
 		{"order-processing:2.0.0:def456:prod",
-			InstanceKey{SystemID: "order-processing", Version: "2.0.0", Hash: "def456", Env: "prod"}},
+			InstanceKey{AssemblyID: "order-processing", Version: "2.0.0", Hash: "def456", Env: "prod"}},
 	}
 	for _, tt := range tests {
 		got, err := ParseUserKey(tt.in)
@@ -38,7 +38,7 @@ func TestParseUserKeyErrors(t *testing.T) {
 }
 
 func TestParseUserKeyColonStringRoundTrip(t *testing.T) {
-	key := InstanceKey{SystemID: "sys", Version: "1.0.0", Hash: "h", Env: "development"}
+	key := InstanceKey{AssemblyID: "sys", Version: "1.0.0", Hash: "h", Env: "development"}
 	parsed, err := ParseUserKey(key.ColonString())
 	if err != nil {
 		t.Fatalf("parse colon string: %v", err)
@@ -61,10 +61,10 @@ func TestColonStringPreservesPartialKey(t *testing.T) {
 		key  InstanceKey
 		want string
 	}{
-		{InstanceKey{SystemID: "order-processing-ts", Version: "2.0.0"}, "order-processing-ts:2.0.0::"},
-		{InstanceKey{SystemID: "order-processing-ts"}, "order-processing-ts:latest::"},
-		{InstanceKey{SystemID: "sys", Version: "1.0.0", Hash: "abc123"}, "sys:1.0.0:abc123:"},
-		{InstanceKey{SystemID: "sys", Version: "1.0.0", Hash: "abc123", Env: "prod"}, "sys:1.0.0:abc123:prod"},
+		{InstanceKey{AssemblyID: "order-processing-ts", Version: "2.0.0"}, "order-processing-ts:2.0.0::"},
+		{InstanceKey{AssemblyID: "order-processing-ts"}, "order-processing-ts:latest::"},
+		{InstanceKey{AssemblyID: "sys", Version: "1.0.0", Hash: "abc123"}, "sys:1.0.0:abc123:"},
+		{InstanceKey{AssemblyID: "sys", Version: "1.0.0", Hash: "abc123", Env: "prod"}, "sys:1.0.0:abc123:prod"},
 	}
 	for _, tt := range tests {
 		got := tt.key.ColonString()
