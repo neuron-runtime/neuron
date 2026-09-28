@@ -38,28 +38,28 @@ func (e *Execution) Error() string {
 	return e.executionError
 }
 
-// Outputs returns a deep copy of every service output recorded so far, keyed
-// by service ID. It is the aggregate result of a finished execution.
-func (e *Execution) Outputs() map[core.ID]map[string]any {
+// Results returns a deep copy of every capability result recorded so far,
+// keyed by capability ID. It is the aggregate result of a finished execution.
+func (e *Execution) Results() map[core.ID]map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	result := make(map[core.ID]map[string]any, len(e.outputs))
-	for id, output := range e.outputs {
+	result := make(map[core.ID]map[string]any, len(e.results))
+	for id, output := range e.results {
 		result[id] = cloneMap(output)
 	}
 	return result
 }
 
-// StringKeyedOutputs is Outputs with service IDs rendered as strings, the shape
-// used on the wire (execution results and the terminal execution.completed
-// event payload).
-func (e *Execution) StringKeyedOutputs() map[string]map[string]any {
-	outputs := e.Outputs()
-	if len(outputs) == 0 {
+// StringKeyedResults is Results with capability IDs rendered as strings, the
+// shape used on the wire (execution results and the terminal
+// execution.completed event payload).
+func (e *Execution) StringKeyedResults() map[string]map[string]any {
+	results := e.Results()
+	if len(results) == 0 {
 		return nil
 	}
-	result := make(map[string]map[string]any, len(outputs))
-	for id, output := range outputs {
+	result := make(map[string]map[string]any, len(results))
+	for id, output := range results {
 		result[string(id)] = output
 	}
 	return result

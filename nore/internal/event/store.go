@@ -17,7 +17,7 @@ type persistedEvent struct {
 	Type          Type            `json:"type"`
 	CorrelationID core.ID         `json:"correlation_id"`
 	ExecutionID   core.ID         `json:"execution_id"`
-	ServiceID     core.ID         `json:"service_id"`
+	CapabilityID     core.ID         `json:"capability_id"`
 	OccurredAt    int64           `json:"occurred_at"`
 	Payload       json.RawMessage `json:"payload"`
 }
@@ -41,7 +41,7 @@ func (s *Store) Save(ctx context.Context, evt Event) error {
 		Type:          evt.Type,
 		CorrelationID: evt.Metadata.CorrelationID,
 		ExecutionID:   evt.Metadata.ExecutionID,
-		ServiceID:     evt.Metadata.ServiceID,
+		CapabilityID:     evt.Metadata.CapabilityID,
 		OccurredAt:    evt.Metadata.OccurredAt.UnixNano(),
 		Payload:       payload,
 	}
@@ -119,7 +119,7 @@ func (s *Store) load(ctx context.Context, key string) (Event, error) {
 			EventID:       pe.EventID,
 			ExecutionID:   pe.ExecutionID,
 			CorrelationID: pe.CorrelationID,
-			ServiceID:     pe.ServiceID,
+			CapabilityID:     pe.CapabilityID,
 			OccurredAt:    time.Unix(0, pe.OccurredAt).UTC(),
 		},
 		Payload: pe.Payload,

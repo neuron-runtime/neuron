@@ -9,7 +9,7 @@ import (
 
 	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
@@ -22,16 +22,16 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Key.SystemID == "" {
-		utils.ErrorJSON(w, http.StatusBadRequest, fmt.Errorf("key.system_id is required"))
+	if req.Key.AssemblyID == "" {
+		utils.ErrorJSON(w, http.StatusBadRequest, fmt.Errorf("key.assembly_id is required"))
 		return
 	}
 
-	// A system body is optional: when supplied, ensure it is durable first
+	// A assembly body is optional: when supplied, ensure it is durable first
 	// (idempotent), then lazily create the runtime from the registered
-	// artifact. When omitted, the system must have been registered already.
+	// artifact. When omitted, the assembly must have been registered already.
 	var domainKey protocol.InstanceKey
-	if req.System != nil {
+	if req.Assembly != nil {
 		key, err := h.ensureRegistered(r, req)
 		if err != nil {
 			utils.ErrorJSON(w, http.StatusBadRequest, err)
@@ -40,7 +40,7 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 		domainKey = key
 	} else {
 		domainKey = protocol.InstanceKey{
-			SystemID: req.Key.SystemID,
+			AssemblyID: req.Key.AssemblyID,
 			Version:  req.Key.Version,
 			Hash:     req.Key.Hash,
 			Env:      req.Key.Env,
@@ -63,7 +63,7 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 		Data: protocol.InstanceResponse{
 			ID:       i.ID,
 			Status:   string(i.Status()),
-			SystemID: i.Key.SystemID,
+			AssemblyID: i.Key.AssemblyID,
 			Version:  i.Key.Version,
 			Hash:     i.Key.Hash,
 			Env:      i.Key.Env,
@@ -71,15 +71,15 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ensureRegistered persists the supplied system so instance creation can load
+// ensureRegistered persists the supplied assembly so instance creation can load
 // it from the durable registry. It is idempotent: an already-registered key is
-// left untouched. It returns the resolved identity under which the system is
+// left untouched. It returns the resolved identity under which the assembly is
 // stored so callers address the same key.
 func (h *Handler) ensureRegistered(r *http.Request, req protocol.CreateInstanceRequest) (protocol.InstanceKey, error) {
 	ctx := r.Context()
 
 	key := protocol.InstanceKey{
-		SystemID: req.Key.SystemID,
+		AssemblyID: req.Key.AssemblyID,
 		Version:  req.Key.Version,
 		Hash:     req.Key.Hash,
 		Env:      req.Key.Env,
@@ -91,23 +91,23 @@ func (h *Handler) ensureRegistered(r *http.Request, req protocol.CreateInstanceR
 		key.Env = "development"
 	}
 
-	computed, err := protocol.HashSystem(*req.System)
+	computed, err := protocol.HashAssembly(*req.Assembly)
 	if err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("hash system: %w", err)
+		return protocol.InstanceKey{}, fmt.Errorf("hash assembly: %w", err)
 	}
 	if key.Hash != "" && key.Hash != computed {
-		return protocol.InstanceKey{}, fmt.Errorf("key.hash does not match system content")
+		return protocol.InstanceKey{}, fmt.Errorf("key.hash does not match assembly content")
 	}
 	key.Hash = computed
 
-	if _, err := h.compiler.Compile(*req.System); err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("invalid system: %w", err)
+	if _, err := h.compiler.Compile(*req.Assembly); err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("invalid assembly: %w", err)
 	}
 
 	now := time.Now().UTC()
-	_, _, err = h.systems.Register(ctx, system.RegisteredSystem{
+	_, _, err = h.assemblies.Register(ctx, assembly.RegisteredAssembly{
 		Key:          key,
-		System:       *req.System,
+		Assembly:       *req.Assembly,
 		RegisteredAt: now,
 		UpdatedAt:    now,
 	})

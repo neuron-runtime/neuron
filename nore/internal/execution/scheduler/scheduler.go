@@ -13,8 +13,8 @@ type Scheduler struct {
 	bus              contracts.EventBus
 	executions       contracts.ExecutionRepository
 	executionStarted event.Subscription
-	serviceCompleted event.Subscription
-	serviceFailed    event.Subscription
+	capabilityCompleted event.Subscription
+	capabilityFailed    event.Subscription
 }
 
 func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Scheduler, error) {
@@ -25,18 +25,18 @@ func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Sch
 	if err != nil {
 		return nil, err
 	}
-	completed, err := bus.Subscribe(event.ServiceCompleted, 64)
+	completed, err := bus.Subscribe(event.CapabilityCompleted, 64)
 	if err != nil {
 		_ = started.Close()
 		return nil, err
 	}
-	failed, err := bus.Subscribe(event.ServiceFailed, 64)
+	failed, err := bus.Subscribe(event.CapabilityFailed, 64)
 	if err != nil {
 		_ = started.Close()
 		_ = completed.Close()
 		return nil, err
 	}
-	return &Scheduler{bus: bus, executions: executions, executionStarted: started, serviceCompleted: completed, serviceFailed: failed}, nil
+	return &Scheduler{bus: bus, executions: executions, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed}, nil
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
@@ -52,20 +52,20 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if err := s.onExecutionStarted(ctx, received); err != nil {
 				s.failExecution(ctx, received.Metadata.ExecutionID, err)
 			}
-		case received, open := <-s.serviceCompleted.Events():
+		case received, open := <-s.capabilityCompleted.Events():
 			if !open {
 				return nil
 			}
-			if err := s.onServiceCompleted(ctx, received); err != nil {
+			if err := s.onCapabilityCompleted(ctx, received); err != nil {
 				s.failExecution(ctx, received.Metadata.ExecutionID, err)
 			}
-		case received, open := <-s.serviceFailed.Events():
+		case received, open := <-s.capabilityFailed.Events():
 			if !open {
 				return nil
 			}
-			payload, ok := received.Payload.(event.ServiceFailedPayload)
+			payload, ok := received.Payload.(event.CapabilityFailedPayload)
 			if !ok {
-				payload.Message = "service execution failed"
+				payload.Message = "capability execution failed"
 			}
 			s.failExecution(ctx, received.Metadata.ExecutionID, fmt.Errorf("%s", payload.Message))
 		}
@@ -81,27 +81,27 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	if !ok {
 		return fmt.Errorf("invalid ExecutionStarted payload")
 	}
-	entryIDs := execution.Blueprint.EntryServiceIDs
-	if err := execution.Start(payload.Input, len(entryIDs)); err != nil {
+	entryIDs := execution.Blueprint.EntryCapabilityIDs
+	if err := execution.Start(payload.Params, len(entryIDs)); err != nil {
 		return err
 	}
-	for _, serviceID := range entryIDs {
-		node := execution.Blueprint.Nodes[serviceID]
-		input := cloneMap(payload.Input)
-		if err := validateInput(node.Service, input); err != nil {
-			return fmt.Errorf("invalid entry input for service %s: %w", serviceID, err)
+	for _, capabilityID := range entryIDs {
+		node := execution.Blueprint.Nodes[capabilityID]
+		input := cloneMap(payload.Params)
+		if err := validateInput(node.Capability, input); err != nil {
+			return fmt.Errorf("invalid entry input for capability %s: %w", capabilityID, err)
 		}
-		if err := execution.MarkServiceReady(serviceID, input); err != nil {
+		if err := execution.MarkCapabilityReady(capabilityID, input); err != nil {
 			return err
 		}
-		if err := s.bus.Publish(ctx, event.New(event.ServiceReady, execution.ID, execution.CorrelationID, serviceID, event.ServiceReadyPayload{Input: input})); err != nil {
+		if err := s.bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityReadyPayload{Params: input})); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event) error {
+func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Event) error {
 	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
 	if !exists {
 		return fmt.Errorf("execution %s was not found", received.Metadata.ExecutionID)
@@ -109,21 +109,21 @@ func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event
 	if execution.IsTerminal() {
 		return nil
 	}
-	node, exists := execution.Blueprint.Nodes[received.Metadata.ServiceID]
+	node, exists := execution.Blueprint.Nodes[received.Metadata.CapabilityID]
 	if !exists {
-		return fmt.Errorf("service %s is not present in the blueprint", received.Metadata.ServiceID)
+		return fmt.Errorf("capability %s is not present in the blueprint", received.Metadata.CapabilityID)
 	}
-	output := execution.Output(received.Metadata.ServiceID)
+	output := execution.Result(received.Metadata.CapabilityID)
 
-	type scheduledService struct {
+	type scheduledCapability struct {
 		id    core.ID
 		input map[string]any
 	}
-	scheduled := make([]scheduledService, 0, len(node.Next))
+	scheduled := make([]scheduledCapability, 0, len(node.Next))
 	for _, transition := range node.Next {
-		target, exists := execution.Blueprint.Nodes[transition.TargetServiceID]
+		target, exists := execution.Blueprint.Nodes[transition.TargetCapabilityID]
 		if !exists {
-			return fmt.Errorf("target service %s is missing", transition.TargetServiceID)
+			return fmt.Errorf("target capability %s is missing", transition.TargetCapabilityID)
 		}
 		environment := buildTransitionEnvironment(execution, node, output)
 		if err := validateTransition(ctx, environment, transition); err != nil {
@@ -133,11 +133,11 @@ func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event
 		if err != nil {
 			return err
 		}
-		// Required/type validation always runs. Connector validations are additional and optional.
-		if err := validateInput(target.Service, input); err != nil {
-			return fmt.Errorf("connector %s produced invalid input for service %s: %w", transition.ConnectorID, target.Service.Metadata.ID, err)
+		// Required/type validation always runs. Binding validations are additional and optional.
+		if err := validateInput(target.Capability, input); err != nil {
+			return fmt.Errorf("binding %s produced invalid input for capability %s: %w", transition.BindingID, target.Capability.Metadata.ID, err)
 		}
-		scheduled = append(scheduled, scheduledService{id: target.Service.Metadata.ID, input: input})
+		scheduled = append(scheduled, scheduledCapability{id: target.Capability.Metadata.ID, input: input})
 	}
 
 	remaining, err := execution.CompleteCurrentAndSchedule(len(scheduled))
@@ -145,10 +145,10 @@ func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event
 		return err
 	}
 	for _, target := range scheduled {
-		if err := execution.MarkServiceReady(target.id, target.input); err != nil {
+		if err := execution.MarkCapabilityReady(target.id, target.input); err != nil {
 			return err
 		}
-		if err := s.bus.Publish(ctx, event.New(event.ServiceReady, execution.ID, execution.CorrelationID, target.id, event.ServiceReadyPayload{Input: target.input})); err != nil {
+		if err := s.bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, target.id, event.CapabilityReadyPayload{Params: target.input})); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,7 @@ func (s *Scheduler) onServiceCompleted(ctx context.Context, received event.Event
 		return nil
 	}
 	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{
-		Outputs: execution.StringKeyedOutputs(),
+		Results: execution.StringKeyedResults(),
 	}))
 }
 
@@ -170,6 +170,6 @@ func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err 
 
 func (s *Scheduler) closeSubscriptions() {
 	_ = s.executionStarted.Close()
-	_ = s.serviceCompleted.Close()
-	_ = s.serviceFailed.Close()
+	_ = s.capabilityCompleted.Close()
+	_ = s.capabilityFailed.Close()
 }

@@ -19,14 +19,14 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 	id := utils.PathID(r.PathValue("id"))
 	i, ok := h.resolveInstance(r, id)
 	if !ok {
-		// The target may still be addressable: a system key that names a
-		// registered but never-instantiated system has no runtime, yet its
+		// The target may still be addressable: a assembly key that names a
+		// registered but never-instantiated assembly has no runtime, yet its
 		// executions are vacuously empty. Return an empty list instead of a
 		// 404 so `neuron instance list --target=<name>@<version>` stays useful
-		// before the first execution. Unknown instances and systems 404.
+		// before the first execution. Unknown instances and assemblies 404.
 		if !strings.HasPrefix(id, "inst_") {
 			if key, err := protocol.ParseKey(id); err == nil {
-				if exists, existsErr := h.systems.Exists(r.Context(), key); existsErr == nil && exists {
+				if exists, existsErr := h.assemblies.Exists(r.Context(), key); existsErr == nil && exists {
 					utils.WriteJSON(w, http.StatusOK, protocol.Response{
 						Message: "executions",
 						Status:  http.StatusOK,
@@ -82,14 +82,14 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Input map[string]any `json:"input,omitempty"`
-		Mode  string         `json:"mode,omitempty"`
+		Params map[string]any `json:"params,omitempty"`
+		Mode   string         `json:"mode,omitempty"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
 
-	input := utils.MergeMaps(utils.GetQueryParams(r), body.Input)
+	input := utils.MergeMaps(utils.GetQueryParams(r), body.Params)
 
 	execution, err := i.Execute(r.Context(), input)
 	if err != nil {
@@ -141,7 +141,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			ExecutionID: execution.ID,
 			InstanceID:  i.ID,
 			Status:      string(execution.Status()),
-			Outputs:     execution.StringKeyedOutputs(),
+			Results: execution.StringKeyedResults(),
 		},
 	})
 }
@@ -207,7 +207,7 @@ func (h *Handler) GetExecutionEvents(w http.ResponseWriter, r *http.Request) {
 		items = append(items, protocol.EventItem{
 			ID:        evt.Metadata.EventID,
 			Type:      evt.Type.String(),
-			ServiceID: evt.Metadata.ServiceID,
+			CapabilityID: evt.Metadata.CapabilityID,
 			Payload:   evt.Payload,
 		})
 	}

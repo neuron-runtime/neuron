@@ -11,7 +11,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/execution"
 	"github.com/Muhammad-Jay/neuron/nore/internal/plugin"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	core2 "github.com/Muhammad-Jay/neuron/shared/types/core"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
@@ -26,10 +26,10 @@ type Manager struct {
 	workers  int
 	store    storage.Store
 	metadata *metadataStore
-	systems  *system.Repository
+	assemblies  *assembly.Repository
 }
 
-func NewManager(parent context.Context, workers int, store storage.Store, systems *system.Repository) *Manager {
+func NewManager(parent context.Context, workers int, store storage.Store, assemblies *assembly.Repository) *Manager {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -43,7 +43,7 @@ func NewManager(parent context.Context, workers int, store storage.Store, system
 		workers:        workers,
 		store:          store,
 		metadata:       newMetadataStore(store),
-		systems:        systems,
+		assemblies:        assemblies,
 	}
 	m.reconcile()
 	return m
@@ -86,7 +86,7 @@ func (m *Manager) GetByID(id string) (*Instance, bool) {
 
 // Resolve returns the live runtime for key without creating it. An exact key
 // matches directly; a partial key (name, name:version, or one carrying a hash
-// or env) is resolved through the registered systems so version-without-hash
+// or env) is resolved through the registered assemblies so version-without-hash
 // addresses the most recently registered artifact. Returns false when no
 // instance exists for the key.
 func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Instance, bool) {
@@ -97,7 +97,7 @@ func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Insta
 	}
 	m.mu.RUnlock()
 
-	if reg, err := m.systems.Resolve(ctx, key); err == nil {
+	if reg, err := m.assemblies.Resolve(ctx, key); err == nil {
 		m.mu.RLock()
 		if i, ok := m.instancesByKey[reg.Key]; ok {
 			m.mu.RUnlock()
@@ -109,13 +109,13 @@ func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Insta
 }
 
 // GetOrCreate returns the live runtime for key, lazily constructing it from
-// the durable RegisteredSystem when it is not already running. Registration
+// the durable RegisteredAssembly when it is not already running. Registration
 // itself never creates an instance; this is the only entry point that does.
-// The key may be partial (systemID, systemID:latest, systemID:version); it is
+// The key may be partial (assemblyID, assemblyID:latest, assemblyID:version); it is
 // resolved to its canonical form first so every addressing style shares the
 // same runtime.
 func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*Instance, bool, error) {
-	reg, err := m.systems.Get(ctx, key)
+	reg, err := m.assemblies.Get(ctx, key)
 	if err != nil {
 		return nil, false, err
 	}
@@ -138,11 +138,11 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 		delete(m.instancesByID, previous.ID)
 	}
 
-	execOpt, err := withExecutors(reg)
+	execOpt, err := withCapabilityRuntimes(reg)
 	if err != nil {
 		return nil, false, err
 	}
-	i, err := New(m.parent, string(id), canonical, &reg.System, m.workers, m.store, execOpt)
+	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store, execOpt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -181,14 +181,14 @@ func (m *Manager) List(opts protocol.ListOptions) []*Instance {
 	return result
 }
 
-// withExecutors decodes the frozen executor set from the registered system's
-// opaque configuration so non-core executors can be launched.
-func withExecutors(reg system.RegisteredSystem) (Option, error) {
-	resolved, err := plugin.DecodeResolvedExecutors(reg.ExecutionConfigurations)
+// withCapabilityRuntimes decodes the frozen capability runtime set from the registered assembly's
+// opaque configuration so non-core capability runtimes can be launched.
+func withCapabilityRuntimes(reg assembly.RegisteredAssembly) (Option, error) {
+	resolved, err := plugin.DecodeResolvedCapabilityRuntimes(reg.ExecutionConfigurations)
 	if err != nil {
-		return nil, fmt.Errorf("decode resolved executors for %s: %w", reg.Key.String(), err)
+		return nil, fmt.Errorf("decode resolved capability runtimes for %s: %w", reg.Key.String(), err)
 	}
-	return WithResolvedExecutors(resolved), nil
+	return WithResolvedCapabilityRuntimes(resolved), nil
 }
 
 func (m *Manager) Stop(id string) error {
@@ -212,7 +212,7 @@ func (m *Manager) Stop(id string) error {
 }
 
 // Remove stops and removes the instance addressed by target (an instance ID
-// or a colon-encoded system key). The instance's executions and events are
+// or a colon-encoded assembly key). The instance's executions and events are
 // deleted along with its durable metadata.
 func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err error) {
 	if strings.HasPrefix(strings.TrimSpace(target), "inst_") {
@@ -260,14 +260,14 @@ func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 	return nil
 }
 
-// RemoveBySystem stops and removes every instance whose key addresses the
-// given system, optionally scoped to the key's version. Returns the number of
+// RemoveByAssembly stops and removes every instance whose key addresses the
+// given assembly, optionally scoped to the key's version. Returns the number of
 // instances removed.
-func (m *Manager) RemoveBySystem(ctx context.Context, key protocol.InstanceKey) (int, error) {
+func (m *Manager) RemoveByAssembly(ctx context.Context, key protocol.InstanceKey) (int, error) {
 	m.mu.RLock()
 	var matches []*Instance
 	for _, inst := range m.instancesByID {
-		if inst.Key.SystemID != key.SystemID {
+		if inst.Key.AssemblyID != key.AssemblyID {
 			continue
 		}
 		if key.Version != "" && key.Version != protocol.VersionLatest && inst.Key.Version != key.Version {

@@ -57,6 +57,6 @@ func newTestEvent(executionID core.ID) Event {
 		executionID,
 		core.NewID("corr_"),
 		"",
-		ExecutionStartedPayload{Input: map[string]any{"execution": string(executionID)}},
+		ExecutionStartedPayload{Params: map[string]any{"execution": string(executionID)}},
 	)
 }

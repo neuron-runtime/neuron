@@ -15,8 +15,8 @@ type Analytics struct {
 
 	executionStarted event.Subscription
 	executionFailed  event.Subscription
-	serviceCompleted event.Subscription
-	serviceFailed    event.Subscription
+	capabilityCompleted event.Subscription
+	capabilityFailed    event.Subscription
 }
 
 func New(bus contracts.EventBus, logger *slog.Logger) (*Analytics, error) {
@@ -38,14 +38,14 @@ func New(bus contracts.EventBus, logger *slog.Logger) (*Analytics, error) {
 		return nil, err
 	}
 
-	completed, err := bus.Subscribe(event.ServiceCompleted, 64)
+	completed, err := bus.Subscribe(event.CapabilityCompleted, 64)
 	if err != nil {
 		_ = started.Close()
 		_ = failed.Close()
 		return nil, err
 	}
 
-	svcFailed, err := bus.Subscribe(event.ServiceFailed, 64)
+	svcFailed, err := bus.Subscribe(event.CapabilityFailed, 64)
 	if err != nil {
 		_ = started.Close()
 		_ = failed.Close()
@@ -58,8 +58,8 @@ func New(bus contracts.EventBus, logger *slog.Logger) (*Analytics, error) {
 		logger:           logger,
 		executionStarted: started,
 		executionFailed:  failed,
-		serviceCompleted: completed,
-		serviceFailed:    svcFailed,
+		capabilityCompleted: completed,
+		capabilityFailed:    svcFailed,
 	}, nil
 }
 
@@ -99,21 +99,21 @@ func (a *Analytics) Serve(ctx context.Context) error {
 				slog.String("correlation_id", string(evt.Metadata.CorrelationID)),
 				slog.String("message", msg),
 			)
-		case evt, open := <-a.serviceCompleted.Events():
+		case evt, open := <-a.capabilityCompleted.Events():
 			if !open {
 				return nil
 			}
-			a.logger.Info("Service completed",
+			a.logger.Info("Capability completed",
 				slog.String("execution_id", string(evt.Metadata.ExecutionID)),
-				slog.String("service_id", string(evt.Metadata.ServiceID)),
+				slog.String("capability_id", string(evt.Metadata.CapabilityID)),
 			)
-		case evt, open := <-a.serviceFailed.Events():
+		case evt, open := <-a.capabilityFailed.Events():
 			if !open {
 				return nil
 			}
 			var msg string
 			switch p := evt.Payload.(type) {
-			case event.ServiceFailedPayload:
+			case event.CapabilityFailedPayload:
 				msg = p.Message
 			case string:
 				msg = p
@@ -122,9 +122,9 @@ func (a *Analytics) Serve(ctx context.Context) error {
 			default:
 				msg = fmt.Sprintf("%v", evt.Payload)
 			}
-			a.logger.Error("Service failed",
+			a.logger.Error("Capability failed",
 				slog.String("execution_id", string(evt.Metadata.ExecutionID)),
-				slog.String("service_id", string(evt.Metadata.ServiceID)),
+				slog.String("capability_id", string(evt.Metadata.CapabilityID)),
 				slog.String("message", msg),
 			)
 		}
@@ -134,6 +134,6 @@ func (a *Analytics) Serve(ctx context.Context) error {
 func (a *Analytics) closeSubscriptions() {
 	_ = a.executionStarted.Close()
 	_ = a.executionFailed.Close()
-	_ = a.serviceCompleted.Close()
-	_ = a.serviceFailed.Close()
+	_ = a.capabilityCompleted.Close()
+	_ = a.capabilityFailed.Close()
 }

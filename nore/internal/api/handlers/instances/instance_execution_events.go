@@ -57,7 +57,7 @@ func (h *Handler) StreamExecutionEvents(w http.ResponseWriter, r *http.Request) 
 				ID:            msg.EventID,
 				Type:          msg.Type.String(),
 				CorrelationID: msg.CorrelationID,
-				ServiceID:     msg.ServiceID,
+				CapabilityID:     msg.CapabilityID,
 				OccurredAt:    msg.OccurredAt.UnixNano(),
 				Payload:       msg.Payload,
 			})

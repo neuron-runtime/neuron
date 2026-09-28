@@ -17,7 +17,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/version"
 )
 
@@ -32,7 +32,7 @@ func main() {
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
 	flag.StringVar(&socket, "socket", defaultSocket(), "Unix socket for local CLI clients; empty disables Unix socket")
-	flag.IntVar(&workers, "workers", 8, "executor worker count")
+	flag.IntVar(&workers, "workers", 8, "capability runtime worker count")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "persistent data directory")
 	flag.BoolVar(&showVer, "version", false, "print the N.O.R.E. version and exit")
 	flag.Parse()
@@ -55,7 +55,7 @@ func main() {
 	}
 	defer store.Close()
 
-	systems := system.NewRepository(store)
+	assemblies := assembly.NewRepository(store)
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
@@ -66,8 +66,8 @@ func main() {
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, store, systems)
-	srv := api.NewServer(inst, systems, compiler)
+	inst := instance.NewManager(ctx, workers, store, assemblies)
+	srv := api.NewServer(inst, assemblies, compiler)
 
 	type listenerEntry struct {
 		name string
@@ -118,7 +118,7 @@ func main() {
 		for _, entry := range listeners {
 			_ = entry.l.Close()
 		}
-		// Gracefully stop all live instances so executor-backed resources
+		// Gracefully stop all live instances so capability runtime-backed resources
 		// (worker processes and WASM modules) receive a clean shutdown instead
 		// of being torn down by process exit.
 		srv.StopInstances()

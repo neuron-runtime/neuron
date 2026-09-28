@@ -22,7 +22,7 @@ func (h *Handler) GetInstanceByID(w http.ResponseWriter, r *http.Request) {
 		Data: protocol.InstanceResponse{
 			ID:       i.ID,
 			Status:   string(i.Status()),
-			SystemID: i.Key.SystemID,
+			AssemblyID: i.Key.AssemblyID,
 			Version:  i.Key.Version,
 			Hash:     i.Key.Hash,
 			Env:      i.Key.Env,

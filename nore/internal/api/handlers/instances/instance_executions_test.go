@@ -14,13 +14,13 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
 	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
 // newTestHandler wires the instances handler against an isolated sqlite store
-// with no registered systems or instances.
+// with no registered assemblies or instances.
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
 
@@ -30,8 +30,8 @@ func newTestHandler(t *testing.T) *Handler {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	systemsRepo := system.NewRepository(store)
-	m := instance.NewManager(context.Background(), 2, store, systemsRepo)
+	assembliesRepo := assembly.NewRepository(store)
+	m := instance.NewManager(context.Background(), 2, store, assembliesRepo)
 
 	cel, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
@@ -42,18 +42,18 @@ func newTestHandler(t *testing.T) *Handler {
 		t.Fatalf("new planner compiler: %v", err)
 	}
 
-	return New(m, systemsRepo, compiler)
+	return New(m, assembliesRepo, compiler)
 }
 
-// registerSystem persists an arbitrary RegisteredSystem keyed as given.
-func registerSystem(t *testing.T, h *Handler, key protocol.InstanceKey) {
+// registerAssembly persists an arbitrary RegisteredAssembly keyed as given.
+func registerAssembly(t *testing.T, h *Handler, key protocol.InstanceKey) {
 	t.Helper()
-	_, _, err := h.systems.Register(context.Background(), system.RegisteredSystem{
+	_, _, err := h.assemblies.Register(context.Background(), assembly.RegisteredAssembly{
 		Key:    key,
-		System: shared.System{Metadata: shared.Metadata{Name: key.SystemID}},
+		Assembly: shared.Assembly{Metadata: shared.Metadata{Name: key.AssemblyID}},
 	})
 	if err != nil {
-		t.Fatalf("register system %s: %v", key.String(), err)
+		t.Fatalf("register assembly %s: %v", key.String(), err)
 	}
 }
 
@@ -75,13 +75,13 @@ func testListExecutions(t *testing.T, h *Handler, id string) (*httptest.Response
 	return rec, body.Status, body.Data
 }
 
-// A system that is registered but never instantiated is addressable by a
+// A assembly that is registered but never instantiated is addressable by a
 // partial key: listing its executions yields an empty list, not a 404, so
 // `neuron instance list --target=<name>@<version>` works before the first run.
 func TestListExecutionsRegisteredButIdleReturnsEmpty(t *testing.T) {
 	h := newTestHandler(t)
-	registerSystem(t, h, protocol.InstanceKey{
-		SystemID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
+	registerAssembly(t, h, protocol.InstanceKey{
+		AssemblyID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
 	})
 
 	rec, status, items := testListExecutions(t, h, "sys:2.0.0::")
@@ -93,11 +93,11 @@ func TestListExecutionsRegisteredButIdleReturnsEmpty(t *testing.T) {
 	}
 }
 
-// A full key (hash+env) for a registered but idle system behaves the same way.
+// A full key (hash+env) for a registered but idle assembly behaves the same way.
 func TestListExecutionsFullKeyIdleReturnsEmpty(t *testing.T) {
 	h := newTestHandler(t)
-	registerSystem(t, h, protocol.InstanceKey{
-		SystemID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
+	registerAssembly(t, h, protocol.InstanceKey{
+		AssemblyID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
 	})
 
 	rec, status, items := testListExecutions(t, h, "sys:2.0.0:h:wait")
@@ -109,20 +109,20 @@ func TestListExecutionsFullKeyIdleReturnsEmpty(t *testing.T) {
 	}
 }
 
-// An unregistered system key must 404.
-func TestListExecutionsUnknownSystemReturns404(t *testing.T) {
+// An unregistered assembly key must 404.
+func TestListExecutionsUnknownAssemblyReturns404(t *testing.T) {
 	h := newTestHandler(t)
-	registerSystem(t, h, protocol.InstanceKey{
-		SystemID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
+	registerAssembly(t, h, protocol.InstanceKey{
+		AssemblyID: "sys", Version: "2.0.0", Hash: "h", Env: "wait",
 	})
 
-	rec, status, _ := testListExecutions(t, h, "unknown-system:1.0.0")
+	rec, status, _ := testListExecutions(t, h, "unknown-assembly:1.0.0")
 	if status != http.StatusNotFound {
 		t.Fatalf("list executions = status %d, want 404 (body %s)", status, rec.Body.String())
 	}
 }
 
-// An unknown instance ID always 404s; it never falls back to system lookup.
+// An unknown instance ID always 404s; it never falls back to assembly lookup.
 func TestListExecutionsUnknownInstanceIDReturns404(t *testing.T) {
 	h := newTestHandler(t)
 
@@ -135,7 +135,7 @@ func TestListExecutionsUnknownInstanceIDReturns404(t *testing.T) {
 // A stale instance restored metadata-only after a daemon restart (its runtime
 // is gone, status coerced to failed) must be transparently recreated by
 // Execute rather than rejected with "instance is not running". This is what
-// makes `neuron run` re-run an already-instantiated system.
+// makes `neuron run` re-run an already-instantiated assembly.
 func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
 	if err != nil {
@@ -143,27 +143,27 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	systemsRepo := system.NewRepository(store)
-	key := protocol.InstanceKey{SystemID: "sys", Version: "1.0.0", Hash: "h", Env: "dev"}
-	if _, _, err := systemsRepo.Register(context.Background(), system.RegisteredSystem{
+	assembliesRepo := assembly.NewRepository(store)
+	key := protocol.InstanceKey{AssemblyID: "sys", Version: "1.0.0", Hash: "h", Env: "dev"}
+	if _, _, err := assembliesRepo.Register(context.Background(), assembly.RegisteredAssembly{
 		Key: key,
-		System: shared.System{
-			Metadata: shared.Metadata{Name: key.SystemID, Version: key.Version},
-			Specification: shared.SystemSpec{
-				Services: []shared.Service{{
+		Assembly: shared.Assembly{
+			Metadata: shared.Metadata{Name: key.AssemblyID, Version: key.Version},
+			Specification: shared.AssemblySpec{
+				Capabilities: []shared.Capability{{
 					Metadata: shared.Metadata{ID: shared.NewID("svc_"), Name: "sys.say", Version: "1.0.0"},
 					Type:     shared.CoreName("set"),
 				}},
 			},
 		},
 	}); err != nil {
-		t.Fatalf("register system: %v", err)
+		t.Fatalf("register assembly: %v", err)
 	}
 
 	// Seed an instance metadata record as a previous process would have left it.
 	rec := map[string]any{
 		"id":                 "inst_stale",
-		"system_id":          key.SystemID,
+		"assembly_id":          key.AssemblyID,
 		"version":            key.Version,
 		"hash":               key.Hash,
 		"env":                key.Env,
@@ -182,7 +182,7 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 
 	// A fresh manager reconciles the record as metadata-only; the runtime is
 	// intentionally absent.
-	m := instance.NewManager(context.Background(), 2, store, systemsRepo)
+	m := instance.NewManager(context.Background(), 2, store, assembliesRepo)
 	stale, ok := m.GetByID("inst_stale")
 	if !ok {
 		t.Fatal("stale instance was not restored")
@@ -199,7 +199,7 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new planner compiler: %v", err)
 	}
-	h := New(m, systemsRepo, compiler)
+	h := New(m, assembliesRepo, compiler)
 
 	body := `{"mode":"detach"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/instances/inst_stale/executions", strings.NewReader(body))

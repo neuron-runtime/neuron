@@ -12,10 +12,10 @@ type ExecutionSnapshot struct {
 	CorrelationID core.ID                           `json:"correlation_id"`
 	InstanceID    core.ID                           `json:"instance_id,omitempty"`
 	Status        Status                            `json:"status"`
-	InitialInput  map[string]any                    `json:"initial_input,omitempty"`
-	Inputs        map[core.ID]map[string]any        `json:"inputs,omitempty"`
-	Outputs       map[core.ID]map[string]any        `json:"outputs,omitempty"`
-	States        map[core.ID]ServiceExecutionState `json:"states,omitempty"`
+	InitialParams map[string]any                    `json:"initial_params,omitempty"`
+	Params        map[core.ID]map[string]any        `json:"params,omitempty"`
+	Results       map[core.ID]map[string]any        `json:"results,omitempty"`
+	States        map[core.ID]CapabilityExecutionState `json:"states,omitempty"`
 	InFlight      int                               `json:"in_flight"`
 	StartedAt     *time.Time                        `json:"started_at,omitempty"`
 	CompletedAt   *time.Time                        `json:"completed_at,omitempty"`
@@ -26,7 +26,7 @@ func (e *Execution) Snapshot() *ExecutionSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	states := make(map[core.ID]ServiceExecutionState, len(e.states))
+	states := make(map[core.ID]CapabilityExecutionState, len(e.states))
 	for id, state := range e.states {
 		states[id] = state
 	}
@@ -36,9 +36,9 @@ func (e *Execution) Snapshot() *ExecutionSnapshot {
 		CorrelationID: e.CorrelationID,
 		InstanceID:    e.InstanceID,
 		Status:        e.status,
-		InitialInput:  cloneMap(e.initialInput),
-		Inputs:        cloneInputsMap(e.inputs),
-		Outputs:       cloneInputsMap(e.outputs),
+		InitialParams: cloneMap(e.initialParams),
+		Params:        cloneParamsMap(e.params),
+		Results:       cloneParamsMap(e.results),
 		States:        states,
 		InFlight:      e.inFlight,
 		StartedAt:     e.startedAt,
@@ -52,9 +52,9 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 	defer e.mu.Unlock()
 
 	e.status = snapshot.Status
-	e.initialInput = cloneMap(snapshot.InitialInput)
-	e.inputs = cloneInputsMap(snapshot.Inputs)
-	e.outputs = cloneInputsMap(snapshot.Outputs)
+	e.initialParams = cloneMap(snapshot.InitialParams)
+	e.params = cloneParamsMap(snapshot.Params)
+	e.results = cloneParamsMap(snapshot.Results)
 	e.inFlight = snapshot.InFlight
 	e.startedAt = snapshot.StartedAt
 	e.completedAt = snapshot.CompletedAt
@@ -79,9 +79,9 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		CorrelationID:  snap.CorrelationID,
 		InstanceID:     snap.InstanceID,
 		status:         snap.Status,
-		initialInput:   snap.InitialInput,
-		inputs:         snap.Inputs,
-		outputs:        snap.Outputs,
+		initialParams:  snap.InitialParams,
+		params:         snap.Params,
+		results:        snap.Results,
 		states:         snap.States,
 		inFlight:       snap.InFlight,
 		startedAt:      snap.StartedAt,
@@ -97,7 +97,7 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 	return e, nil
 }
 
-func cloneInputsMap(source map[core.ID]map[string]any) map[core.ID]map[string]any {
+func cloneParamsMap(source map[core.ID]map[string]any) map[core.ID]map[string]any {
 	if source == nil {
 		return make(map[core.ID]map[string]any)
 	}

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
@@ -25,48 +25,48 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.compiler.Compile(req.System); err != nil {
-		utils.ErrorJSON(w, http.StatusBadRequest, fmt.Errorf("invalid system: %w", err))
+	if _, err := h.compiler.Compile(req.Assembly); err != nil {
+		utils.ErrorJSON(w, http.StatusBadRequest, fmt.Errorf("invalid assembly: %w", err))
 		return
 	}
 
 	now := time.Now().UTC()
-	reg := system.RegisteredSystem{
+	reg := assembly.RegisteredAssembly{
 		Key:                     key,
-		System:                  req.System,
+		Assembly:                  req.Assembly,
 		ExecutionConfigurations: req.ExecutionConfigurations,
 		RegisteredAt:            now,
 		UpdatedAt:               now,
 	}
 
 	if req.Force {
-		// Clear the system for (name, version) and remove any instances built
+		// Clear the assembly for (name, version) and remove any instances built
 		// from it so the replacement is authoritative.
-		if _, err := h.instances.RemoveBySystem(r.Context(), key); err != nil {
+		if _, err := h.instances.RemoveByAssembly(r.Context(), key); err != nil {
 			utils.ErrorJSON(w, http.StatusInternalServerError, err)
 			return
 		}
-		if err := h.systems.Delete(r.Context(), protocol.InstanceKey{SystemID: key.SystemID, Version: key.Version}); err != nil {
+		if err := h.assemblies.Delete(r.Context(), protocol.InstanceKey{AssemblyID: key.AssemblyID, Version: key.Version}); err != nil {
 			utils.ErrorJSON(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 
-	created, replaced, err := h.systems.Register(r.Context(), reg)
+	created, replaced, err := h.assemblies.Register(r.Context(), reg)
 	if err != nil {
 		utils.ErrorJSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	status := protocol.RegisterStatusRegistered
-	message := "system registered"
+	message := "assembly registered"
 	switch {
 	case replaced:
 		status = protocol.RegisterStatusReplaced
-		message = "system replaced"
+		message = "assembly replaced"
 	case !created:
 		status = protocol.RegisterStatusAlreadyRegistered
-		message = "system already registered"
+		message = "assembly already registered"
 	}
 
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
@@ -82,16 +82,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 // resolveKey derives the durable identity for a registration: the client key
 // is honored when provided (Hash is validated against the content), otherwise
-// the key is derived from the system metadata and content hash.
+// the key is derived from the assembly metadata and content hash.
 func resolveKey(req protocol.RegisterRequest) (protocol.InstanceKey, error) {
-	if req.Key.SystemID != "" {
+	if req.Key.AssemblyID != "" {
 		if req.Key.Hash != "" {
-			computed, err := protocol.HashSystem(req.System)
+			computed, err := protocol.HashAssembly(req.Assembly)
 			if err != nil {
-				return protocol.InstanceKey{}, fmt.Errorf("hash system: %w", err)
+				return protocol.InstanceKey{}, fmt.Errorf("hash assembly: %w", err)
 			}
 			if computed != req.Key.Hash {
-				return protocol.InstanceKey{}, fmt.Errorf("key.hash does not match system content")
+				return protocol.InstanceKey{}, fmt.Errorf("key.hash does not match assembly content")
 			}
 		}
 		if req.Key.Version == "" {
@@ -103,7 +103,7 @@ func resolveKey(req protocol.RegisterRequest) (protocol.InstanceKey, error) {
 		return req.Key, nil
 	}
 
-	key, err := protocol.SystemKey(req.System, req.Key.Env)
+	key, err := protocol.AssemblyKey(req.Assembly, req.Key.Env)
 	if err != nil {
 		return protocol.InstanceKey{}, err
 	}

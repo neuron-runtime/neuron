@@ -49,7 +49,7 @@ func TestSubscribeReplaysHistoryThenLive(t *testing.T) {
 		t.Fatal("timed out waiting for history replay")
 	}
 
-	live := event.New(event.ServiceStarted, execID, "corr", "svc", event.ServiceStartedPayload{})
+	live := event.New(event.CapabilityStarted, execID, "corr", "svc", event.CapabilityStartedPayload{})
 	if err := bus.Publish(ctx, live); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestSubscribeDedupsReplayedAndLiveEvents(t *testing.T) {
 	if err := bus.Publish(ctx, history); err != nil {
 		t.Fatal(err)
 	}
-	fresh := event.New(event.ServiceStarted, execID, "corr", "svc", event.ServiceStartedPayload{})
+	fresh := event.New(event.CapabilityStarted, execID, "corr", "svc", event.CapabilityStartedPayload{})
 	time.Sleep(2 * time.Millisecond)
 	if err := bus.Publish(ctx, fresh); err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestSubscribeResumesFromCursorWithoutBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * time.Millisecond)
-	second := event.New(event.ServiceStarted, execID, "corr", "svc", event.ServiceStartedPayload{})
+	second := event.New(event.CapabilityStarted, execID, "corr", "svc", event.CapabilityStartedPayload{})
 	if err := store.Save(ctx, second); err != nil {
 		t.Fatal(err)
 	}
