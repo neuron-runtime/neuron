@@ -1,0 +1,156 @@
+syntax = "proto3";
+
+package neuron.capability_runtime.v1;
+
+option go_package = "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1";
+
+// CapabilityRuntimeService is the gRPC contract that capability runtime
+// processes implement. N.O.R.E. acts as the client; the capability runtime
+// process acts as the server. This protocol is language-independent:
+// capability runtime authors can implement it in Go, C#, Java, Rust, Python,
+// C++, or any language with gRPC support.
+//
+// The lifecycle is:
+//   1. N.O.R.E. starts the capability runtime process (or connects to one).
+//   2. N.O.R.E. calls Initialize to negotiate protocol version and exchange identity.
+//   3. N.O.R.E. calls Execute for each execution request.
+//   4. N.O.R.E. periodically calls Health to verify the runtime is alive.
+//   5. N.O.R.E. calls Shutdown for graceful termination.
+service CapabilityRuntimeService {
+  // Initialize negotiates the protocol version and exchanges capability
+  // runtime identity.
+  // Called once per capability runtime process lifetime, before any Execute calls.
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+
+  // Execute runs one capability execution and returns the result.
+  // The runtime must process exactly one request per Execute call.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+
+  // Health reports whether the capability runtime is ready to accept requests.
+  // Called periodically by the runtime backend to detect unresponsive workers.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Shutdown requests graceful termination. The capability runtime should
+  // complete any in-flight work and close. The runtime backend will
+  // forcefully terminate the process if Shutdown does not complete within a deadline.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+// InitializeRequest is sent by N.O.R.E. to negotiate the protocol and
+// exchange capability runtime identity.
+message InitializeRequest {
+  // protocol_version is the version of the capability runtime protocol the
+  // runtime backend supports (e.g. "neuron/capability-runtime-v1"). The
+  // runtime must reject incompatible versions.
+  string protocol_version = 1;
+
+  // metadata carries capability runtime identity and configuration.
+  map<string, string> metadata = 2;
+}
+
+// InitializeResponse is returned by the capability runtime after successful
+// initialization.
+message InitializeResponse {
+  // protocol_version is the version the capability runtime supports. The
+  // runtime backend must verify this matches or is compatible with the
+  // requested version.
+  string protocol_version = 1;
+
+  // features declares what this capability runtime supports.
+  // Known values: "concurrent", "streaming", "cancellation".
+  repeated string features = 2;
+
+  // metadata carries capability runtime specific identity information.
+  map<string, string> metadata = 3;
+}
+
+// ExecuteRequest carries one execution request to the capability runtime.
+message ExecuteRequest {
+  // execution_id is a unique identifier for this execution. The capability
+  // runtime may use it for logging and correlation.
+  string execution_id = 1;
+
+  // params carries the resolved execution params for the capability. Keys
+  // map to the capability's declared params.
+  map<string, Value> params = 2;
+
+  // timeout_ms is the maximum time the capability runtime should spend on
+  // this execution. It should respect this deadline and return a timeout
+  // error if exceeded. A value of 0 means no timeout.
+  int64 timeout_ms = 3;
+
+  // correlation_id links this execution to a parent execution or request chain.
+  string correlation_id = 4;
+}
+
+// ExecuteResponse carries the result of one execution.
+message ExecuteResponse {
+  // result carries the results of the execution. Keys map to the capability's
+  // declared result fields.
+  map<string, Value> result = 1;
+
+  // error, when non-empty, records a controlled failure. The capability
+  // runtime may still return this with a successful gRPC status; the runtime
+  // treats a non-empty error as an execution failure.
+  string error = 2;
+
+  // metadata carries execution-specific metadata (e.g. timing, trace IDs).
+  map<string, string> metadata = 3;
+}
+
+// HealthRequest is sent periodically by the runtime backend.
+message HealthRequest {}
+
+// HealthResponse reports capability runtime health status.
+message HealthResponse {
+  // ready indicates the capability runtime can accept new requests.
+  bool ready = 1;
+
+  // message provides optional human-readable health information.
+  string message = 2;
+
+  // active_executions is the number of currently in-flight executions.
+  int32 active_executions = 3;
+
+  // max_executions is the maximum concurrent executions this capability
+  // runtime supports.
+  int32 max_executions = 4;
+}
+
+// ShutdownRequest requests graceful termination.
+message ShutdownRequest {
+  // timeout_ms is the maximum time the runtime backend will wait for graceful
+  // shutdown before forcefully terminating the process.
+  int64 timeout_ms = 1;
+}
+
+// ShutdownResponse confirms the capability runtime is shutting down.
+message ShutdownResponse {}
+
+// Value is a dynamic value that can represent any JSON-compatible type.
+// It mirrors google.protobuf.Value for JSON interop.
+message Value {
+  oneof kind {
+    NullValue null_value = 1;
+    double number_value = 2;
+    string string_value = 3;
+    bool bool_value = 4;
+    ListValue list_value = 5;
+    Struct struct_value = 6;
+  }
+}
+
+// NullValue represents a JSON null.
+enum NullValue {
+  NULL_VALUE = 0;
+}
+
+// ListValue is a repeated Value.
+message ListValue {
+  repeated Value values = 1;
+}
+
+// Struct is a map of string to Value.
+message Struct {
+  map<string, Value> fields = 1;
+}

@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"os"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/executor/v1"
+	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
 	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
 	"google.golang.org/grpc"
 )
@@ -70,8 +70,8 @@ type InitializeResult struct {
 	// ProtocolVersion is the protocol version the executor supports.
 	ProtocolVersion string
 
-	// Capabilities declared by the executor.
-	Capabilities []string
+	// Features declared by the executor.
+	Features []string
 
 	// Metadata carries executor-specific identity information.
 	Metadata map[string]string
@@ -112,7 +112,7 @@ func serveGRPC(socketPath string, h Handler) error {
 	server.onShutdown = func() {
 		grpcShutdownCh <- struct{}{}
 	}
-	v1.RegisterExecutorServiceServer(srv, server)
+	v1.RegisterCapabilityRuntimeServiceServer(srv, server)
 
 	// Signal readiness so N.O.R.E. can connect.
 	if readyFile := os.Getenv("NEURON_EXECUTOR_READY"); readyFile != "" {
@@ -158,7 +158,7 @@ func serveStdio(h Handler) error {
 // sdkServer is the internal gRPC server implementation that adapts the
 // Handler to the protobuf service contract.
 type sdkServer struct {
-	v1.UnimplementedExecutorServiceServer
+	v1.UnimplementedCapabilityRuntimeServiceServer
 	handler    Handler
 	onShutdown func()
 }
@@ -177,7 +177,7 @@ func (s *sdkServer) Initialize(ctx context.Context, req *v1.InitializeRequest) (
 	response := &v1.InitializeResponse{}
 	if result != nil {
 		response.ProtocolVersion = result.ProtocolVersion
-		response.Capabilities = result.Capabilities
+		response.Features = result.Features
 		response.Metadata = result.Metadata
 	}
 
@@ -192,7 +192,7 @@ func (s *sdkServer) Initialize(ctx context.Context, req *v1.InitializeRequest) (
 // Execute adapts a protobuf ExecuteRequest to the Handler.
 func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.ExecuteResponse, error) {
 	input := make(map[string]any)
-	for k, v := range req.Input {
+	for k, v := range req.Params {
 		input[k] = fromProtoValue(v)
 	}
 
@@ -204,10 +204,10 @@ func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.Ex
 	}
 
 	resp := &v1.ExecuteResponse{
-		Output: make(map[string]*v1.Value, len(out)),
+		Result: make(map[string]*v1.Value, len(out)),
 	}
 	for k, v := range out {
-		resp.Output[k] = toProtoValue(v)
+		resp.Result[k] = toProtoValue(v)
 	}
 
 	return resp, nil

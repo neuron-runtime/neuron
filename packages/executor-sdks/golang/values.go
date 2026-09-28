@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/executor/v1"
+	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
 )
 
 // toProtoValue converts a Go value to a protobuf Value. Supported Go types:

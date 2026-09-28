@@ -1,6 +1,6 @@
 using Grpc.Core;
 using Neuron.Executor.Conversion;
-using Neuron.Executor.V1;
+using Neuron.CapabilityRuntime.V1;
 
 namespace Neuron.Executor.Grpc;
 
@@ -23,12 +23,12 @@ internal sealed class ShutdownCoordinator
 
 /// <summary>
 /// Adapts the <see cref="ExecutorHandler"/> to the generated
-/// <see cref="ExecutorService.ExecutorServiceBase"/> contract. The failure
+/// <see cref="CapabilityRuntimeService.CapabilityRuntimeServiceBase"/> contract. The failure
 /// semantics mirror <c>packages/executor-sdks/golang/executor.go</c>: an exception from
 /// Execute becomes a controlled failure in the response; an exception from
 /// Initialize or Shutdown becomes a transport failure.
 /// </summary>
-internal sealed class GrpcExecutorService : ExecutorService.ExecutorServiceBase
+internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityRuntimeServiceBase
 {
     private readonly ExecutorHandler _handler;
     private readonly ShutdownCoordinator _shutdown;
@@ -59,7 +59,7 @@ internal sealed class GrpcExecutorService : ExecutorService.ExecutorServiceBase
             response.ProtocolVersion = ExecutorConstants.ProtocolV1;
         }
 
-        response.Capabilities.AddRange(result.Capabilities);
+        response.Features.AddRange(result.Features);
         foreach (var (key, value) in result.Metadata)
         {
             response.Metadata[key] = value;
@@ -70,7 +70,7 @@ internal sealed class GrpcExecutorService : ExecutorService.ExecutorServiceBase
 
     public override async Task<ExecuteResponse> Execute(ExecuteRequest request, ServerCallContext context)
     {
-        var input = ValueConverter.ToObjectDictionary(request.Input);
+        var input = ValueConverter.ToObjectDictionary(request.Params);
         var executionContext = new ExecuteContext
         {
             ExecutionId = request.ExecutionId,
@@ -89,9 +89,9 @@ internal sealed class GrpcExecutorService : ExecutorService.ExecutorServiceBase
         }
 
         var response = new ExecuteResponse();
-        foreach (var (key, value) in result.Output)
+        foreach (var (key, value) in result.Result)
         {
-            response.Output[key] = ValueConverter.ToValue(value);
+            response.Result[key] = ValueConverter.ToValue(value);
         }
 
         return response;

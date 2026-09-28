@@ -3,7 +3,7 @@ package process
 import (
 	"time"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/executor/v1"
+	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
 )
 
 // defaultExecutionTimeout is the maximum time an execution may run when the

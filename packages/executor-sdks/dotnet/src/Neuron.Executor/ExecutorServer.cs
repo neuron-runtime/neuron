@@ -15,8 +15,8 @@ namespace Neuron.Executor;
 /// termination with Shutdown.
 /// </para>
 /// <para>
-/// This SDK implements the <c>neuron/executor-v1</c> gRPC transport only. The
-/// legacy <c>neuron/executor-v1-json</c> stdin/stdout transport is deliberately
+/// This SDK implements the <c>neuron/capability-runtime-v1</c> gRPC transport only. The
+/// legacy <c>neuron/capability-runtime-v1-json</c> stdin/stdout transport is deliberately
 /// not provided; attempting to run without <c>NEURON_EXECUTOR_SOCKET</c> or with
 /// an unsupported declared protocol fails fast with an explicit error.
 /// </para>

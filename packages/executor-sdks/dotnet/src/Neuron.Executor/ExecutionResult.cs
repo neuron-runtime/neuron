@@ -6,9 +6,9 @@ namespace Neuron.Executor;
 public sealed class ExecutionResult
 {
     /// <summary>
-    /// The execution output. Keys map to the executor's declared outputs.
+    /// The execution result. Keys map to the capability's declared result fields.
     /// </summary>
-    public IReadOnlyDictionary<string, object?> Output { get; init; } =
+    public IReadOnlyDictionary<string, object?> Result { get; init; } =
         new Dictionary<string, object?>();
 
     /// <summary>

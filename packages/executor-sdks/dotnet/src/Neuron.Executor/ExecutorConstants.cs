@@ -9,10 +9,10 @@ namespace Neuron.Executor;
 public static class ExecutorConstants
 {
     /// <summary>Canonical wire protocol spoken over gRPC (Unix domain sockets).</summary>
-    public const string ProtocolV1 = "neuron/executor-v1";
+    public const string ProtocolV1 = "neuron/capability-runtime-v1";
 
     /// <summary>Legacy stdin/stdout JSON protocol (not implemented by this SDK).</summary>
-    public const string ProtocolJSONV1 = "neuron/executor-v1-json";
+    public const string ProtocolJSONV1 = "neuron/capability-runtime-v1-json";
 
     /// <summary>Declares the protocol version the runtime expects.</summary>
     public const string EnvProtocol = "NEURON_EXECUTOR_PROTOCOL";
