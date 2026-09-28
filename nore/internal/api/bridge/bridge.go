@@ -80,7 +80,7 @@ func (b *EventBridge) Stream(ctx context.Context, room string) (<-chan protocol.
 					ID:            msg.EventID,
 					Type:          msg.Type.String(),
 					CorrelationID: msg.CorrelationID,
-					ServiceID:     msg.ServiceID,
+					CapabilityID:     msg.CapabilityID,
 					OccurredAt:    msg.OccurredAt.UnixNano(),
 					Payload:       msg.Payload,
 				}

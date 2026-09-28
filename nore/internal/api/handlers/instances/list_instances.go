@@ -18,7 +18,7 @@ func (h *Handler) ListInstances(w http.ResponseWriter, r *http.Request) {
 		items = append(items, protocol.InstanceResponse{
 			ID:                i.ID,
 			Status:            string(i.Status()),
-			SystemID:          i.Key.SystemID,
+			AssemblyID:          i.Key.AssemblyID,
 			BlueprintMetadata: i.Blueprint.Metadata,
 			Version:           i.Key.Version,
 			Hash:              i.Key.Hash,

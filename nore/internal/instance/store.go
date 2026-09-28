@@ -13,10 +13,10 @@ import (
 
 // metadata is the durable record persisted for an instance. Runtime objects
 // (event bus, scheduler, engine) are deliberately not stored; they are
-// reconstructed in memory from a System when the instance is recreated.
+// reconstructed in memory from a Assembly when the instance is recreated.
 type metadata struct {
 	ID                string          `json:"id"`
-	SystemID          string          `json:"system_id"`
+	AssemblyID          string          `json:"assembly_id"`
 	Version           string          `json:"version,omitempty"`
 	Hash              string          `json:"hash,omitempty"`
 	Env               string          `json:"env,omitempty"`

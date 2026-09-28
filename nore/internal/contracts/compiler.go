@@ -6,5 +6,5 @@ import (
 )
 
 type Compiler interface {
-	Compile(system shared.System) (*types.ExecutionBlueprint, error)
+	Compile(assembly shared.Assembly) (*types.ExecutionBlueprint, error)
 }

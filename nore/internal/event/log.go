@@ -2,7 +2,7 @@ package event
 
 import "github.com/Muhammad-Jay/neuron/shared/types/core"
 
-// LogLevel is the severity of a ServiceLog payload.
+// LogLevel is the severity of a CapabilityLog payload.
 type LogLevel string
 
 const (
@@ -12,8 +12,8 @@ const (
 	LogError LogLevel = "error"
 )
 
-// LogPayload is carried by ServiceLog events and represents one structured
-// diagnostic line emitted by an executing service. It is what executors should
+// LogPayload is carried by CapabilityLog events and represents one structured
+// diagnostic line emitted by an executing capability. It is what capability runtimes should
 // use instead of writing directly to stdout.
 type LogPayload struct {
 	Level   LogLevel

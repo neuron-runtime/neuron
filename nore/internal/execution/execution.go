@@ -20,18 +20,18 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
-type ServiceStatus string
+type CapabilityStatus string
 
 const (
-	ServicePending   ServiceStatus = "pending"
-	ServiceReady     ServiceStatus = "ready"
-	ServiceRunning   ServiceStatus = "running"
-	ServiceCompleted ServiceStatus = "completed"
-	ServiceFailed    ServiceStatus = "failed"
+	CapabilityPending   CapabilityStatus = "pending"
+	CapabilityReady     CapabilityStatus = "ready"
+	CapabilityRunning   CapabilityStatus = "running"
+	CapabilityCompleted CapabilityStatus = "completed"
+	CapabilityFailed    CapabilityStatus = "failed"
 )
 
-type ServiceExecutionState struct {
-	Status      ServiceStatus
+type CapabilityExecutionState struct {
+	Status      CapabilityStatus
 	StartedAt   *time.Time
 	CompletedAt *time.Time
 	Error       string
@@ -44,10 +44,10 @@ type Execution struct {
 	Blueprint      *types.ExecutionBlueprint
 	mu             sync.RWMutex
 	status         Status
-	initialInput   map[string]any
-	inputs         map[shared.ID]map[string]any
-	outputs        map[shared.ID]map[string]any
-	states         map[shared.ID]ServiceExecutionState
+	initialParams   map[string]any
+	params         map[shared.ID]map[string]any
+	results        map[shared.ID]map[string]any
+	states         map[shared.ID]CapabilityExecutionState
 	inFlight       int
 	startedAt      *time.Time
 	completedAt    *time.Time
@@ -66,14 +66,14 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 	if correlationID == "" {
 		correlationID = shared.NewID("corr_")
 	}
-	states := make(map[shared.ID]ServiceExecutionState, len(blueprint.Nodes))
-	for serviceID := range blueprint.Nodes {
-		states[serviceID] = ServiceExecutionState{Status: ServicePending}
+	states := make(map[shared.ID]CapabilityExecutionState, len(blueprint.Nodes))
+	for capabilityID := range blueprint.Nodes {
+		states[capabilityID] = CapabilityExecutionState{Status: CapabilityPending}
 	}
 	return &Execution{
 		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
-		status: StatusPending, initialInput: make(map[string]any),
-		inputs: make(map[shared.ID]map[string]any), outputs: make(map[shared.ID]map[string]any), states: states,
+		status: StatusPending, initialParams: make(map[string]any),
+		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
 		done: make(chan struct{}),
 	}, nil
 }
@@ -89,94 +89,94 @@ func (e *Execution) signalTerminal() {
 	}
 }
 
-func (e *Execution) Start(initialInput map[string]any, initialServiceCount int) error {
+func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount int) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.status != StatusPending {
 		return fmt.Errorf("execution %s cannot start from status %s", e.ID, e.status)
 	}
-	if initialServiceCount <= 0 {
-		return errors.New("execution must start with at least one entry service")
+	if initialCapabilityCount <= 0 {
+		return errors.New("execution must start with at least one entry capability")
 	}
 	now := time.Now().UTC()
 	e.status = StatusRunning
 	e.startedAt = &now
-	e.inFlight = initialServiceCount
-	e.initialInput = cloneMap(initialInput)
+	e.inFlight = initialCapabilityCount
+	e.initialParams = cloneMap(initialParams)
 	return nil
 }
 
-func (e *Execution) MarkServiceReady(serviceID shared.ID, input map[string]any) error {
+func (e *Execution) MarkCapabilityReady(capabilityID shared.ID, input map[string]any) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.status != StatusRunning {
 		return fmt.Errorf("execution %s is not running", e.ID)
 	}
-	state, exists := e.states[serviceID]
+	state, exists := e.states[capabilityID]
 	if !exists {
-		return fmt.Errorf("service %s is not in the blueprint", serviceID)
+		return fmt.Errorf("capability %s is not in the blueprint", capabilityID)
 	}
-	if state.Status != ServicePending {
-		return fmt.Errorf("service %s cannot become ready from %s", serviceID, state.Status)
+	if state.Status != CapabilityPending {
+		return fmt.Errorf("capability %s cannot become ready from %s", capabilityID, state.Status)
 	}
-	state.Status = ServiceReady
-	e.states[serviceID] = state
-	e.inputs[serviceID] = cloneMap(input)
+	state.Status = CapabilityReady
+	e.states[capabilityID] = state
+	e.params[capabilityID] = cloneMap(input)
 	return nil
 }
 
-func (e *Execution) MarkServiceRunning(serviceID shared.ID) error {
+func (e *Execution) MarkCapabilityRunning(capabilityID shared.ID) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	state, exists := e.states[serviceID]
+	state, exists := e.states[capabilityID]
 	if !exists {
-		return fmt.Errorf("service %s is not in the blueprint", serviceID)
+		return fmt.Errorf("capability %s is not in the blueprint", capabilityID)
 	}
-	if state.Status != ServiceReady {
-		return fmt.Errorf("service %s cannot run from %s", serviceID, state.Status)
+	if state.Status != CapabilityReady {
+		return fmt.Errorf("capability %s cannot run from %s", capabilityID, state.Status)
 	}
 	now := time.Now().UTC()
-	state.Status = ServiceRunning
+	state.Status = CapabilityRunning
 	state.StartedAt = &now
-	e.states[serviceID] = state
+	e.states[capabilityID] = state
 	return nil
 }
 
-func (e *Execution) MarkServiceCompleted(serviceID shared.ID, output map[string]any) error {
+func (e *Execution) MarkCapabilityCompleted(capabilityID shared.ID, output map[string]any) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	state, exists := e.states[serviceID]
+	state, exists := e.states[capabilityID]
 	if !exists {
-		return fmt.Errorf("service %s is not in the blueprint", serviceID)
+		return fmt.Errorf("capability %s is not in the blueprint", capabilityID)
 	}
-	if state.Status != ServiceRunning {
-		return fmt.Errorf("service %s cannot complete from %s", serviceID, state.Status)
+	if state.Status != CapabilityRunning {
+		return fmt.Errorf("capability %s cannot complete from %s", capabilityID, state.Status)
 	}
 	now := time.Now().UTC()
-	state.Status = ServiceCompleted
+	state.Status = CapabilityCompleted
 	state.CompletedAt = &now
-	e.states[serviceID] = state
-	e.outputs[serviceID] = cloneMap(output)
+	e.states[capabilityID] = state
+	e.results[capabilityID] = cloneMap(output)
 	return nil
 }
 
-func (e *Execution) MarkServiceFailed(serviceID shared.ID, err error) {
+func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	state, exists := e.states[serviceID]
+	state, exists := e.states[capabilityID]
 	if !exists {
 		return
 	}
 	now := time.Now().UTC()
-	state.Status = ServiceFailed
+	state.Status = CapabilityFailed
 	state.CompletedAt = &now
 	if err != nil {
 		state.Error = err.Error()
 	}
-	e.states[serviceID] = state
+	e.states[capabilityID] = state
 }
 
-func (e *Execution) CompleteCurrentAndSchedule(nextServiceCount int) (int, error) {
+func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.status != StatusRunning {
@@ -185,7 +185,7 @@ func (e *Execution) CompleteCurrentAndSchedule(nextServiceCount int) (int, error
 	if e.inFlight <= 0 {
 		return e.inFlight, errors.New("execution in-flight counter is invalid")
 	}
-	e.inFlight += nextServiceCount - 1
+	e.inFlight += nextCapabilityCount - 1
 	return e.inFlight, nil
 }
 
@@ -224,22 +224,22 @@ func (e *Execution) IsTerminal() bool {
 	return e.status == StatusCompleted || e.status == StatusFailed || e.status == StatusCancelled
 }
 
-func (e *Execution) Input(serviceID shared.ID) map[string]any {
+func (e *Execution) Params(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.inputs[serviceID])
+	return cloneMap(e.params[capabilityID])
 }
 
-func (e *Execution) Output(serviceID shared.ID) map[string]any {
+func (e *Execution) Result(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.outputs[serviceID])
+	return cloneMap(e.results[capabilityID])
 }
 
-func (e *Execution) InitialInput() map[string]any {
+func (e *Execution) InitialParams() map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.initialInput)
+	return cloneMap(e.initialParams)
 }
 
 func cloneMap(source map[string]any) map[string]any {

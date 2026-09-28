@@ -11,16 +11,16 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/api/websocket"
 	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
 	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
-func BuildRoutes(mux *http.ServeMux, mgr *instance.Manager, systems *system.Repository, compiler *planner.Compiler) http.Handler {
+func BuildRoutes(mux *http.ServeMux, mgr *instance.Manager, assemblies *assembly.Repository, compiler *planner.Compiler) http.Handler {
 	// Health
 	mux.HandleFunc("GET /health", health.Health)
 
 	// Instances
-	instHandler := instances.New(mgr, systems, compiler)
+	instHandler := instances.New(mgr, assemblies, compiler)
 	mux.HandleFunc("GET /v1/instances", instHandler.ListInstances)
 	mux.HandleFunc("POST /v1/instances", instHandler.CreateInstance)
 	mux.HandleFunc("DELETE /v1/instances", instHandler.ClearInstances)
@@ -40,7 +40,7 @@ func BuildRoutes(mux *http.ServeMux, mgr *instance.Manager, systems *system.Repo
 	mux.HandleFunc(protocol.WebSocketPath, ws.HandleWebSocket)
 
 	// Register
-	reg := register.New(mgr, systems, compiler)
+	reg := register.New(mgr, assemblies, compiler)
 	mux.HandleFunc("POST /v1/register", reg.Register)
 
 	handler := middleware.Recovery(mux)

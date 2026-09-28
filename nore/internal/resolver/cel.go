@@ -35,7 +35,7 @@ func DefaultCELConfig() CELConfig {
 
 type celCompiler struct {
 	transitionEnv *cel.Env
-	serviceEnv    *cel.Env
+	capabilityEnv    *cel.Env
 	config        CELConfig
 }
 
@@ -65,18 +65,18 @@ func NewCELCompiler(config CELConfig) (Compiler, error) {
 		return nil, fmt.Errorf("create transition CEL environment: %w", err)
 	}
 
-	serviceEnv, err := cel.NewEnv(append(commonOptions,
+	capabilityEnv, err := cel.NewEnv(append(commonOptions,
 		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("execution", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("service", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("capability", cel.MapType(cel.StringType, cel.DynType)),
 	)...)
 	if err != nil {
-		return nil, fmt.Errorf("create service CEL environment: %w", err)
+		return nil, fmt.Errorf("create capability CEL environment: %w", err)
 	}
 
 	return &celCompiler{
 		transitionEnv: transitionEnv,
-		serviceEnv:    serviceEnv,
+		capabilityEnv:    capabilityEnv,
 		config:        config,
 	}, nil
 }
@@ -89,7 +89,7 @@ func (c *celCompiler) CompileTransitionExpression(expression string) (Program, e
 	return &transitionProgram{expression: compiled}, nil
 }
 
-func (c *celCompiler) CompileServiceConfigurations(config map[string]any) (ConfigurationProgram, error) {
+func (c *celCompiler) CompileCapabilityConfigurations(config map[string]any) (ConfigurationProgram, error) {
 	node, err := c.compileConfigurationValue(config, "config")
 	if err != nil {
 		return nil, err

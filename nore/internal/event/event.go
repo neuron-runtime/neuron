@@ -10,7 +10,7 @@ type Metadata struct {
 	EventID       core.ID
 	CorrelationID core.ID
 	ExecutionID   core.ID
-	ServiceID     core.ID
+	CapabilityID     core.ID
 	OccurredAt    time.Time
 }
 
@@ -20,29 +20,29 @@ type Event struct {
 	Payload  any
 }
 
-func New(eventType Type, executionID, correlationID, serviceID core.ID, payload any) Event {
+func New(eventType Type, executionID, correlationID, capabilityID core.ID, payload any) Event {
 	return Event{
 		Type: eventType,
 		Metadata: Metadata{
 			EventID:       core.NewID("evt_"),
 			ExecutionID:   executionID,
 			CorrelationID: correlationID,
-			ServiceID:     serviceID,
+			CapabilityID:     capabilityID,
 			OccurredAt:    time.Now().UTC(),
 		},
 		Payload: payload,
 	}
 }
 
-type ExecutionStartedPayload struct{ Input map[string]any }
+type ExecutionStartedPayload struct{ Params map[string]any }
 type ExecutionCompletedPayload struct {
-	// Outputs carries the aggregate service outputs at completion, keyed by
-	// service ID. It is populated at the terminal event so clients rendering
+	// Results carries the aggregate capability results at completion, keyed by
+	// capability ID. It is populated at the terminal event so clients rendering
 	// the final result of a run do not need a second round-trip.
-	Outputs map[string]map[string]any
+	Results map[string]map[string]any
 }
 type ExecutionFailedPayload struct{ Message string }
-type ServiceReadyPayload struct{ Input map[string]any }
-type ServiceStartedPayload struct{}
-type ServiceCompletedPayload struct{ Output map[string]any }
-type ServiceFailedPayload struct{ Message string }
+type CapabilityReadyPayload struct{ Params map[string]any }
+type CapabilityStartedPayload struct{}
+type CapabilityCompletedPayload struct{ Result map[string]any }
+type CapabilityFailedPayload struct{ Message string }

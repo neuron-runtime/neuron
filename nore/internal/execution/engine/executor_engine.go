@@ -14,26 +14,26 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
 )
 
-type ExecutorEngine struct {
+type CapabilityRuntimeEngine struct {
 	bus        contracts.EventBus
-	registry   contracts.ExecutorRegistry
+	registry   contracts.CapabilityRuntimeRegistry
 	executions contracts.ExecutionRepository
 	ready      event.Subscription
 	semaphore  chan struct{}
 }
 
-func NewExecutorEngine(bus contracts.EventBus, registry contracts.ExecutorRegistry, executions contracts.ExecutionRepository, maxConcurrency int) (*ExecutorEngine, error) {
+func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.CapabilityRuntimeRegistry, executions contracts.ExecutionRepository, maxConcurrency int) (*CapabilityRuntimeEngine, error) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
-	ready, err := bus.Subscribe(event.ServiceReady, maxConcurrency*4)
+	ready, err := bus.Subscribe(event.CapabilityReady, maxConcurrency*4)
 	if err != nil {
 		return nil, err
 	}
-	return &ExecutorEngine{bus: bus, registry: registry, executions: executions, ready: ready, semaphore: make(chan struct{}, maxConcurrency)}, nil
+	return &CapabilityRuntimeEngine{bus: bus, registry: registry, executions: executions, ready: ready, semaphore: make(chan struct{}, maxConcurrency)}, nil
 }
 
-func (e *ExecutorEngine) Run(ctx context.Context) error {
+func (e *CapabilityRuntimeEngine) Run(ctx context.Context) error {
 	var workers sync.WaitGroup
 	defer func() {
 		workers.Wait()
@@ -56,78 +56,78 @@ func (e *ExecutorEngine) Run(ctx context.Context) error {
 			go func(received event.Event) {
 				defer workers.Done()
 				defer func() { <-e.semaphore }()
-				e.executeService(ctx, received)
+				e.executeCapability(ctx, received)
 			}(received)
 		}
 	}
 }
 
-func (e *ExecutorEngine) executeService(ctx context.Context, received event.Event) {
+func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, received event.Event) {
 	execution, exists := e.executions.Get(received.Metadata.ExecutionID)
 	if !exists || execution.IsTerminal() {
 		return
 	}
-	serviceID := received.Metadata.ServiceID
-	node, exists := execution.Blueprint.Nodes[serviceID]
+	capabilityID := received.Metadata.CapabilityID
+	node, exists := execution.Blueprint.Nodes[capabilityID]
 	if !exists {
-		e.publishFailure(ctx, execution, serviceID, fmt.Errorf("service %s does not exist in the blueprint", serviceID))
+		e.publishFailure(ctx, execution, capabilityID, fmt.Errorf("capability %s does not exist in the blueprint", capabilityID))
 		return
 	}
 
-	input := execution.Input(serviceID)
-	resolvedConfig, err := node.Configurations.Resolve(ctx, resolver.ServiceEnvironment{
-		Input: input,
+	input := execution.Params(capabilityID)
+	resolvedConfig, err := node.Configurations.Resolve(ctx, resolver.CapabilityEnvironment{
+		Params: input,
 		Execution: map[string]any{
 			"id": string(execution.ID), "correlation_id": string(execution.CorrelationID),
-			"input": execution.InitialInput(),
+			"input": execution.InitialParams(),
 			"blueprint": map[string]any{
 				"id": string(execution.Blueprint.Metadata.ID), "name": execution.Blueprint.Metadata.Name,
 				"version": execution.Blueprint.Metadata.Version,
 			},
 		},
-		Service: map[string]any{
-			"id": string(node.Service.Metadata.ID), "name": node.Service.Metadata.Name,
-			"type": string(node.Service.Type), "version": node.Service.Metadata.Version,
+		Capability: map[string]any{
+			"id": string(node.Capability.Metadata.ID), "name": node.Capability.Metadata.Name,
+			"type": string(node.Capability.Type), "version": node.Capability.Metadata.Version,
 		},
 	})
 	if err != nil {
-		e.publishFailure(ctx, execution, serviceID, fmt.Errorf("resolve configurations for service %s: %w", serviceID, err))
+		e.publishFailure(ctx, execution, capabilityID, fmt.Errorf("resolve configurations for capability %s: %w", capabilityID, err))
 		return
 	}
 
-	if err := execution.MarkServiceRunning(serviceID); err != nil {
-		e.publishFailure(ctx, execution, serviceID, err)
+	if err := execution.MarkCapabilityRunning(capabilityID); err != nil {
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
-	if err := e.bus.Publish(ctx, event.New(event.ServiceStarted, execution.ID, execution.CorrelationID, serviceID, event.ServiceStartedPayload{})); err != nil {
-		e.publishFailure(ctx, execution, serviceID, err)
+	if err := e.bus.Publish(ctx, event.New(event.CapabilityStarted, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityStartedPayload{})); err != nil {
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
-	executor, err := e.registry.Resolve(node.Service.Type)
+	cr, err := e.registry.Resolve(node.Capability.Type)
 	if err != nil {
-		e.publishFailure(ctx, execution, serviceID, err)
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
-	output, err := executor.Execute(ctx, contracts.ExecutionContext{
+	output, err := cr.Execute(ctx, contracts.ExecutionContext{
 		ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
-		Service: node.Service, Input: input, ServiceConfigurations: resolvedConfig,
-		Logger: newExecLogger(e.bus, execution.ID, execution.CorrelationID, serviceID),
+		Capability: node.Capability, Params: input, CapabilityConfigurations: resolvedConfig,
+		Logger: newExecLogger(e.bus, execution.ID, execution.CorrelationID, capabilityID),
 	})
 	if err != nil {
-		e.publishFailure(ctx, execution, serviceID, err)
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
 	if output == nil {
 		output = map[string]any{}
 	}
-	if err := execution.MarkServiceCompleted(serviceID, output); err != nil {
-		e.publishFailure(ctx, execution, serviceID, err)
+	if err := execution.MarkCapabilityCompleted(capabilityID, output); err != nil {
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
-	_ = e.bus.Publish(ctx, event.New(event.ServiceCompleted, execution.ID, execution.CorrelationID, serviceID, event.ServiceCompletedPayload{Output: output}))
+	_ = e.bus.Publish(ctx, event.New(event.CapabilityCompleted, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityCompletedPayload{Result: output}))
 }
 
-func (e *ExecutorEngine) publishFailure(ctx context.Context, execution *exec.Execution, serviceID core.ID, err error) {
-	execution.MarkServiceFailed(serviceID, err)
-	_ = e.bus.Publish(ctx, event.New(event.ServiceFailed, execution.ID, execution.CorrelationID, serviceID, event.ServiceFailedPayload{Message: err.Error()}))
+func (e *CapabilityRuntimeEngine) publishFailure(ctx context.Context, execution *exec.Execution, capabilityID core.ID, err error) {
+	execution.MarkCapabilityFailed(capabilityID, err)
+	_ = e.bus.Publish(ctx, event.New(event.CapabilityFailed, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityFailedPayload{Message: err.Error()}))
 }

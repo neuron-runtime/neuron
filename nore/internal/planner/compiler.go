@@ -20,78 +20,78 @@ func NewCompiler(expressions resolver.Compiler) (*Compiler, error) {
 	return &Compiler{expressions: expressions}, nil
 }
 
-func (c *Compiler) Compile(system shared.System) (*types.ExecutionBlueprint, error) {
-	services := make(map[shared.ID]shared.Service)
-	triggerIDs := make([]shared.ID, 0, len(system.Specification.Triggers))
+func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint, error) {
+	capabilities := make(map[shared.ID]shared.Capability)
+	triggerIDs := make([]shared.ID, 0, len(assembly.Specification.Triggers))
 
-	for _, trigger := range system.Specification.Triggers {
-		service := cloneService(trigger.Service)
-		if err := addService(services, service); err != nil {
+	for _, trigger := range assembly.Specification.Triggers {
+		capability := cloneCapability(trigger.Capability)
+		if err := addCapability(capabilities, capability); err != nil {
 			return nil, err
 		}
-		triggerIDs = append(triggerIDs, service.Metadata.ID)
+		triggerIDs = append(triggerIDs, capability.Metadata.ID)
 	}
-	for _, service := range system.Specification.Services {
-		if err := addService(services, cloneService(service)); err != nil {
+	for _, capability := range assembly.Specification.Capabilities {
+		if err := addCapability(capabilities, cloneCapability(capability)); err != nil {
 			return nil, err
 		}
 	}
-	if len(services) == 0 {
-		return nil, fmt.Errorf("systems must contain at least one service")
+	if len(capabilities) == 0 {
+		return nil, fmt.Errorf("assemblies must contain at least one capability")
 	}
 
-	nodes := make(map[shared.ID]types.ExecutionNode, len(services))
-	incoming := make(map[shared.ID]int, len(services))
-	for id, service := range services {
-		compiledConfig, err := c.expressions.CompileServiceConfigurations(service.ServiceConfigurations)
+	nodes := make(map[shared.ID]types.ExecutionNode, len(capabilities))
+	incoming := make(map[shared.ID]int, len(capabilities))
+	for id, capability := range capabilities {
+		compiledConfig, err := c.expressions.CompileCapabilityConfigurations(capability.CapabilityConfigurations)
 		if err != nil {
-			return nil, fmt.Errorf("compile configurations for service %s: %w", id, err)
+			return nil, fmt.Errorf("compile configurations for capability %s: %w", id, err)
 		}
-		nodes[id] = types.ExecutionNode{Service: service, Configurations: compiledConfig}
+		nodes[id] = types.ExecutionNode{Capability: capability, Configurations: compiledConfig}
 		incoming[id] = 0
 	}
 
-	for _, original := range system.Specification.Connectors {
-		connector := cloneConnector(original)
-		fromService, fromExists := services[connector.From.ServiceID]
+	for _, original := range assembly.Specification.Bindings {
+		binding := cloneBinding(original)
+		fromCapability, fromExists := capabilities[binding.From.CapabilityID]
 		if !fromExists {
-			return nil, fmt.Errorf("connector %s references missing source service %s", connector.Metadata.ID, connector.From.ServiceID)
+			return nil, fmt.Errorf("binding %s references missing source capability %s", binding.Metadata.ID, binding.From.CapabilityID)
 		}
-		toService, toExists := services[connector.To.ServiceID]
+		toCapability, toExists := capabilities[binding.To.CapabilityID]
 		if !toExists {
-			return nil, fmt.Errorf("connector %s references missing target service %s", connector.Metadata.ID, connector.To.ServiceID)
+			return nil, fmt.Errorf("binding %s references missing target capability %s", binding.Metadata.ID, binding.To.CapabilityID)
 		}
-		if connector.From.Port != "" && !hasPort(fromService.Outputs, connector.From.Port) {
-			return nil, fmt.Errorf("source output port %q does not exist on service %s", connector.From.Port, fromService.Metadata.ID)
+		if binding.From.Port != "" && !hasPort(fromCapability.Results, binding.From.Port) {
+			return nil, fmt.Errorf("source output port %q does not exist on capability %s", binding.From.Port, fromCapability.Metadata.ID)
 		}
-		if connector.To.Port != "" && !hasPort(toService.Inputs, connector.To.Port) {
-			return nil, fmt.Errorf("target input port %q does not exist on service %s", connector.To.Port, toService.Metadata.ID)
-		}
-
-		incoming[connector.To.ServiceID]++
-		if incoming[connector.To.ServiceID] > 1 {
-			return nil, fmt.Errorf("service %s has multiple incoming connectors; use an aggregation service", connector.To.ServiceID)
+		if binding.To.Port != "" && !hasPort(toCapability.Params, binding.To.Port) {
+			return nil, fmt.Errorf("target input port %q does not exist on capability %s", binding.To.Port, toCapability.Metadata.ID)
 		}
 
-		transition, err := c.compileTransition(connector)
+		incoming[binding.To.CapabilityID]++
+		if incoming[binding.To.CapabilityID] > 1 {
+			return nil, fmt.Errorf("capability %s has multiple incoming bindings; use an aggregation capability", binding.To.CapabilityID)
+		}
+
+		transition, err := c.compileTransition(binding)
 		if err != nil {
 			return nil, err
 		}
-		node := nodes[connector.From.ServiceID]
+		node := nodes[binding.From.CapabilityID]
 		node.Next = append(node.Next, transition)
-		nodes[connector.From.ServiceID] = node
+		nodes[binding.From.CapabilityID] = node
 	}
 
 	entryIDs := triggerIDs
 	if len(entryIDs) == 0 {
-		for serviceID, count := range incoming {
+		for capabilityID, count := range incoming {
 			if count == 0 {
-				entryIDs = append(entryIDs, serviceID)
+				entryIDs = append(entryIDs, capabilityID)
 			}
 		}
 	}
 	if len(entryIDs) == 0 {
-		return nil, fmt.Errorf("systems has no entry service")
+		return nil, fmt.Errorf("assemblies has no entry capability")
 	}
 	if err := validateAcyclic(nodes, incoming); err != nil {
 		return nil, err
@@ -100,73 +100,73 @@ func (c *Compiler) Compile(system shared.System) (*types.ExecutionBlueprint, err
 		return nil, err
 	}
 
-	metadata := cloneMetadata(system.Metadata)
+	metadata := cloneMetadata(assembly.Metadata)
 	if metadata.ID == "" {
 		metadata.ID = shared.NewID("blueprint_")
 	}
 	if metadata.Version == "" {
 		metadata.Version = "1"
 	}
-	return &types.ExecutionBlueprint{Metadata: metadata, Nodes: nodes, EntryServiceIDs: entryIDs}, nil
+	return &types.ExecutionBlueprint{Metadata: metadata, Nodes: nodes, EntryCapabilityIDs: entryIDs}, nil
 }
 
-func (c *Compiler) compileTransition(connector shared.Connector) (types.ExecutionTransition, error) {
-	compiledMappings := make([]types.CompiledMapping, 0, len(connector.Mappings))
-	targets := make(map[string]struct{}, len(connector.Mappings))
-	for index, mapping := range connector.Mappings {
+func (c *Compiler) compileTransition(binding shared.Binding) (types.ExecutionTransition, error) {
+	compiledMappings := make([]types.CompiledMapping, 0, len(binding.Mappings))
+	targets := make(map[string]struct{}, len(binding.Mappings))
+	for index, mapping := range binding.Mappings {
 		targetPath := strings.TrimSpace(mapping.TargetPath)
 		expression := strings.TrimSpace(mapping.Expression)
 		if targetPath == "" {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s mapping %d has no target path", connector.Metadata.ID, index)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %d has no target path", binding.Metadata.ID, index)
 		}
 		if expression == "" {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s mapping %q has no expression", connector.Metadata.ID, targetPath)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %q has no expression", binding.Metadata.ID, targetPath)
 		}
 		if _, exists := targets[targetPath]; exists {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s contains duplicate target path %q", connector.Metadata.ID, targetPath)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s contains duplicate target path %q", binding.Metadata.ID, targetPath)
 		}
 		targets[targetPath] = struct{}{}
 		program, err := c.expressions.CompileTransitionExpression(expression)
 		if err != nil {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s mapping %q: %w", connector.Metadata.ID, targetPath, err)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %q: %w", binding.Metadata.ID, targetPath, err)
 		}
 		compiledMappings = append(compiledMappings, types.CompiledMapping{TargetPath: targetPath, Expression: expression, Program: program})
 	}
 
-	compiledValidations := make([]types.CompiledValidation, 0, len(connector.Validations))
-	for index, rule := range connector.Validations {
+	compiledValidations := make([]types.CompiledValidation, 0, len(binding.Validations))
+	for index, rule := range binding.Validations {
 		expression := strings.TrimSpace(rule.Expression)
 		if expression == "" {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s validation %d has no expression", connector.Metadata.ID, index)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s validation %d has no expression", binding.Metadata.ID, index)
 		}
 		program, err := c.expressions.CompileTransitionExpression(expression)
 		if err != nil {
-			return types.ExecutionTransition{}, fmt.Errorf("connector %s validation %d: %w", connector.Metadata.ID, index, err)
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s validation %d: %w", binding.Metadata.ID, index, err)
 		}
 		message := strings.TrimSpace(rule.Message)
 		if message == "" {
-			message = "connector validation failed"
+			message = "binding validation failed"
 		}
 		compiledValidations = append(compiledValidations, types.CompiledValidation{Expression: expression, Message: message, Program: program})
 	}
 
 	return types.ExecutionTransition{
-		ConnectorID: connector.Metadata.ID, TargetServiceID: connector.To.ServiceID,
+		BindingID: binding.Metadata.ID, TargetCapabilityID: binding.To.CapabilityID,
 		Mappings: compiledMappings, Validations: compiledValidations,
 	}, nil
 }
 
-func addService(services map[shared.ID]shared.Service, service shared.Service) error {
-	if service.Metadata.ID == "" {
-		return fmt.Errorf("service ID is required")
+func addCapability(capabilities map[shared.ID]shared.Capability, capability shared.Capability) error {
+	if capability.Metadata.ID == "" {
+		return fmt.Errorf("capability ID is required")
 	}
-	if service.Type == "" {
-		return fmt.Errorf("service %s has no service type", service.Metadata.ID)
+	if capability.Type == "" {
+		return fmt.Errorf("capability %s has no capability type", capability.Metadata.ID)
 	}
-	if _, exists := services[service.Metadata.ID]; exists {
-		return fmt.Errorf("duplicate service ID %s", service.Metadata.ID)
+	if _, exists := capabilities[capability.Metadata.ID]; exists {
+		return fmt.Errorf("duplicate capability ID %s", capability.Metadata.ID)
 	}
-	services[service.Metadata.ID] = service
+	capabilities[capability.Metadata.ID] = capability
 	return nil
 }
 
@@ -194,7 +194,7 @@ func validateAcyclic(nodes map[shared.ID]types.ExecutionNode, incoming map[share
 		queue = queue[1:]
 		visited++
 		for _, transition := range nodes[current].Next {
-			target := transition.TargetServiceID
+			target := transition.TargetCapabilityID
 			counts[target]--
 			if counts[target] == 0 {
 				queue = append(queue, target)
@@ -202,7 +202,7 @@ func validateAcyclic(nodes map[shared.ID]types.ExecutionNode, incoming map[share
 		}
 	}
 	if visited != len(nodes) {
-		return fmt.Errorf("systems contains a connector cycle")
+		return fmt.Errorf("assemblies contains a binding cycle")
 	}
 	return nil
 }
@@ -218,11 +218,11 @@ func validateReachability(nodes map[shared.ID]types.ExecutionNode, entries []sha
 		}
 		visited[current] = true
 		for _, transition := range nodes[current].Next {
-			queue = append(queue, transition.TargetServiceID)
+			queue = append(queue, transition.TargetCapabilityID)
 		}
 	}
 	if len(visited) != len(nodes) {
-		return fmt.Errorf("systems contains unreachable services")
+		return fmt.Errorf("assemblies contains unreachable capabilities")
 	}
 	return nil
 }
@@ -236,26 +236,26 @@ func cloneMetadata(metadata shared.Metadata) shared.Metadata {
 	return metadata
 }
 
-func cloneService(service shared.Service) shared.Service {
-	service.Metadata = cloneMetadata(service.Metadata)
-	service.ServiceConfigurations = cloneConfiguration(service.ServiceConfigurations)
-	service.Inputs = append([]shared.Port(nil), service.Inputs...)
-	service.Outputs = append([]shared.Port(nil), service.Outputs...)
-	return service
+func cloneCapability(capability shared.Capability) shared.Capability {
+	capability.Metadata = cloneMetadata(capability.Metadata)
+	capability.CapabilityConfigurations = cloneConfiguration(capability.CapabilityConfigurations)
+	capability.Params = append([]shared.Port(nil), capability.Params...)
+	capability.Results = append([]shared.Port(nil), capability.Results...)
+	return capability
 }
 
-func cloneConnector(connector shared.Connector) shared.Connector {
-	connector.Metadata = cloneMetadata(connector.Metadata)
-	if connector.Metadata.ID == "" {
-		connector.Metadata.ID = shared.NewID("connector_")
+func cloneBinding(binding shared.Binding) shared.Binding {
+	binding.Metadata = cloneMetadata(binding.Metadata)
+	if binding.Metadata.ID == "" {
+		binding.Metadata.ID = shared.NewID("binding_")
 	}
-	connector.Mappings = append([]shared.MappingRule(nil), connector.Mappings...)
-	connector.Validations = append([]shared.ValidationRule(nil), connector.Validations...)
-	return connector
+	binding.Mappings = append([]shared.MappingRule(nil), binding.Mappings...)
+	binding.Validations = append([]shared.ValidationRule(nil), binding.Validations...)
+	return binding
 }
 
-func cloneConfiguration(source shared.ServiceConfigurations) shared.ServiceConfigurations {
-	result := make(shared.ServiceConfigurations, len(source))
+func cloneConfiguration(source shared.CapabilityConfigurations) shared.CapabilityConfigurations {
+	result := make(shared.CapabilityConfigurations, len(source))
 	for key, value := range source {
 		result[key] = cloneConfigurationValue(value)
 	}

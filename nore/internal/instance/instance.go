@@ -22,7 +22,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/stream"
 	"github.com/Muhammad-Jay/neuron/nore/internal/types"
 	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
-	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
+	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
@@ -40,16 +40,16 @@ const (
 type Option func(*options)
 
 type options struct {
-	// resolvedExecutors is the frozen dependency set from the registered
-	// system. Non-core executors are launched as subprocesses.
-	resolvedExecutors []shadexec.ResolvedExecutor
+	// resolvedCapabilityRuntimes is the frozen dependency set from the registered
+	// assembly. Non-core capability runtimes are launched as subprocesses.
+	resolvedCapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime
 }
 
-// WithResolvedExecutors supplies the frozen executor set persisted with the
-// system's registration.
-func WithResolvedExecutors(resolved []shadexec.ResolvedExecutor) Option {
+// WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
+// assembly's registration.
+func WithResolvedCapabilityRuntimes(resolved []capabilityrt.ResolvedCapabilityRuntime) Option {
 	return func(o *options) {
-		o.resolvedExecutors = resolved
+		o.resolvedCapabilityRuntimes = resolved
 	}
 }
 
@@ -71,7 +71,7 @@ type Instance struct {
 	eventStore *event.Store
 
 	scheduler *scheduler.Scheduler
-	engine    *engine.ExecutorEngine
+	engine    *engine.CapabilityRuntimeEngine
 
 	registry *registry.Registry
 
@@ -84,12 +84,12 @@ func New(
 	parent context.Context,
 	id string,
 	key protocol.InstanceKey,
-	system *shared.System,
+	assembly *shared.Assembly,
 	workers int,
 	persistentStore storage.Store,
 	opts ...Option,
 ) (*Instance, error) {
-	if system == nil {
+	if assembly == nil {
 		return nil, fmt.Errorf("blueprint is required")
 	}
 	if workers <= 0 {
@@ -110,12 +110,12 @@ func New(
 	evtStore := event.NewStore(persistentStore)
 
 	reg := registry.New()
-	reg.RegisterCoreServiceExecutors()
+	reg.RegisterCoreRuntimes()
 
-	if err := plugin.RegisterResolvedExecutors(reg, optsApplied.resolvedExecutors); err != nil {
+	if err := plugin.RegisterResolvedCapabilityRuntimes(reg, optsApplied.resolvedCapabilityRuntimes); err != nil {
 		cancel()
 		bus.Close()
-		return nil, fmt.Errorf("register resolved executors: %w", err)
+		return nil, fmt.Errorf("register resolved capability runtimes: %w", err)
 	}
 
 	sched, err := scheduler.New(bus, store)
@@ -132,25 +132,25 @@ func New(
 		return nil, fmt.Errorf("create cel compiler: %w", err)
 	}
 
-	systemCompiler, err := planner.NewCompiler(celCompiler)
+	assemblyCompiler, err := planner.NewCompiler(celCompiler)
 	if err != nil {
 		cancel()
 		bus.Close()
 		return nil, fmt.Errorf("create compiler: %w", err)
 	}
 
-	blueprint, err := systemCompiler.Compile(*system)
+	blueprint, err := assemblyCompiler.Compile(*assembly)
 	if err != nil {
 		cancel()
 		bus.Close()
-		return nil, fmt.Errorf("compile systems: %w", err)
+		return nil, fmt.Errorf("compile assemblies: %w", err)
 	}
 
-	execEngine, err := engine.NewExecutorEngine(bus, reg, store, workers)
+	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, workers)
 	if err != nil {
 		cancel()
 		bus.Close()
-		return nil, fmt.Errorf("create executor engine: %w", err)
+		return nil, fmt.Errorf("create capability runtime engine: %w", err)
 	}
 
 	anly, err := analytics.New(bus, slog.Default())
@@ -262,11 +262,11 @@ func (i *Instance) Stop() error {
 		i.wg.Wait()
 	}
 
-	// Release executor-backed resources (wasm runtimes) now that no execution
+	// Release capability runtime-backed resources (wasm runtimes) now that no execution
 	// can be in flight.
 	if i.registry != nil {
 		if err := i.registry.Close(); err != nil {
-			slog.Warn("close executors", slog.String("instance", i.ID), slog.String("error", err.Error()))
+			slog.Warn("close capability runtimes", slog.String("instance", i.ID), slog.String("error", err.Error()))
 		}
 	}
 
@@ -303,7 +303,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 		return nil, fmt.Errorf("instance %s is not running", i.ID)
 	}
 	// Canonical casing is snake_case; normalize camelCase --input (e.g. from
-	// a TypeScript-authored system) once so every expression resolves.
+	// a TypeScript-authored assembly) once so every expression resolves.
 	input = data.SnakeMap(input)
 
 	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID))
@@ -321,7 +321,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 			exec.ID,
 			exec.CorrelationID,
 			"",
-			event.ExecutionStartedPayload{Input: input},
+			event.ExecutionStartedPayload{Params: input},
 		),
 	); err != nil {
 		return nil, fmt.Errorf("publish execution start: %w", err)

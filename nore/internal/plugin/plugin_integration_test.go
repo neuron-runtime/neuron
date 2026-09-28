@@ -13,11 +13,11 @@ import (
 	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
 	"github.com/Muhammad-Jay/neuron/nore/internal/registry"
 	core "github.com/Muhammad-Jay/neuron/shared/types/core"
-	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
+	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
 )
 
 const (
-	echoSourceDir = "../../../examples/executors/echo"
+	echoSourceDir = "../../../examples/capability-runtimes/echo"
 	spinSourceDir = "testdata/spin"
 )
 
@@ -74,44 +74,44 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// resolvedExecutor builds a frozen ResolvedExecutor whose runtime kind and
+// resolvedCapabilityRuntime builds a frozen ResolvedCapabilityRuntime whose runtime kind and
 // declared protocol reflect the transport the fixture actually speaks. The
 // echo/echo-wasm fixtures speak the legacy stdin/stdout JSON protocol, so they
-// declare neuron/executor-v1-json (see ProtocolJSONV1).
-func resolvedExecutor(t *testing.T, typ, entrypoint, rootDir, runtimeKind string) shadexec.ResolvedExecutor {
+// declare neuron/capability-runtime-v1-json (see ProtocolJSONV1).
+func resolvedCapabilityRuntime(t *testing.T, typ, entrypoint, rootDir, runtimeKind string) capabilityrt.ResolvedCapabilityRuntime {
 	t.Helper()
-	return shadexec.ResolvedExecutor{
+	return capabilityrt.ResolvedCapabilityRuntime{
 		Type:             typ,
 		RequestedVersion: "1.0.0",
 		ResolvedVersion:  "1.0.0",
 		Registry:         "local",
-		Runtime: shadexec.RuntimeInfo{
+		Runtime: capabilityrt.RuntimeInfo{
 			Type:       runtimeKind,
-			Protocol:   shadexec.ProtocolJSONV1,
+			Protocol:   capabilityrt.ProtocolJSONV1,
 			Entrypoint: entrypoint,
 		},
 		RootDir: rootDir,
 	}
 }
 
-func echoResolved(t *testing.T, typ, kind string) shadexec.ResolvedExecutor {
+func echoResolved(t *testing.T, typ, kind string) capabilityrt.ResolvedCapabilityRuntime {
 	t.Helper()
 	entry, root := fixtures.wasm, filepath.Dir(fixtures.wasm)
-	if kind == shadexec.RuntimeKindProcess {
+	if kind == capabilityrt.RuntimeKindProcess {
 		entry, root = fixtures.native, filepath.Dir(fixtures.native)
 	}
-	return resolvedExecutor(t, typ, filepath.Base(entry), root, kind)
+	return resolvedCapabilityRuntime(t, typ, filepath.Base(entry), root, kind)
 }
 
 func executionContext(input map[string]any) contracts.ExecutionContext {
 	return contracts.ExecutionContext{
 		ExecutionID:   "exec-1",
 		CorrelationID: "corr-1",
-		Service: core.Service{
+		Capability: core.Capability{
 			Metadata: core.Metadata{Name: "echo", Version: "1.0.0"},
 			Type:     "example:echo",
 		},
-		Input: input,
+		Params: input,
 	}
 }
 
@@ -121,8 +121,8 @@ func assertEchoOutput(t *testing.T, got map[string]any, expectedType string) {
 	if got["type"] != expectedType {
 		t.Errorf("output.type = %v, want %s", got["type"], expectedType)
 	}
-	if got["protocol"] != shadexec.ProtocolJSONV1 {
-		t.Errorf("output.protocol = %v, want %s", got["protocol"], shadexec.ProtocolJSONV1)
+	if got["protocol"] != capabilityrt.ProtocolJSONV1 {
+		t.Errorf("output.protocol = %v, want %s", got["protocol"], capabilityrt.ProtocolJSONV1)
 	}
 	if got["version"] != "1.0.0" {
 		t.Errorf("output.version = %v, want 1.0.0", got["version"])
@@ -132,30 +132,30 @@ func assertEchoOutput(t *testing.T, got map[string]any, expectedType string) {
 	}
 }
 
-func TestRegisterResolvedExecutorsDispatch(t *testing.T) {
+func TestRegisterResolvedCapabilityRuntimesDispatch(t *testing.T) {
 	cases := []struct {
 		name string
 		kind string
-		res  shadexec.ResolvedExecutor
+		res  capabilityrt.ResolvedCapabilityRuntime
 	}{
-		{"process", shadexec.RuntimeKindProcess, echoResolved(t, "example:echo", shadexec.RuntimeKindProcess)},
+		{"process", capabilityrt.RuntimeKindProcess, echoResolved(t, "example:echo", capabilityrt.RuntimeKindProcess)},
 		{"process_implicit_default", "", echoResolved(t, "example:echo", "")},
-		{"wasm", shadexec.RuntimeKindWasm, echoResolved(t, "example:echo-wasm", shadexec.RuntimeKindWasm)},
+		{"wasm", capabilityrt.RuntimeKindWasm, echoResolved(t, "example:echo-wasm", capabilityrt.RuntimeKindWasm)},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Dispatch through the public registry path.
 			reg := registry.New()
-			if err := RegisterResolvedExecutors(reg, []shadexec.ResolvedExecutor{tc.res}); err != nil {
-				t.Fatalf("RegisterResolvedExecutors: %v", err)
+			if err := RegisterResolvedCapabilityRuntimes(reg, []capabilityrt.ResolvedCapabilityRuntime{tc.res}); err != nil {
+				t.Fatalf("RegisterResolvedCapabilityRuntimes: %v", err)
 			}
-			ex, err := reg.Resolve(core.ExecutorType(tc.res.Type))
+			ex, err := reg.Resolve(core.CapabilityRuntimeType(tc.res.Type))
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}
 			if ex == nil {
-				t.Fatal("resolved executor is nil")
+				t.Fatal("resolved capability runtime is nil")
 			}
 			defer closeIfCloser(t, ex)
 		})
@@ -163,9 +163,9 @@ func TestRegisterResolvedExecutorsDispatch(t *testing.T) {
 }
 
 func TestNewAdapterRejectsUnknownRuntime(t *testing.T) {
-	res := shadexec.ResolvedExecutor{
+	res := capabilityrt.ResolvedCapabilityRuntime{
 		Type:    "example:echo",
-		Runtime: shadexec.RuntimeInfo{Type: "container", Entrypoint: "echo"},
+		Runtime: capabilityrt.RuntimeInfo{Type: "container", Entrypoint: "echo"},
 	}
 	_, err := NewAdapter(res)
 	if err == nil {
@@ -176,8 +176,8 @@ func TestNewAdapterRejectsUnknownRuntime(t *testing.T) {
 	}
 }
 
-func TestProcessExecutorRoundTripWithEnv(t *testing.T) {
-	adapter, err := NewAdapter(echoResolved(t, "example:echo", shadexec.RuntimeKindProcess))
+func TestProcessCapabilityRuntimeRoundTripWithEnv(t *testing.T) {
+	adapter, err := NewAdapter(echoResolved(t, "example:echo", capabilityrt.RuntimeKindProcess))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +190,8 @@ func TestProcessExecutorRoundTripWithEnv(t *testing.T) {
 	assertEchoOutput(t, got, "example:echo")
 }
 
-func TestWasmExecutorRoundTripWithEnv(t *testing.T) {
-	adapter, err := NewAdapter(echoResolved(t, "example:echo-wasm", shadexec.RuntimeKindWasm))
+func TestWasmCapabilityRuntimeRoundTripWithEnv(t *testing.T) {
+	adapter, err := NewAdapter(echoResolved(t, "example:echo-wasm", capabilityrt.RuntimeKindWasm))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,10 +207,10 @@ func TestWasmExecutorRoundTripWithEnv(t *testing.T) {
 func TestAdaptersSurfaceControlledError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		res  shadexec.ResolvedExecutor
+		res  capabilityrt.ResolvedCapabilityRuntime
 	}{
-		{"process", echoResolved(t, "example:echo", shadexec.RuntimeKindProcess)},
-		{"wasm", echoResolved(t, "example:echo-wasm", shadexec.RuntimeKindWasm)},
+		{"process", echoResolved(t, "example:echo", capabilityrt.RuntimeKindProcess)},
+		{"wasm", echoResolved(t, "example:echo-wasm", capabilityrt.RuntimeKindWasm)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter, err := NewAdapter(tc.res)
@@ -221,7 +221,7 @@ func TestAdaptersSurfaceControlledError(t *testing.T) {
 
 			_, err = adapter.Execute(context.Background(), executionContext(map[string]any{"error": "boom"}))
 			if err == nil {
-				t.Fatal("expected controlled error from executor")
+				t.Fatal("expected controlled error from capability runtime")
 			}
 			if !strings.Contains(err.Error(), "boom") {
 				t.Errorf("error = %q, want boom", err)
@@ -235,11 +235,11 @@ func TestAdapterMissingEntrypoint(t *testing.T) {
 		name string
 		kind string
 	}{
-		{"process", shadexec.RuntimeKindProcess},
-		{"wasm", shadexec.RuntimeKindWasm},
+		{"process", capabilityrt.RuntimeKindProcess},
+		{"wasm", capabilityrt.RuntimeKindWasm},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res := resolvedExecutor(t, "example:echo", "does-not-exist", t.TempDir(), tc.kind)
+			res := resolvedCapabilityRuntime(t, "example:echo", "does-not-exist", t.TempDir(), tc.kind)
 			if _, err := NewAdapter(res); err == nil {
 				t.Fatal("expected error for missing entrypoint")
 			}
@@ -247,19 +247,19 @@ func TestAdapterMissingEntrypoint(t *testing.T) {
 	}
 }
 
-func TestDecodeResolvedExecutorsNil(t *testing.T) {
-	got, err := DecodeResolvedExecutors(nil)
+func TestDecodeResolvedCapabilityRuntimesNil(t *testing.T) {
+	got, err := DecodeResolvedCapabilityRuntimes(nil)
 	if err != nil {
-		t.Fatalf("DecodeResolvedExecutors: %v", err)
+		t.Fatalf("DecodeResolvedCapabilityRuntimes: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("got %d executors, want 0", len(got))
+		t.Errorf("got %d capability runtimes, want 0", len(got))
 	}
 }
 
-func TestDecodeResolvedExecutorsRoundTrip(t *testing.T) {
-	res := echoResolved(t, "example:echo", shadexec.RuntimeKindProcess)
-	payload := map[string]any{"resolved_executors": []any{
+func TestDecodeResolvedCapabilityRuntimesRoundTrip(t *testing.T) {
+	res := echoResolved(t, "example:echo", capabilityrt.RuntimeKindProcess)
+	payload := map[string]any{"resolved_capability_runtimes": []any{
 		map[string]any{
 			"type":             res.Type,
 			"requestedVersion": res.RequestedVersion,
@@ -274,12 +274,12 @@ func TestDecodeResolvedExecutorsRoundTrip(t *testing.T) {
 		},
 	}}
 
-	got, err := DecodeResolvedExecutors(payload)
+	got, err := DecodeResolvedCapabilityRuntimes(payload)
 	if err != nil {
-		t.Fatalf("DecodeResolvedExecutors: %v", err)
+		t.Fatalf("DecodeResolvedCapabilityRuntimes: %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("got %d executors, want 1", len(got))
+		t.Fatalf("got %d capability runtimes, want 1", len(got))
 	}
 	if got[0].Type != res.Type || got[0].Runtime.Protocol != res.Runtime.Protocol || got[0].RootDir != res.RootDir {
 		t.Errorf("round-trip mismatch: %+v", got[0])
@@ -288,7 +288,7 @@ func TestDecodeResolvedExecutorsRoundTrip(t *testing.T) {
 
 func closeIfCloser(t *testing.T, ex any) {
 	t.Helper()
-	closer, ok := ex.(contracts.ExecutorCloser)
+	closer, ok := ex.(contracts.CapabilityRuntimeCloser)
 	if !ok {
 		return
 	}

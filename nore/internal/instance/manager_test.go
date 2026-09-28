@@ -3,31 +3,31 @@ package instance
 import (
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
-func TestWithExecutorsInvalidPayloadReturnsError(t *testing.T) {
-	_, err := withExecutors(system.RegisteredSystem{
-		Key:                     protocol.InstanceKey{SystemID: "sys_test"},
+func TestWithCapabilityRuntimesInvalidPayloadReturnsError(t *testing.T) {
+	_, err := withCapabilityRuntimes(assembly.RegisteredAssembly{
+		Key:                     protocol.InstanceKey{AssemblyID: "sys_test"},
 		ExecutionConfigurations: make(chan int),
 	})
 	if err == nil {
-		t.Fatal("withExecutors() error = nil, want decode failure")
+		t.Fatal("withCapabilityRuntimes() error = nil, want decode failure")
 	}
 }
 
-func TestWithExecutorsValidPayloadReturnsOption(t *testing.T) {
-	opt, err := withExecutors(system.RegisteredSystem{
-		Key: protocol.InstanceKey{SystemID: "sys_test"},
+func TestWithCapabilityRuntimesValidPayloadReturnsOption(t *testing.T) {
+	opt, err := withCapabilityRuntimes(assembly.RegisteredAssembly{
+		Key: protocol.InstanceKey{AssemblyID: "sys_test"},
 		ExecutionConfigurations: map[string]any{
-			"resolved_executors": []any{},
+			"resolved_capability_runtimes": []any{},
 		},
 	})
 	if err != nil {
-		t.Fatalf("withExecutors() error = %v", err)
+		t.Fatalf("withCapabilityRuntimes() error = %v", err)
 	}
 	if opt == nil {
-		t.Fatal("withExecutors() option = nil, want non-nil Option")
+		t.Fatal("withCapabilityRuntimes() option = nil, want non-nil Option")
 	}
 }

@@ -11,6 +11,6 @@ func Health(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
 		Message: "N.O.R.E. is healthy",
 		Status:  http.StatusOK,
-		Data:    map[string]string{"service": "nore"},
+		Data:    map[string]string{"capability": "nore"},
 	})
 }

@@ -8,24 +8,24 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-// execLogger is a contracts.Logger that turns log calls into ServiceLog events
+// execLogger is a contracts.Logger that turns log calls into CapabilityLog events
 // published on the execution's event bus. Every log is therefore persisted by
 // the event store and observable through the event stream alongside lifecycle
 // events. Publishing is intentionally fire-and-forget: a log failure must not
-// fail the service execution that produced it.
+// fail the capability execution that produced it.
 type execLogger struct {
 	bus           contracts.EventBus
 	executionID   core.ID
 	correlationID core.ID
-	serviceID     core.ID
+	capabilityID     core.ID
 }
 
-func newExecLogger(bus contracts.EventBus, executionID, correlationID, serviceID core.ID) *execLogger {
+func newExecLogger(bus contracts.EventBus, executionID, correlationID, capabilityID core.ID) *execLogger {
 	return &execLogger{
 		bus:           bus,
 		executionID:   executionID,
 		correlationID: correlationID,
-		serviceID:     serviceID,
+		capabilityID:     capabilityID,
 	}
 }
 
@@ -49,7 +49,7 @@ func (l *execLogger) emit(ctx context.Context, level event.LogLevel, message str
 	if l.bus == nil {
 		return
 	}
-	payload := event.LogPayload{Level: level, Message: message, NodeID: l.serviceID}
+	payload := event.LogPayload{Level: level, Message: message, NodeID: l.capabilityID}
 	if len(fields) > 0 {
 		evFields := make([]event.Field, len(fields))
 		for i, f := range fields {
@@ -57,5 +57,5 @@ func (l *execLogger) emit(ctx context.Context, level event.LogLevel, message str
 		}
 		payload.Fields = evFields
 	}
-	_ = l.bus.Publish(ctx, event.New(event.ServiceLog, l.executionID, l.correlationID, l.serviceID, payload))
+	_ = l.bus.Publish(ctx, event.New(event.CapabilityLog, l.executionID, l.correlationID, l.capabilityID, payload))
 }

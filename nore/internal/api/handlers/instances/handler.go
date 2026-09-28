@@ -7,23 +7,23 @@ import (
 
 	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
 	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
-	"github.com/Muhammad-Jay/neuron/nore/internal/system"
+	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
 	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 )
 
 type Handler struct {
 	instances *instance.Manager
-	systems   *system.Repository
+	assemblies   *assembly.Repository
 	compiler  *planner.Compiler
 }
 
-func New(m *instance.Manager, systems *system.Repository, compiler *planner.Compiler) *Handler {
-	return &Handler{instances: m, systems: systems, compiler: compiler}
+func New(m *instance.Manager, assemblies *assembly.Repository, compiler *planner.Compiler) *Handler {
+	return &Handler{instances: m, assemblies: assemblies, compiler: compiler}
 }
 
 // resolveInstance maps a URL segment to a live instance. The segment may be an
-// instance ID (inst_*) or a colon-encoded system key
-// (systemID:version:hash[:env]); keys resolve to an existing runtime without
+// instance ID (inst_*) or a colon-encoded assembly key
+// (assemblyID:version:hash[:env]); keys resolve to an existing runtime without
 // creating one.
 func (h *Handler) resolveInstance(r *http.Request, id string) (*instance.Instance, bool) {
 	if strings.HasPrefix(id, "inst_") {
@@ -39,7 +39,7 @@ func (h *Handler) resolveInstance(r *http.Request, id string) (*instance.Instanc
 // runningInstance resolves the URL segment to an instance that is actually
 // running. A resolved instance whose runtime is gone — for example one restored
 // metadata-only after a daemon restart — is transparently recreated from its
-// registered key. This is what makes `neuron run` re-run an existing system
+// registered key. This is what makes `neuron run` re-run an existing assembly
 // instead of failing with "instance is not running".
 func (h *Handler) runningInstance(r *http.Request, id string) (*instance.Instance, error) {
 	if i, ok := h.resolveInstance(r, id); ok {

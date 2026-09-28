@@ -5,20 +5,20 @@ import (
 	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-// ExecutionBlueprint is the compiled, reusable representation of a System.
+// ExecutionBlueprint is the compiled, reusable representation of a Assembly.
 // It is an in-memory runtime object and should not be serialized directly.
 type ExecutionBlueprint struct {
 	Metadata shared.Metadata
 	Nodes    map[shared.ID]ExecutionNode
 
-	EntryServiceIDs []shared.ID
+	EntryCapabilityIDs []shared.ID
 }
 
 type ExecutionNode struct {
-	Service shared.Service
+	Capability shared.Capability
 
-	// Configurations is compiled once during System compilation and resolved
-	// for each Service execution.
+	// Configurations is compiled once during Assembly compilation and resolved
+	// for each Capability execution.
 	Configurations resolver.ConfigurationProgram
 
 	Next []ExecutionTransition
@@ -37,8 +37,8 @@ type CompiledValidation struct {
 }
 
 type ExecutionTransition struct {
-	ConnectorID     shared.ID
-	TargetServiceID shared.ID
+	BindingID     shared.ID
+	TargetCapabilityID shared.ID
 
 	Mappings    []CompiledMapping
 	Validations []CompiledValidation

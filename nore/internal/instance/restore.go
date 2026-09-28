@@ -14,7 +14,7 @@ import (
 func recordFor(i *Instance, status Status) metadata {
 	return metadata{
 		ID:                i.ID,
-		SystemID:          i.Key.SystemID,
+		AssemblyID:          i.Key.AssemblyID,
 		Version:           i.Key.Version,
 		Hash:              i.Key.Hash,
 		Env:               i.Key.Env,
@@ -47,7 +47,7 @@ func restoreInstance(
 	return &Instance{
 		ID: rec.ID,
 		Key: protocol.InstanceKey{
-			SystemID: rec.SystemID,
+			AssemblyID: rec.AssemblyID,
 			Version:  rec.Version,
 			Hash:     rec.Hash,
 			Env:      rec.Env,

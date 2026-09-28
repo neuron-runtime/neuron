@@ -13,7 +13,7 @@ type configurationProgram struct {
 }
 
 type configurationNode interface {
-	resolve(ctx context.Context, environment ServiceEnvironment) (any, error)
+	resolve(ctx context.Context, environment CapabilityEnvironment) (any, error)
 }
 
 type literalNode struct {
@@ -46,14 +46,14 @@ type expressionSegment struct {
 func (textSegment) isTemplateSegment()       {}
 func (expressionSegment) isTemplateSegment() {}
 
-func (p *configurationProgram) Resolve(ctx context.Context, environment ServiceEnvironment) (map[string]any, error) {
+func (p *configurationProgram) Resolve(ctx context.Context, environment CapabilityEnvironment) (map[string]any, error) {
 	value, err := p.root.resolve(ctx, environment)
 	if err != nil {
 		return nil, err
 	}
 	resolved, ok := value.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("resolved Service configuration must be an object, received %T", value)
+		return nil, fmt.Errorf("resolved Capability configuration must be an object, received %T", value)
 	}
 	return resolved, nil
 }
@@ -155,7 +155,7 @@ func (c *celCompiler) compileTemplate(raw string, path string) (configurationNod
 			return nil, fmt.Errorf("configuration template %s exceeds %d expressions", path, c.config.MaxTemplateExpressions)
 		}
 
-		program, err := c.compileExpression(c.serviceEnv, expression)
+		program, err := c.compileExpression(c.capabilityEnv, expression)
 		if err != nil {
 			return nil, fmt.Errorf("configuration template %s: %w", path, err)
 		}
@@ -180,11 +180,11 @@ func (c *celCompiler) compileTemplate(raw string, path string) (configurationNod
 	}, nil
 }
 
-func (n literalNode) resolve(_ context.Context, _ ServiceEnvironment) (any, error) {
+func (n literalNode) resolve(_ context.Context, _ CapabilityEnvironment) (any, error) {
 	return cloneJSONLike(n.value), nil
 }
 
-func (n objectNode) resolve(ctx context.Context, environment ServiceEnvironment) (any, error) {
+func (n objectNode) resolve(ctx context.Context, environment CapabilityEnvironment) (any, error) {
 	result := make(map[string]any, len(n))
 	for key, child := range n {
 		value, err := child.resolve(ctx, environment)
@@ -196,7 +196,7 @@ func (n objectNode) resolve(ctx context.Context, environment ServiceEnvironment)
 	return result, nil
 }
 
-func (n arrayNode) resolve(ctx context.Context, environment ServiceEnvironment) (any, error) {
+func (n arrayNode) resolve(ctx context.Context, environment CapabilityEnvironment) (any, error) {
 	result := make([]any, len(n))
 	for index, child := range n {
 		value, err := child.resolve(ctx, environment)
@@ -208,11 +208,11 @@ func (n arrayNode) resolve(ctx context.Context, environment ServiceEnvironment) 
 	return result, nil
 }
 
-func (n templateNode) resolve(ctx context.Context, environment ServiceEnvironment) (any, error) {
+func (n templateNode) resolve(ctx context.Context, environment CapabilityEnvironment) (any, error) {
 	variables := map[string]any{
-		"input":     environment.Input,
-		"execution": environment.Execution,
-		"service":   environment.Service,
+		"params":     environment.Params,
+		"execution":  environment.Execution,
+		"capability": environment.Capability,
 	}
 
 	if n.exact {

@@ -1,7 +1,7 @@
 // Package data provides helpers for normalizing runtime payload shapes so
 // N.O.R.E. operates on canonical snake_case keys regardless of the casing
 // authors chose at the source (for example camelCase --input for a
-// TypeScript-authored system).
+// TypeScript-authored assembly).
 package data
 
 import "github.com/Muhammad-Jay/neuron/shared/types/core"

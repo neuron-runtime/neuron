@@ -8,11 +8,11 @@ const (
 	ExecutionCompleted
 	ExecutionFailed
 	ExecutionCancelled
-	ServiceReady
-	ServiceStarted
-	ServiceCompleted
-	ServiceFailed
-	ServiceLog
+	CapabilityReady
+	CapabilityStarted
+	CapabilityCompleted
+	CapabilityFailed
+	CapabilityLog
 )
 
 const All Type = 0xffff
@@ -27,16 +27,16 @@ func (t Type) String() string {
 		return "execution.failed"
 	case ExecutionCancelled:
 		return "execution.cancelled"
-	case ServiceReady:
-		return "service.ready"
-	case ServiceStarted:
-		return "service.started"
-	case ServiceCompleted:
-		return "service.completed"
-	case ServiceFailed:
-		return "service.failed"
-	case ServiceLog:
-		return "service.log"
+	case CapabilityReady:
+		return "capability.ready"
+	case CapabilityStarted:
+		return "capability.started"
+	case CapabilityCompleted:
+		return "capability.completed"
+	case CapabilityFailed:
+		return "capability.failed"
+	case CapabilityLog:
+		return "capability.log"
 	default:
 		return "unknown"
 	}

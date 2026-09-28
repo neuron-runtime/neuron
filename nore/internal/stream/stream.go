@@ -19,7 +19,7 @@ type Message struct {
 	EventID       core.ID
 	Type          event.Type
 	CorrelationID core.ID
-	ServiceID     core.ID
+	CapabilityID     core.ID
 	OccurredAt    time.Time
 	Payload       json.RawMessage
 }
@@ -99,7 +99,7 @@ func normalize(evt event.Event) Message {
 		EventID:       evt.Metadata.EventID,
 		Type:          evt.Type,
 		CorrelationID: evt.Metadata.CorrelationID,
-		ServiceID:     evt.Metadata.ServiceID,
+		CapabilityID:     evt.Metadata.CapabilityID,
 		OccurredAt:    evt.Metadata.OccurredAt,
 		Payload:       mustPayload(evt.Payload),
 	}

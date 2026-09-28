@@ -24,15 +24,15 @@ func TestStoreRoundTripAndListAfter(t *testing.T) {
 	store := newTestStore(t)
 	execID := core.NewID("exec_")
 
-	first := New(ExecutionStarted, execID, "corr", "", ExecutionStartedPayload{Input: map[string]any{"a": 1}})
+	first := New(ExecutionStarted, execID, "corr", "", ExecutionStartedPayload{Params: map[string]any{"a": 1}})
 	if err := store.Save(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	second := New(ServiceStarted, execID, "corr", "svc", ServiceStartedPayload{})
+	second := New(CapabilityStarted, execID, "corr", "svc", CapabilityStartedPayload{})
 	if err := store.Save(ctx, second); err != nil {
 		t.Fatal(err)
 	}
-	third := New(ServiceCompleted, execID, "corr", "svc", ServiceCompletedPayload{Output: map[string]any{"b": 2}})
+	third := New(CapabilityCompleted, execID, "corr", "svc", CapabilityCompletedPayload{Result: map[string]any{"b": 2}})
 	if err := store.Save(ctx, third); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestStoreRoundTripAndListAfter(t *testing.T) {
 	if all[0].Metadata.EventID != first.Metadata.EventID {
 		t.Fatalf("expected chronological order, first got %s", all[0].Metadata.EventID)
 	}
-	if all[0].Type != first.Type || all[0].Metadata.ServiceID != first.Metadata.ServiceID {
+	if all[0].Type != first.Type || all[0].Metadata.CapabilityID != first.Metadata.CapabilityID {
 		t.Fatalf("round-trip mismatch: %+v", all[0])
 	}
 	for i := 1; i < len(all); i++ {

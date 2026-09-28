@@ -14,10 +14,10 @@ import (
 // they carry no execution state and are already persisted by the event store.
 var stateChangingEventTypes = []event.Type{
 	event.ExecutionStarted,
-	event.ServiceReady,
-	event.ServiceStarted,
-	event.ServiceCompleted,
-	event.ServiceFailed,
+	event.CapabilityReady,
+	event.CapabilityStarted,
+	event.CapabilityCompleted,
+	event.CapabilityFailed,
 	event.ExecutionCompleted,
 	event.ExecutionFailed,
 	event.ExecutionCancelled,
