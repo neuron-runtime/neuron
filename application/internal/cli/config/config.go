@@ -9,9 +9,9 @@ const NeuronConfigFileName = "neuron.config.yaml"
 //
 // The template follows the modern neuron.config.* surface: the project
 // configuration is the single source of truth for the authoring language, the
-// System entry file, and runtime defaults. The default entry point is a
-// `kind: System` file at <root>/system.yaml (see project.ResolveSystem).
-// Runtime internals (storage, executor store directory) are managed by Neuron
+// Assembly entry file, and runtime defaults. The default entry point is a
+// `kind: Assembly` file at <root>/assembly.yaml (see project.ResolveAssembly).
+// Runtime internals (storage, capability runtime store directory) are managed by Neuron
 // and rejected from configuration files.
 func NeuronConfigDefaultTemplate(name string) string {
 	return fmt.Sprintf(`#
@@ -20,7 +20,7 @@ func NeuronConfigDefaultTemplate(name string) string {
 #
 
 lang: yaml
-entry: system.yaml
+entry: assembly.yaml
 
 runtime:
   execution:
@@ -30,12 +30,12 @@ runtime:
     min: 1
     max: 8
 
-# External executors are resolved against the registries listed here. Without a
-# registry block, only built-in executors (neuron:core:*) are available.
-executors:
+# External capability runtimes are resolved against the registries listed here. Without a
+# registry block, only built-in capability runtimes (neuron:core:*) are available.
+capabilityRuntimes:
   registries:
     - name: local
-      url: ./executors
+      url: ./capabilityRuntimes
 
 inspector:
   enabled: true

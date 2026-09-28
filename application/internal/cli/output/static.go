@@ -16,16 +16,16 @@ import (
 )
 
 type staticRenderer struct {
-	out     io.Writer
-	system  string
-	verbose bool
-	started time.Time
-	view    *ExecutionView
+	out      io.Writer
+	assembly string
+	verbose  bool
+	started  time.Time
+	view     *ExecutionView
 }
 
 func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) error {
 	if r.view == nil {
-		r.view = NewExecutionView(r.system)
+		r.view = NewExecutionView(r.assembly)
 	}
 	if r.view.Started.IsZero() && evt.OccurredAt > 0 {
 		r.view.Started = time.Unix(0, evt.OccurredAt)
@@ -42,10 +42,10 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 		// that follows). v helps debugging without a live terminal.
 		line.WriteString(" ")
 		fmt.Fprintf(&line, "%s", evt.Type)
-		if evt.ServiceID != "" {
-			fmt.Fprintf(&line, " [%s]", evt.ServiceID)
+		if evt.CapabilityID != "" {
+			fmt.Fprintf(&line, " [%s]", evt.CapabilityID)
 		}
-		if len(evt.Payload) > 0 && evt.Type != "service.log" {
+		if len(evt.Payload) > 0 && evt.Type != "capability.log" {
 			line.WriteString(" ")
 			line.WriteString(string(evt.Payload))
 		}
@@ -58,17 +58,17 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 	case KindLive:
 		line.WriteString(" " + glyphBullet + " ")
 		line.WriteString(evt.Type)
-		if evt.ServiceID != "" {
-			fmt.Fprintf(&line, " [%s]", evt.ServiceID)
+		if evt.CapabilityID != "" {
+			fmt.Fprintf(&line, " [%s]", evt.CapabilityID)
 		}
 	case KindStatic, KindTerminal:
 		switch evt.Type {
-		case "service.completed":
+		case "capability.completed":
 			line.WriteString(" " + glyphCheck + " ")
-			line.WriteString(string(evt.ServiceID))
-		case "service.failed":
+			line.WriteString(string(evt.CapabilityID))
+		case "capability.failed":
 			line.WriteString(" " + glyphCross + " ")
-			line.WriteString(string(evt.ServiceID))
+			line.WriteString(string(evt.CapabilityID))
 			var p struct {
 				Message string `json:"Message"`
 			}
@@ -90,24 +90,24 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 		default:
 			line.WriteString(" " + glyphBullet + " ")
 			line.WriteString(evt.Type)
-			if evt.ServiceID != "" {
-				fmt.Fprintf(&line, " [%s]", evt.ServiceID)
+			if evt.CapabilityID != "" {
+				fmt.Fprintf(&line, " [%s]", evt.CapabilityID)
 			}
 		}
 	}
 
 	// Apply the event to the view, then render any output payload for a
-	// completed service on the following lines.
+	// completed capability on the following lines.
 	if err := r.view.Fold(evt); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(r.out, line.String()); err != nil {
 		return err
 	}
-	if evt.Type == "service.completed" {
-		if sv, ok := r.view.byID[string(evt.ServiceID)]; ok && len(sv.Output) > 0 {
+	if evt.Type == "capability.completed" {
+		if sv, ok := r.view.byID[string(evt.CapabilityID)]; ok && len(sv.Output) > 0 {
 			var b strings.Builder
-			dataWriter(&b, "      ", r.system+" output", sv.Output)
+			dataWriter(&b, "      ", r.assembly+" output", sv.Output)
 			_, err := io.WriteString(r.out, b.String())
 			return err
 		}

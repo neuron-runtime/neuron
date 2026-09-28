@@ -15,9 +15,9 @@ type Options struct {
 	// Root is the absolute project root the builder operates on.
 	Root string
 
-	// Entry is the system source file for the project, absolute or
+	// Entry is the assembly source file for the project, absolute or
 	// relative to Root. When empty the builder uses its language default
-	// (typescript: index.ts, yaml: system.yaml).
+	// (typescript: index.ts, yaml: assembly.yaml).
 	Entry string
 
 	// Variables are project-level values written into the manifest. They

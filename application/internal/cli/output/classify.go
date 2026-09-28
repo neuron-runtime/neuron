@@ -10,9 +10,9 @@ import "github.com/Muhammad-Jay/neuron/shared/types/protocol"
 type Kind int
 
 const (
-	// KindLive updates the live region (service lifecycle while running).
+	// KindLive updates the live region (capability lifecycle while running).
 	KindLive Kind = iota
-	// KindStatic renders a permanent line (a service reached a state).
+	// KindStatic renders a permanent line (a capability reached a state).
 	KindStatic
 	// KindTerminal ends the execution presentation.
 	KindTerminal
@@ -23,9 +23,9 @@ func Classify(evt protocol.StreamEvent) Kind {
 	switch evt.Type {
 	case "execution.started":
 		return KindLive
-	case "service.ready", "service.started", "service.log":
+	case "capability.ready", "capability.started", "capability.log":
 		return KindLive
-	case "service.completed", "service.failed":
+	case "capability.completed", "capability.failed":
 		return KindStatic
 	case "execution.completed", "execution.failed", "execution.cancelled":
 		return KindTerminal

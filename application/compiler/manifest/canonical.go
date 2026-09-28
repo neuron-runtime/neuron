@@ -7,18 +7,18 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-// Canonicalize rewrites connector mapping targets and expressions in place so
+// Canonicalize rewrites binding mapping targets and expressions in place so
 // identifier keys follow the canonical snake_case convention. Only the casing
 // of identifier tokens changes; operators, numbers, quoted string literals and
 // $-prefixed tokens are preserved. TS-authored manifests carry camelCase keys
 // inherited from JavaScript sources; unifying them on disk means every
 // downstream stage treats keys identically regardless of source language.
-func Canonicalize(m *System) *System {
+func Canonicalize(m *Assembly) *Assembly {
 	if m == nil {
 		return nil
 	}
-	for i := range m.Connectors {
-		c := &m.Connectors[i]
+	for i := range m.Bindings {
+		c := &m.Bindings[i]
 		for j := range c.Mappings {
 			c.Mappings[j].Target = core.CamelToSnake(c.Mappings[j].Target)
 			c.Mappings[j].Expression = canonicalizeExpression(c.Mappings[j].Expression)

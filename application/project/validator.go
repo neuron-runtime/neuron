@@ -5,48 +5,48 @@ import (
 	"strings"
 )
 
-func validateSystemBasic(
-	system SystemFile,
+func validateAssemblyBasic(
+	assembly AssemblyFile,
 ) error {
 
 	var errors []string
 
-	if system.APIVersion == "" {
+	if assembly.APIVersion == "" {
 		errors = append(errors, "apiVersion is required")
 	}
 
-	if system.Kind != "System" {
+	if assembly.Kind != "Assembly" {
 		errors = append(
 			errors,
 			fmt.Sprintf(
-				"kind must be System, got %q",
-				system.Kind,
+				"kind must be Assembly, got %q",
+				assembly.Kind,
 			),
 		)
 	}
 
-	if strings.TrimSpace(system.Metadata.Name) == "" {
+	if strings.TrimSpace(assembly.Metadata.Name) == "" {
 		errors = append(errors, "metadata.name is required")
 	}
 
-	if strings.TrimSpace(system.Metadata.Version) == "" {
+	if strings.TrimSpace(assembly.Metadata.Version) == "" {
 		errors = append(errors, "metadata.version is required")
 	}
 
-	if len(system.Services) == 0 {
+	if len(assembly.Capabilities) == 0 {
 		errors = append(
 			errors,
-			"systems.services must contain at least one service",
+			"assemblies.capabilities must contain at least one capability",
 		)
 	}
 
-	if len(system.Connectors) > 0 {
-		serviceRefs := make(map[string]bool)
-		for _, svc := range system.Services {
-			serviceRefs[svc.Ref] = true
+	if len(assembly.Bindings) > 0 {
+		capabilityRefs := make(map[string]bool)
+		for _, svc := range assembly.Capabilities {
+			capabilityRefs[svc.Ref] = true
 		}
-		for i, conn := range system.Connectors {
-			if err := validateConnectorBasic(conn, serviceRefs, i); err != nil {
+		for i, conn := range assembly.Bindings {
+			if err := validateBindingBasic(conn, capabilityRefs, i); err != nil {
 				errors = append(errors, err.Error())
 			}
 		}
@@ -62,12 +62,12 @@ func validateSystemBasic(
 	return nil
 }
 
-func validateConnectorBasic(
-	conn ConnectorReference,
-	serviceRefs map[string]bool,
+func validateBindingBasic(
+	conn BindingReference,
+	capabilityRefs map[string]bool,
 	index int,
 ) error {
-	prefix := fmt.Sprintf("connectors[%d]", index)
+	prefix := fmt.Sprintf("bindings[%d]", index)
 
 	if conn.Entry == "" {
 		if strings.TrimSpace(conn.From) == "" {
@@ -76,11 +76,11 @@ func validateConnectorBasic(
 		if strings.TrimSpace(conn.To) == "" {
 			return fmt.Errorf("%s.to is required", prefix)
 		}
-		if !serviceRefs[conn.From] {
-			return fmt.Errorf("%s.from references unknown service %q", prefix, conn.From)
+		if !capabilityRefs[conn.From] {
+			return fmt.Errorf("%s.from references unknown capability %q", prefix, conn.From)
 		}
-		if !serviceRefs[conn.To] {
-			return fmt.Errorf("%s.to references unknown service %q", prefix, conn.To)
+		if !capabilityRefs[conn.To] {
+			return fmt.Errorf("%s.to references unknown capability %q", prefix, conn.To)
 		}
 	}
 
@@ -102,65 +102,65 @@ func validateConnectorBasic(
 	return nil
 }
 
-// validateConnectorFile validates a ConnectorFile (for external connector files)
-func validateConnectorFile(conn ConnectorFile) error {
+// validateBindingFile validates a BindingFile (for external binding files)
+func validateBindingFile(conn BindingFile) error {
 	if strings.TrimSpace(conn.From) == "" {
-		return fmt.Errorf("connector.from is required")
+		return fmt.Errorf("binding.from is required")
 	}
 	if strings.TrimSpace(conn.To) == "" {
-		return fmt.Errorf("connector.to is required")
+		return fmt.Errorf("binding.to is required")
 	}
 
 	for j, m := range conn.Mappings {
 		if strings.TrimSpace(m.Target) == "" {
-			return fmt.Errorf("connector.mappings[%d].target is required", j)
+			return fmt.Errorf("binding.mappings[%d].target is required", j)
 		}
 		if strings.TrimSpace(m.Expression) == "" {
-			return fmt.Errorf("connector.mappings[%d].expression is required", j)
+			return fmt.Errorf("binding.mappings[%d].expression is required", j)
 		}
 	}
 
 	for j, v := range conn.Validations {
 		if strings.TrimSpace(v.Expression) == "" {
-			return fmt.Errorf("connector.validations[%d].expression is required", j)
+			return fmt.Errorf("binding.validations[%d].expression is required", j)
 		}
 	}
 
 	return nil
 }
 
-func validateServiceBasic(
-	service ServiceFile,
+func validateCapabilityBasic(
+	capability CapabilityFile,
 ) error {
 
 	var errors []string
 
-	if service.APIVersion == "" {
+	if capability.APIVersion == "" {
 		errors = append(errors, "apiVersion is required")
 	}
 
-	if service.Kind != "Service" {
+	if capability.Kind != "Capability" {
 		errors = append(
 			errors,
 			fmt.Sprintf(
-				"kind must be Service, got %q",
-				service.Kind,
+				"kind must be Capability, got %q",
+				capability.Kind,
 			),
 		)
 	}
 
-	if strings.TrimSpace(service.Metadata.Name) == "" {
+	if strings.TrimSpace(capability.Metadata.Name) == "" {
 		errors = append(errors, "metadata.name is required")
 	}
 
-	if strings.TrimSpace(service.Metadata.Version) == "" {
+	if strings.TrimSpace(capability.Metadata.Version) == "" {
 		errors = append(errors, "metadata.version is required")
 	}
 
-	if strings.TrimSpace(service.Spec.Executor.Type) == "" {
+	if strings.TrimSpace(capability.Spec.CapabilityRuntime.Type) == "" {
 		errors = append(
 			errors,
-			"spec.executor.type is required",
+			"spec.capabilityruntime.type is required",
 		)
 	}
 

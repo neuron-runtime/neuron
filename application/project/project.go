@@ -17,9 +17,9 @@ type Options struct {
 	// If empty, the current working directory is used.
 	ProjectRoot string
 
-	// Entry is the system source file for YAML projects. It may be an
+	// Entry is the assembly source file for YAML projects. It may be an
 	// absolute path or one relative to the project root. An empty value
-	// selects the default <root>/system.yaml.
+	// selects the default <root>/assembly.yaml.
 	Entry string
 
 	// Validate controls basic source validation.
@@ -47,9 +47,9 @@ type Result struct {
 // Resolve reads and resolves the project source.
 //
 // It does not load .neuron/resolved.
-// It does not parse into core.System.
+// It does not parse into core.Assembly.
 // It does not start N.O.R.E.
-// It does not install executors.
+// It does not install capability runtimes.
 func Resolve(
 	ctx context.Context,
 	opts Options,
@@ -94,7 +94,7 @@ func Resolve(
 		return nil, err
 	}
 
-	resolved, err := resolver.ResolveSystem(opts.Entry)
+	resolved, err := resolver.ResolveAssembly(opts.Entry)
 	if err != nil {
 		return nil, err
 	}

@@ -28,11 +28,11 @@ const (
 	glyphCircle = "\u25cb"
 )
 
-// spinnerFrames is the braille animation shown next to running services on a
-// live terminal. The renderer advances the frame while a service is in flight.
+// spinnerFrames is the braille animation shown next to running capabilities on a
+// live terminal. The renderer advances the frame while a capability is in flight.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// ruleWidth is the width of the separator rule under the system header.
+// ruleWidth is the width of the separator rule under the assembly header.
 const ruleWidth = 32
 
 // isTerminal reports whether out is a real interactive terminal. Piped and
@@ -46,7 +46,7 @@ func isTerminal(out io.Writer) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
-// dataWriter renders a map of service output as indented "key: value" lines.
+// dataWriter renders a map of capability output as indented "key: value" lines.
 // It recursively renders nested maps, arrays, and multi-line strings so the
 // renderer can show real execution data, not just lifecycle names.
 func dataWriter(b *strings.Builder, indent string, key string, val any) {

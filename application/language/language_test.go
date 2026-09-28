@@ -88,9 +88,9 @@ func TestResolveFlagOverridesDetection(t *testing.T) {
 	}
 }
 
-func TestResolveDetectsYAMLSystemFile(t *testing.T) {
+func TestResolveDetectsYAMLAssemblyFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "system.yaml"), []byte("apiVersion: neuron/v1\nkind: System\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "assembly.yaml"), []byte("apiVersion: neuron/v1\nkind: Assembly\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

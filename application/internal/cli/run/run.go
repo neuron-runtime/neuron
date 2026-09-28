@@ -31,12 +31,12 @@ var (
 	jsonMode bool
 )
 
-// New constructs and configures the Cobra command for executing Neuron systems.
+// New constructs and configures the Cobra command for executing Neuron assemblies.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Run,
-		Short: "Run a Neuron System",
-		Long:  "Run a Neuron System using the internal N.O.R.E runtime execution engine.",
+		Short: "Run a Neuron Assembly",
+		Long:  "Run a Neuron Assembly using the internal N.O.R.E runtime execution engine.",
 		RunE:  runCmdHandler,
 	}
 
@@ -49,9 +49,9 @@ func New() *cobra.Command {
 	return cmd
 }
 
-// runCmdHandler addresses a registered system and triggers execution.
+// runCmdHandler addresses a registered assembly and triggers execution.
 //
-// With a target (`neuron run acme-api@1.0.0`) the command runs that system
+// With a target (`neuron run acme-api@1.0.0`) the command runs that assembly
 // from anywhere and never consults the project. Without a target it resolves
 // the key from the project's build record (.neuron/build.json): the project is
 // rebuilt automatically when its authoring fingerprint has changed, or when
@@ -114,10 +114,10 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 
 	if !detach {
 		renderer, err := output.New(output.Options{
-			Out:     cmd.OutOrStdout(),
-			System:  systemLabel(key.SystemID, target),
-			Mode:    presentationMode(),
-			Verbose: verbose,
+			Out:      cmd.OutOrStdout(),
+			Assembly: assemblyLabel(key.AssemblyID, target),
+			Mode:     presentationMode(),
+			Verbose:  verbose,
 		})
 		if err != nil {
 			return err
@@ -149,10 +149,10 @@ func presentationMode() output.Mode {
 	}
 }
 
-// systemLabel derives a human-readable label for the executed system from the
+// assemblyLabel derives a human-readable label for the executed assembly from the
 // resolved key, falling back to the addressing target.
-func systemLabel(systemID, target string) string {
-	label := systemID
+func assemblyLabel(assemblyID, target string) string {
+	label := assemblyID
 	if label == "" {
 		label = target
 	}
@@ -165,7 +165,7 @@ func systemLabel(systemID, target string) string {
 	return label
 }
 
-// ensureBuiltProject resolves the registered system key for the current
+// ensureBuiltProject resolves the registered assembly key for the current
 // project, rebuilding it when the authoring inputs changed since the last
 // build (or when --build forces a rebuild). A missing build record is an error
 // pointing at `neuron build`.

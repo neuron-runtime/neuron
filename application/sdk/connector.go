@@ -6,7 +6,7 @@ import (
 	"github.com/Muhammad-Jay/neuron/shared/types/core"
 )
 
-// Connector is the developer-facing representation of a types Connector.
+// Binding is the developer-facing representation of a types Binding.
 //
 // It deliberately exposes only the operations that make sense while
 // constructing a transition:
@@ -16,24 +16,24 @@ import (
 //   - AddValidation / AddValidations
 //
 // Execution, compilation and validation semantics remain in N.O.R.E.
-type Connector struct {
-	connector core.Connector
+type Binding struct {
+	binding core.Binding
 }
 
-func NewConnector(
+func NewBinding(
 	sourceID core.ID,
 	targetID core.ID,
-) *Connector {
-	return &Connector{
-		connector: core.Connector{
+) *Binding {
+	return &Binding{
+		binding: core.Binding{
 			Metadata: core.Metadata{
-				ID: core.NewID("connector_"),
+				ID: core.NewID("binding_"),
 			},
 			From: core.Endpoint{
-				ServiceID: sourceID,
+				CapabilityID: sourceID,
 			},
 			To: core.Endpoint{
-				ServiceID: targetID,
+				CapabilityID: targetID,
 			},
 			Mappings:    make([]core.MappingRule, 0),
 			Validations: make([]core.ValidationRule, 0),
@@ -41,33 +41,33 @@ func NewConnector(
 	}
 }
 
-// Metadata configures connector metadata.
+// Metadata configures binding metadata.
 //
 // Example:
 //
-//	sys.Connector(a, b).
+//	sys.Binding(a, b).
 //		Metadata("customer-to-email", "Customer to Email")
-func (c *Connector) Metadata(
+func (c *Binding) Metadata(
 	id, name string,
-) *Connector {
-	c.connector.Metadata.ID = core.ID(id)
-	c.connector.Metadata.Name = name
+) *Binding {
+	c.binding.Metadata.ID = core.ID(id)
+	c.binding.Metadata.Name = name
 
 	return c
 }
 
-func (c *Connector) Description(
+func (c *Binding) Description(
 	description string,
-) *Connector {
-	c.connector.Metadata.Description = description
+) *Binding {
+	c.binding.Metadata.Description = description
 
 	return c
 }
 
-func (c *Connector) Version(
+func (c *Binding) Version(
 	version string,
-) *Connector {
-	c.connector.Metadata.Version = version
+) *Binding {
+	c.binding.Metadata.Version = version
 
 	return c
 }
@@ -76,15 +76,15 @@ func (c *Connector) Version(
 //
 // Example:
 //
-//	connector.AddMapping(
+//	binding.AddMapping(
 //		Mapping("customer.name", Expr("input.name")),
 //	)
-func (c *Connector) AddMapping(
+func (c *Binding) AddMapping(
 	mapping core.MappingRule,
-) *Connector {
-	c.connector.Mappings =
+) *Binding {
+	c.binding.Mappings =
 		append(
-			c.connector.Mappings,
+			c.binding.Mappings,
 			mapping,
 		)
 
@@ -94,12 +94,12 @@ func (c *Connector) AddMapping(
 // AddMappings adds multiple mappings.
 //
 // This is the preferred API for configuration packages.
-func (c *Connector) AddMappings(
+func (c *Binding) AddMappings(
 	mappings ...core.MappingRule,
-) *Connector {
-	c.connector.Mappings =
+) *Binding {
+	c.binding.Mappings =
 		append(
-			c.connector.Mappings,
+			c.binding.Mappings,
 			mappings...,
 		)
 
@@ -107,12 +107,12 @@ func (c *Connector) AddMappings(
 }
 
 // AddValidation adds one validation rule.
-func (c *Connector) AddValidation(
+func (c *Binding) AddValidation(
 	validation core.ValidationRule,
-) *Connector {
-	c.connector.Validations =
+) *Binding {
+	c.binding.Validations =
 		append(
-			c.connector.Validations,
+			c.binding.Validations,
 			validation,
 		)
 
@@ -120,12 +120,12 @@ func (c *Connector) AddValidation(
 }
 
 // AddValidations adds multiple validation rules.
-func (c *Connector) AddValidations(
+func (c *Binding) AddValidations(
 	validations ...core.ValidationRule,
-) *Connector {
-	c.connector.Validations =
+) *Binding {
+	c.binding.Validations =
 		append(
-			c.connector.Validations,
+			c.binding.Validations,
 			validations...,
 		)
 
@@ -169,55 +169,55 @@ func Validation(
 	}
 }
 
-// Build exposes the underlying types Connector to package-level
+// Build exposes the underlying types Binding to package-level
 // configuration and import/export tooling.
-func (c *Connector) Build() core.Connector {
+func (c *Binding) Build() core.Binding {
 	if c == nil {
-		panic("mvp: nil connector")
+		panic("mvp: nil binding")
 	}
 
-	return c.connector
+	return c.binding
 }
 
 // Core is an alias for Build for callers that prefer explicit terminology.
-func (c *Connector) Core() core.Connector {
+func (c *Binding) Core() core.Binding {
 	return c.Build()
 }
 
 // Source and Target are intentionally read-only developer helpers.
-func (c *Connector) Source() core.ID {
-	return c.connector.From.ServiceID
+func (c *Binding) Source() core.ID {
+	return c.binding.From.CapabilityID
 }
 
-func (c *Connector) Target() core.ID {
-	return c.connector.To.ServiceID
+func (c *Binding) Target() core.ID {
+	return c.binding.To.CapabilityID
 }
 
-// Must ensures a connector is structurally complete before it is exported.
-func (c *Connector) Must() *Connector {
+// Must ensures a binding is structurally complete before it is exported.
+func (c *Binding) Must() *Binding {
 	if c == nil {
-		panic("mvp: connector is nil")
+		panic("mvp: binding is nil")
 	}
 
-	if c.connector.From.ServiceID == "" {
-		panic("mvp: connector source service is required")
+	if c.binding.From.CapabilityID == "" {
+		panic("mvp: binding source capability is required")
 	}
 
-	if c.connector.To.ServiceID == "" {
-		panic("mvp: connector target service is required")
+	if c.binding.To.CapabilityID == "" {
+		panic("mvp: binding target capability is required")
 	}
 
 	return c
 }
 
-func (c *Connector) String() string {
+func (c *Binding) String() string {
 	if c == nil {
 		return "<nil>"
 	}
 
 	return fmt.Sprintf(
 		"%s -> %s",
-		c.connector.From.ServiceID,
-		c.connector.To.ServiceID,
+		c.binding.From.CapabilityID,
+		c.binding.To.CapabilityID,
 	)
 }

@@ -71,7 +71,7 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 		return fmt.Errorf("typescript build failed: %w", err)
 	}
 
-	// The SDK writes camelCase connector keys inherited from JS objects;
+	// The SDK writes camelCase binding keys inherited from JS objects;
 	// canonicalize them so every language produces the same snake_case shape.
 	sys, err := manifest.LoadFromProjectRoot(root)
 	if err != nil {

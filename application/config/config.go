@@ -26,20 +26,20 @@ type Config struct {
 	// Lang is the canonical authoring language. It defaults to "typescript".
 	Lang string `yaml:"lang,omitempty" mapstructure:"lang"`
 
-	// Entry is the system source file relative to the project root
-	// (e.g. "system.ts" or "system.yaml"). When empty the default entry for
+	// Entry is the assembly source file relative to the project root
+	// (e.g. "assembly.ts" or "assembly.yaml"). When empty the default entry for
 	// the resolved language is used.
 	Entry string `yaml:"entry,omitempty" mapstructure:"entry"`
 
-	// Variables are project-level values passed into the compiled system
+	// Variables are project-level values passed into the compiled assembly
 	// manifest. They have no meaning to the runtime itself.
 	Variables map[string]any `yaml:"variables,omitempty" mapstructure:"variables"`
 
-	Runtime   RuntimeConfig   `yaml:"runtime" mapstructure:"runtime"`
-	Daemon    DaemonConfig    `yaml:"daemon" mapstructure:"daemon"`
-	Storage   StorageConfig   `yaml:"storage" mapstructure:"storage"`
-	Executors ExecutorsConfig `yaml:"executors" mapstructure:"executors"`
-	Inspector InspectorConfig `yaml:"inspector" mapstructure:"inspector"`
+	Runtime            RuntimeConfig            `yaml:"runtime" mapstructure:"runtime"`
+	Daemon             DaemonConfig             `yaml:"daemon" mapstructure:"daemon"`
+	Storage            StorageConfig            `yaml:"storage" mapstructure:"storage"`
+	CapabilityRuntimes CapabilityRuntimesConfig `yaml:"capabilityRuntimes" mapstructure:"capabilityRuntimes"`
+	Inspector          InspectorConfig          `yaml:"inspector" mapstructure:"inspector"`
 
 	// Dev controls developer-experience options.
 	Dev DevConfig `yaml:"dev,omitempty" mapstructure:"dev"`
@@ -47,7 +47,7 @@ type Config struct {
 	// ProjectDir is the absolute path of the project root: the directory that
 	// owns the project configuration (neuron.config.*). It is computed during
 	// Load and never read from a configuration file. Downstream consumers use
-	// it to resolve project-relative paths (implicit executor roots, build
+	// it to resolve project-relative paths (implicit capability runtime roots, build
 	// artifacts).
 	ProjectDir string `yaml:"-" mapstructure:"-"`
 
@@ -78,7 +78,7 @@ type ExecutionConfig struct {
 	Timeout string `yaml:"timeout" mapstructure:"timeout"`
 }
 
-// WorkerConfig describes the executor worker pool.
+// WorkerConfig describes the capability runtime worker pool.
 type WorkerConfig struct {
 	Min int `yaml:"min,omitempty" mapstructure:"min"`
 	Max int `yaml:"max,omitempty" mapstructure:"max"`
@@ -109,26 +109,26 @@ type StorageConfig struct {
 	Provider string `yaml:"provider" mapstructure:"provider"`
 
 	// Directory is the provider's data directory. The storage implementation
-	// decides the individual subdirectories (systems, instances, ...).
+	// decides the individual subdirectories (assemblies, instances, ...).
 	Directory string `yaml:"directory" mapstructure:"directory"`
 }
 
-// ExecutorsConfig lists the executable registries Neuron can resolve services
-// against. A service only declares `type`/`version`; the registry resolution
-// system determines where the executor comes from.
-type ExecutorsConfig struct {
-	// Registries lists the registry providers Neuron can resolve executors
+// CapabilityRuntimesConfig lists the executable registries Neuron can resolve capabilities
+// against. A capability only declares `type`/`version`; the registry resolution
+// assembly determines where the capability runtime comes from.
+type CapabilityRuntimesConfig struct {
+	// Registries lists the registry providers Neuron can resolve capability runtimes
 	// against.
-	Registries []ExecutorRegistry `yaml:"registries,omitempty" mapstructure:"registries"`
+	Registries []CapabilityRuntimeRegistry `yaml:"registries,omitempty" mapstructure:"registries"`
 
-	// LocalRoots lists additional project-local executor search roots,
-	// resolved against the project root. The project's own ./neuron/executors
+	// LocalRoots lists additional project-local capability runtime search roots,
+	// resolved against the project root. The project's own ./neuron/capabilityRuntimes
 	// directory is always an implicit local root and does not need to be
 	// listed here.
 	LocalRoots []string `yaml:"localRoots,omitempty" mapstructure:"localRoots"`
 
-	// StoreDir is the local installed-executor directory. Defaults to
-	// ~/.neuron/executors. Like storage, it is internal and rejected from
+	// StoreDir is the local installed capability runtime directory. Defaults to
+	// ~/.neuron/capabilityRuntimes. Like storage, it is internal and rejected from
 	// configuration files.
 	StoreDir string `yaml:"storeDir,omitempty" mapstructure:"storeDir"`
 
@@ -141,13 +141,13 @@ type ExecutorsConfig struct {
 func DefaultStoreDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".neuron/executors"
+		return ".neuron/capabilityRuntimes"
 	}
-	return filepath.Join(home, ".neuron", "executors")
+	return filepath.Join(home, ".neuron", "capabilityRuntimes")
 }
 
-// ExecutorRegistry identifies a source of executor definitions.
-type ExecutorRegistry struct {
+// CapabilityRuntimeRegistry identifies a source of capability runtime definitions.
+type CapabilityRuntimeRegistry struct {
 	Name string `yaml:"name,omitempty" mapstructure:"name"`
 	URL  string `yaml:"url"            mapstructure:"url"`
 }
@@ -161,7 +161,7 @@ type InspectorConfig struct {
 // DevConfig carries developer-experience options. Everything here has a
 // sensible default and is optional to author.
 type DevConfig struct {
-	// MaxWorkers bounds how many local executor build commands may run at
+	// MaxWorkers bounds how many local capability runtime build commands may run at
 	// once during `neuron build`. Defaults to 1 (sequential builds).
 	MaxWorkers int `yaml:"maxWorkers,omitempty" mapstructure:"maxWorkers"`
 }

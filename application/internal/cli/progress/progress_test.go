@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/executor"
+	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
 )
 
 func TestReporterLineOutput(t *testing.T) {
@@ -14,10 +14,10 @@ func TestReporterLineOutput(t *testing.T) {
 	var buf bytes.Buffer
 	rep := New(&buf)
 
-	rep.Resolving(executor.Requirement{Type: "example:echo", Version: "^1.0.0"})
-	rep.Installing(executor.Package{Type: "example:echo", Version: "1.0.0", Registry: "local"})
-	rep.Installed(executor.InstallResult{
-		Installed: &executor.Installed{Type: "example:echo", Version: "1.0.0"},
+	rep.Resolving(capabilityruntime.Requirement{Type: "example:echo", Version: "^1.0.0"})
+	rep.Installing(capabilityruntime.Package{Type: "example:echo", Version: "1.0.0", Registry: "local"})
+	rep.Installed(capabilityruntime.InstallResult{
+		Installed: &capabilityruntime.Installed{Type: "example:echo", Version: "1.0.0"},
 	})
 
 	rep.Stop()
@@ -39,10 +39,10 @@ func TestReporterAlreadyInstalled(t *testing.T) {
 	var buf bytes.Buffer
 	rep := New(&buf)
 
-	rep.Resolving(executor.Requirement{Type: "example:echo"})
+	rep.Resolving(capabilityruntime.Requirement{Type: "example:echo"})
 	rep.AlreadyInstalled(
-		executor.Requirement{Type: "example:echo"},
-		executor.Installed{Type: "example:echo", Version: "1.0.0"},
+		capabilityruntime.Requirement{Type: "example:echo"},
+		capabilityruntime.Installed{Type: "example:echo", Version: "1.0.0"},
 	)
 	rep.Stop()
 

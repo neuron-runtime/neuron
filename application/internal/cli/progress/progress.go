@@ -1,10 +1,10 @@
-// Package progress adapts the executor pipeline's Observer events into the
-// CLI's step-rendering ui package. It implements executor.Observer so the
-// resolution pipeline stays output-free: the executor package reports events,
+// Package progress adapts the capability runtime pipeline's Observer events into the
+// CLI's step-rendering ui package. It implements capabilityruntime.Observer so the
+// resolution pipeline stays output-free: the capability runtime package reports events,
 // and this layer decides how to draw them through ui.Runner.
 //
 // The package owns the domain meaning of each event (what "resolving",
-// "installing", "already installed", and executor build status mean) and hands
+// "installing", "already installed", and capability runtime build status mean) and hands
 // rendering to ui. Its sole remaining job is translating events into runner
 // calls.
 package progress
@@ -12,20 +12,20 @@ package progress
 import (
 	"io"
 
-	"github.com/Muhammad-Jay/neuron/application/executor"
+	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
 	"github.com/Muhammad-Jay/neuron/application/internal/cli/ui"
 )
 
-// Reporter renders executor.Observer events for one command invocation.
+// Reporter renders capabilityruntime.Observer events for one command invocation.
 //
 // A Reporter is not safe for concurrent use beyond the internal spinner
 // lifecycle; resolution events are emitted sequentially by the pipeline.
 type Reporter struct {
 	r *ui.Runner
 
-	// building counts executors currently running a build.command so the
+	// building counts capability runtimes currently running a build.command so the
 	// concurrent-build display can show an aggregate instead of flickering
-	// per-executor lines.
+	// per-capability runtime lines.
 	building int
 }
 
@@ -34,18 +34,18 @@ func New(out io.Writer) *Reporter {
 	return &Reporter{r: ui.New(out)}
 }
 
-// Resolving implements executor.Observer.
-func (r *Reporter) Resolving(res executor.Requirement) {
+// Resolving implements capabilityruntime.Observer.
+func (r *Reporter) Resolving(res capabilityruntime.Requirement) {
 	r.r.Step("Resolving " + display(res.Type, res.Version))
 }
 
-// AlreadyInstalled implements executor.Observer.
-func (r *Reporter) AlreadyInstalled(_ executor.Requirement, installed executor.Installed) {
+// AlreadyInstalled implements capabilityruntime.Observer.
+func (r *Reporter) AlreadyInstalled(_ capabilityruntime.Requirement, installed capabilityruntime.Installed) {
 	r.r.StepDone(display(installed.Type, installed.Version) + " already installed")
 }
 
-// Installing implements executor.Observer.
-func (r *Reporter) Installing(pkg executor.Package) {
+// Installing implements capabilityruntime.Observer.
+func (r *Reporter) Installing(pkg capabilityruntime.Package) {
 	text := "Installing " + display(pkg.Type, pkg.Version)
 	if pkg.Registry != "" {
 		text += " (from " + pkg.Registry + ")"
@@ -53,8 +53,8 @@ func (r *Reporter) Installing(pkg executor.Package) {
 	r.r.Step(text)
 }
 
-// Installed implements executor.Observer.
-func (r *Reporter) Installed(result executor.InstallResult) {
+// Installed implements capabilityruntime.Observer.
+func (r *Reporter) Installed(result capabilityruntime.InstallResult) {
 	if result.Installed == nil {
 		return
 	}
@@ -65,8 +65,8 @@ func (r *Reporter) Installed(result executor.InstallResult) {
 	r.r.StepDone(display(result.Installed.Type, result.Installed.Version) + verb)
 }
 
-// Status renders one per-executor build decision (building / cached /
-// installed / failed) reported through executorctl.BuildOptions.Status. Build
+// Status renders one per-capability runtime build decision (building / cached /
+// installed / failed) reported through runtimectl.BuildOptions.Status. Build
 // commands run concurrently under BuildLocal, so the in-flight "building"
 // state drives the aggregate spinner and terminal decisions render completed
 // lines.
@@ -76,7 +76,7 @@ func (r *Reporter) Status(typ, version, message string) {
 	switch message {
 	case "building":
 		r.building++
-		r.r.Busy(r.building, "building executors")
+		r.r.Busy(r.building, "building capability runtimes")
 		if !r.r.Live() {
 			r.r.Step(name + " building")
 		}

@@ -1,20 +1,20 @@
-package executor
+package capabilityruntime
 
 import (
 	"encoding/json"
 	"io"
 	"os"
 
-	shadexec "github.com/Muhammad-Jay/neuron/shared/types/executor"
+	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
 )
 
 // readRequestFromStdin reads a single JSON Request document from stdin.
-func readRequestFromStdin() (*shadexec.Request, error) {
+func readRequestFromStdin() (*capabilityrt.Request, error) {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return nil, err
 	}
-	var req shadexec.Request
+	var req capabilityrt.Request
 	if err := json.Unmarshal(data, &req); err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func readRequestFromStdin() (*shadexec.Request, error) {
 
 // writeStdioOutput writes a successful JSON Response to stdout.
 func writeStdioOutput(output map[string]any) error {
-	resp := shadexec.Response{Output: output}
+	resp := capabilityrt.Response{Result: output}
 	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
 		return err
 	}
@@ -32,8 +32,8 @@ func writeStdioOutput(output map[string]any) error {
 
 // writeStdioError writes a controlled failure JSON Response to stdout.
 func writeStdioError(message string) {
-	_ = json.NewEncoder(os.Stdout).Encode(shadexec.Response{
-		Output: map[string]any{},
+	_ = json.NewEncoder(os.Stdout).Encode(capabilityrt.Response{
+		Result: map[string]any{},
 		Error:  message,
 	})
 }

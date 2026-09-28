@@ -6,7 +6,7 @@ import "time"
 //
 // It contains no unresolved entry references.
 //
-// It is still independent from N.O.R.E. core.System.
+// It is still independent from N.O.R.E. core.Assembly.
 //
 // The next layer can transform this into:
 //
@@ -14,21 +14,21 @@ import "time"
 //
 //	↓
 //
-// SystemParser
+// AssemblyParser
 //
 //	↓
 //
-// core.System
+// core.Assembly
 type ResolvedProject struct {
 	FormatVersion string `json:"formatVersion"`
 
 	ResolvedAt time.Time `json:"resolvedAt"`
 
-	System ResolvedSystem `json:"systems"`
+	Assembly ResolvedAssembly `json:"assemblies"`
 
-	// ExecutorRequirements is an indexed view of the executors
-	// required by all services in this project.
-	ExecutorRequirements []ExecutorRequirement `json:"executorRequirements"`
+	// CapabilityRuntimeRequirements is an indexed view of the capability runtimes
+	// required by all capabilities in this project.
+	CapabilityRuntimeRequirements []CapabilityRuntimeRequirement `json:"capabilityRuntimeRequirements"`
 
 	// SourceFiles records every source YAML file participating in
 	// this resolved project.
@@ -37,47 +37,47 @@ type ResolvedProject struct {
 	SourceFiles []ResolvedSourceFile `json:"sourceFiles"`
 }
 
-// ResolvedSystem is a System with all referenced services resolved.
-type ResolvedSystem struct {
-	Definition SystemFile `json:"definition"`
+// ResolvedAssembly is a Assembly with all referenced capabilities resolved.
+type ResolvedAssembly struct {
+	Definition AssemblyFile `json:"definition"`
 
-	Services   []ResolvedService   `json:"services"`
-	Connectors []ResolvedConnector `json:"connectors"`
+	Capabilities []ResolvedCapability `json:"capabilities"`
+	Bindings     []ResolvedBinding    `json:"bindings"`
 }
 
-// ResolvedConnector contains the original connector definition plus
+// ResolvedBinding contains the original binding definition plus
 // resolution metadata.
-type ResolvedConnector struct {
-	Ref        string        `json:"ref"`
-	SourcePath string        `json:"sourcePath"`
-	Definition ConnectorFile `json:"definition"`
+type ResolvedBinding struct {
+	Ref        string      `json:"ref"`
+	SourcePath string      `json:"sourcePath"`
+	Definition BindingFile `json:"definition"`
 }
 
-// ResolvedService contains the original service definition plus
+// ResolvedCapability contains the original capability definition plus
 // resolution metadata.
-type ResolvedService struct {
+type ResolvedCapability struct {
 	Ref string `json:"ref"`
 
 	SourcePath string `json:"sourcePath"`
 
-	Definition ServiceFile `json:"definition"`
+	Definition CapabilityFile `json:"definition"`
 }
 
-// ExecutorRequirement is an indexed executor dependency.
+// CapabilityRuntimeRequirement is an indexed capability runtime dependency.
 //
 // This is useful later for:
 //
-//	executor install
-//	executor resolve
-//	executor registry
+//	capability runtime install
+//	capability runtime resolve
+//	capability runtime registry
 //	container preparation
-//	remote executor discovery
-type ExecutorRequirement struct {
+//	remote capability runtime discovery
+type CapabilityRuntimeRequirement struct {
 	Type    string `json:"type"`
 	Version string `json:"version,omitempty"`
 	Source  string `json:"source,omitempty"`
 
-	Services []string `json:"services"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // ResolvedSourceFile identifies a source YAML file.
@@ -89,9 +89,9 @@ type ResolvedSourceFile struct {
 	SHA256 string `json:"sha256"`
 }
 
-func collectExecutorRequirements(
-	services []ResolvedService,
-) []ExecutorRequirement {
+func collectCapabilityRuntimeRequirements(
+	capabilities []ResolvedCapability,
+) []CapabilityRuntimeRequirement {
 
 	type key struct {
 		Type    string
@@ -99,38 +99,38 @@ func collectExecutorRequirements(
 		Source  string
 	}
 
-	index := make(map[key]*ExecutorRequirement)
+	index := make(map[key]*CapabilityRuntimeRequirement)
 
-	for _, service := range services {
+	for _, capability := range capabilities {
 
-		executor := service.Definition.Spec.Executor
+		capabilityRuntime := capability.Definition.Spec.CapabilityRuntime
 
 		k := key{
-			Type:    executor.Type,
-			Version: executor.Version,
-			Source:  executor.Source,
+			Type:    capabilityRuntime.Type,
+			Version: capabilityRuntime.Version,
+			Source:  capabilityRuntime.Source,
 		}
 
 		requirement, exists := index[k]
 
 		if !exists {
-			requirement = &ExecutorRequirement{
-				Type:    executor.Type,
-				Version: executor.Version,
-				Source:  executor.Source,
+			requirement = &CapabilityRuntimeRequirement{
+				Type:    capabilityRuntime.Type,
+				Version: capabilityRuntime.Version,
+				Source:  capabilityRuntime.Source,
 			}
 
 			index[k] = requirement
 		}
 
-		requirement.Services = append(
-			requirement.Services,
-			service.Ref,
+		requirement.Capabilities = append(
+			requirement.Capabilities,
+			capability.Ref,
 		)
 	}
 
 	result := make(
-		[]ExecutorRequirement,
+		[]CapabilityRuntimeRequirement,
 		0,
 		len(index),
 	)

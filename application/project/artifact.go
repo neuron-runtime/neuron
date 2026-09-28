@@ -13,7 +13,7 @@ const (
 )
 
 // RegistrationKeyPath returns the path where the last successfully registered
-// system key is persisted. It lives in the project's .neuron directory.
+// assembly key is persisted. It lives in the project's .neuron directory.
 func RegistrationKeyPath(projectRoot string) string {
 	return filepath.Join(
 		projectRoot,
@@ -23,7 +23,7 @@ func RegistrationKeyPath(projectRoot string) string {
 }
 
 // SaveRegistrationKey persists the key reported by a successful registration so
-// run-only flows (e.g. `neuron run`) can address the registered system without
+// run-only flows (e.g. `neuron run`) can address the registered assembly without
 // re-building or re-parsing the project.
 func SaveRegistrationKey(projectRoot string, key any) error {
 	if key == nil {

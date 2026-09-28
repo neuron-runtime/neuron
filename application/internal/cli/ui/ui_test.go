@@ -68,7 +68,7 @@ func TestRunnerLineOutput(t *testing.T) {
 
 	r.Step("Resolving example:echo")
 	r.StepDone("example:echo@1.0.0 installed")
-	r.Info("building executors")
+	r.Info("building capability runtimes")
 	r.Fail("broken:something failed")
 
 	if r.Live() {
@@ -80,7 +80,7 @@ func TestRunnerLineOutput(t *testing.T) {
 	got := buf.String()
 	want := "  · Resolving example:echo ...\n" +
 		"  ✓ example:echo@1.0.0 installed\n" +
-		"  · building executors\n" +
+		"  · building capability runtimes\n" +
 		"  ✗ broken:something failed\n"
 
 	if got != want {
