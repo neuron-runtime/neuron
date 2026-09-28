@@ -41,7 +41,7 @@ for mod in "${go_modules[@]}"; do
   ) || exit 1
 done
 
-for pkg in ./packages/system-sdks/* ./packages/executor-sdks/* ./examples/*; do
+for pkg in ./packages/assembly-sdks/* ./packages/executor-sdks/* ./examples/*; do
   if [ ! -f "$pkg/package.json" ]; then
     echo "skip $pkg (not a pnpm package)"
     continue

@@ -108,7 +108,7 @@ proxy serves the tag.
 
 Each artifact carries its own version and is versioned independently:
 
-- `@neuron/sdk` — `version` in `packages/system-sdks/typescript/package.json`
+- `@neuron/sdk` — `version` in `packages/assembly-sdks/typescript/package.json`
 - `Neuron.Executor` — `<Version>` in `packages/executor-sdks/dotnet/Directory.Build.props`
 - Go modules — the git tag itself
 

@@ -1,0 +1,33 @@
+apiVersion: neuron/v1
+kind: Capability
+
+metadata:
+  name: calculate-totals
+  version: 1.0.0
+  description: Calculate totals
+
+spec:
+  capability runtime:
+    type: neuron:core:set
+
+  config:
+    tax_rate: 0.0825
+    discount_rate: 0.10
+
+  mappings:
+    - direction: input
+      source: items
+      target: items
+    - direction: input
+      source: tier
+      target: customer_tier
+    - direction: input
+      source: shipping_state
+      target: shipping_state
+    - direction: input
+      source: email
+      target: email
+
+  execution:
+    mode: wait
+    timeout: 5s

@@ -1,13 +1,13 @@
 # `executor-dotnet`
 
-The official **.NET SDK for building Neuron executors**. Implement a capability as a plain `ExecutorHandler`; the SDK handles protocol negotiation, Unix domain socket setup, readiness signaling, and lifecycle management.
+The official **.NET SDK for building Neuron capability runtimes**. Implement a capability as a plain `ExecutorHandler`; the SDK handles protocol negotiation, Unix domain socket setup, readiness signaling, and lifecycle management.
 
-An executor is a program that exposes the Neuron execution contract: an input map in, an output map (or a controlled error) out.
+A capability runtime is a program that exposes the Neuron execution contract: an input map in, an output map (or a controlled error) out.
 
 ```mermaid
 flowchart LR
-    S[Neuron Service<br/>content.extract] --> C[Executor Contract<br/>executor.json]
-    C --> D[.NET Executor<br/>Handler + ExecutorServer]
+    S[Neuron Capability<br/>content.extract] --> C[Capability Runtime Contract<br/>executor.json]
+    C --> D[.NET Capability Runtime<br/>Handler + ExecutorServer]
     D --> P[Process Runtime<br/>gRPC worker]
 ```
 
@@ -25,21 +25,21 @@ Neuron.Executor  (namespace Neuron.Executor)
 Requirements:
 
 - .NET SDK 10.0 or newer (`net10.0`)
-- The canonical gRPC contract in `shared/protocol/executor/v1/executor.proto`, referenced (not copied) by the SDK project
+- The canonical gRPC contract in `shared/protocol/capabilityruntime/v1/capability_runtime.proto`, referenced (not copied) by the SDK project
 
 ---
 
-## How the SDK hosts an executor
+## How the SDK hosts a capability runtime
 
-This SDK implements the **`neuron/executor-v1`** wire protocol only: a long-lived gRPC server on a Unix domain socket, matching the worker model of the N.O.R.E. process runtime.
+This SDK implements the **`neuron/capability-runtime-v1`** wire protocol only: a long-lived gRPC server on a Unix domain socket, matching the worker model of the N.O.R.E. process runtime.
 
-The legacy `neuron/executor-v1-json` stdin/stdout transport is deliberately **not** provided. An executor built with this SDK must be launched by the process runtime (the runtime injects `NEURON_EXECUTOR_SOCKET`); the SDK fails fast if that contract is missing.
+The legacy `neuron/capability-runtime-v1-json` stdin/stdout transport is deliberately **not** provided. A capability runtime built with this SDK must be launched by the process runtime (the runtime injects `NEURON_EXECUTOR_SOCKET`); the SDK fails fast if that contract is missing.
 
 ---
 
 ## The Handler contract
 
-An executor is implemented as an `ExecutorHandler` with four callbacks:
+A capability runtime is implemented as an `ExecutorHandler` with four callbacks:
 
 | Callback    | When it runs                           | Responsibility                                              |
 | ----------- | -------------------------------------- | ----------------------------------------------------------- |
@@ -64,7 +64,7 @@ return await ExecutorServer.RunAsync(handler);
 
 `RunAsync` requires both `Initialize` and `Execute`; a handler missing either is rejected at startup.
 
-`InitializeResult` carries the executor's side of the negotiation:
+`InitializeResult` carries the capability runtime's side of the negotiation:
 
 ```csharp
 public sealed class InitializeResult
@@ -75,13 +75,13 @@ public sealed class InitializeResult
 }
 ```
 
-Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/executor-v1`), mirroring `packages/executor-sdks/golang`.
+Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/capability-runtime-v1`), mirroring `packages/executor-sdks/golang`.
 
 `Execute` receives the resolved input map plus an `ExecuteContext` (execution id, timeout, correlation id) and returns `ExecutionResult` with an output map. Setting `ExecutionResult.Error` records a **controlled failure** — the request still succeeds over the transport, and the runtime surfaces the message as an execution failure, exactly like an error in the Go SDK.
 
 ---
 
-## A complete executor
+## A complete capability runtime
 
 ```csharp
 using Neuron.Executor;
@@ -93,7 +93,7 @@ var handler = new ExecutorHandler
         {
             ProtocolVersion = ExecutorConstants.ProtocolV1,
             Capabilities = new[] { "document.metadata.extract" },
-            Metadata = new Dictionary<string, string> { ["service"] = "content:document-metadata" },
+            Metadata = new Dictionary<string, string> { ["capability"] = "content:document-metadata" },
         }),
 
     Execute = async (input, context, ct) =>
@@ -140,9 +140,9 @@ The SDK reads its transport contract from the environment injected by the N.O.R.
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `NEURON_EXECUTOR_SOCKET`   | Path of the Unix domain socket where the gRPC server must listen. **Required.**                      |
 | `NEURON_EXECUTOR_READY`    | Path of a file to create once the server is accepting connections (the launcher waits for this file) |
-| `NEURON_EXECUTOR_PROTOCOL` | The protocol the runtime expects; the SDK verifies it matches `neuron/executor-v1`                   |
-| `NEURON_EXECUTOR_TYPE`     | The logical executor type, e.g. `content:document-metadata` (informational)                          |
-| `NEURON_EXECUTOR_VERSION`  | The resolved executor version (informational)                                                        |
+| `NEURON_EXECUTOR_PROTOCOL` | The protocol the runtime expects; the SDK verifies it matches `neuron/capability-runtime-v1`              |
+| `NEURON_EXECUTOR_TYPE`     | The logical capability runtime type, e.g. `content:document-metadata` (informational)                |
+| `NEURON_EXECUTOR_VERSION`  | The resolved capability runtime version (informational)                                             |
 
 The SDK cleans up a stale socket file from a crashed process before listening, so a restart never fails because an old socket file is still present.
 
@@ -165,12 +165,12 @@ On the way back, numeric protobuf values that are whole numbers are returned as 
 
 ---
 
-## Executors are language-independent
+## Capability runtimes are language-independent
 
 > [!IMPORTANT]
-> An Executor is a runtime implementation of a Service contract. It is **not** required to be written in .NET, nor compiled to WASM. `executor-dotnet` is one implementation SDK; `executor-go` is another; any language with gRPC support can implement `neuron/executor-v1`.
+> A Capability Runtime is a runtime implementation of a Capability contract. It is **not** required to be written in .NET, nor compiled to WASM. `executor-dotnet` is one implementation SDK; `executor-go` is another; any language with gRPC support can implement `neuron/capability-runtime-v1`.
 
-The gRPC contract lives once in `shared/protocol/executor/v1/executor.proto`. This SDK references that file via `Grpc.Tools` — it is never copied, so the wire contract has a single source of truth.
+The gRPC contract lives once in `shared/protocol/capabilityruntime/v1/capability_runtime.proto`. This SDK references that file via `Grpc.Tools` — it is never copied, so the wire contract has a single source of truth.
 
 ---
 
@@ -180,10 +180,10 @@ The gRPC contract lives once in `shared/protocol/executor/v1/executor.proto`. Th
 | ------------------ | -------------------------------------------------------- |
 | Implementation     | `packages/executor-sdks/dotnet/`                              |
 | Go SDK (parity)    | [packages/executor-sdks/golang](../../packages/executor-sdks/golang/README.md) |
-| gRPC schema        | `shared/protocol/executor/v1/executor.proto`             |
-| Contract types     | `shared/types/executor`                                  |
+| gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
+| Contract types     | `shared/types/capabilityruntime`                                  |
 | Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |
-| Executor model     | [docs/MODULES.md](../../docs/MODULES.md)                 |
+| Capability runtime model | [docs/MODULES.md](../../docs/MODULES.md)            |
 
 ## License
 

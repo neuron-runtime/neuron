@@ -1,0 +1,31 @@
+apiVersion: neuron/v1
+kind: Capability
+
+metadata:
+  name: authorize-payment
+  version: 1.0.0
+  description: Authorize payment
+
+spec:
+  capability runtime:
+    type: neuron:core:set
+
+  config:
+    payment_intent:
+      id: pi_abc123
+      status: requires_capture
+
+  mappings:
+    - direction: input
+      source: amount_cents
+      target: amount_cents
+    - direction: input
+      source: currency
+      target: currency
+    - direction: input
+      source: email
+      target: email
+
+  execution:
+    mode: wait
+    timeout: 5s

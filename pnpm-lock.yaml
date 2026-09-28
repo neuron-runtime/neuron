@@ -12,7 +12,7 @@ importers:
     dependencies:
       '@neuron/sdk':
         specifier: workspace:*
-        version: link:../../packages/system-sdks/typescript
+        version: link:../../packages/assembly-sdks/typescript
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -24,8 +24,8 @@ importers:
   examples/hello:
     dependencies:
       '@neuron/sdk':
-        specifier: file:../../packages/system-sdks/typescript
-        version: link:../../packages/system-sdks/typescript
+        specifier: file:../../packages/assembly-sdks/typescript
+        version: link:../../packages/assembly-sdks/typescript
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -34,7 +34,7 @@ importers:
         specifier: ^5.9.2
         version: 5.9.2
 
-  packages/system-sdks/typescript:
+  packages/assembly-sdks/typescript:
     dependencies:
       jiti:
         specifier: ^2.7.0

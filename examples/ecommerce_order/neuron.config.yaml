@@ -1,5 +1,5 @@
 lang: yaml
-entry: systems/order-processing/system.yaml
+entry: assemblies/order-processing/assembly.yaml
 
 variables:
   environment: development

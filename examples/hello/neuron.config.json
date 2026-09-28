@@ -1,22 +1,19 @@
 {
-  "entry": "system.ts",
-  "executors": {
-    "localRoots": [
-      "./neuron/executors"
-    ]
-  },
-  "inspector": {
-    "address": "127.0.0.1:7433",
-    "enabled": true
-  },
   "lang": "typescript",
+  "entry": "assembly.ts",
   "runtime": {
     "execution": {
       "mode": "wait",
       "timeout": "30m"
     }
   },
-  "dev": {
-    "workers": 2
+  "capabilityRuntimes": {
+    "localRoots": [
+      "./neuron/capabilityRuntimes"
+    ]
+  },
+  "inspector": {
+    "enabled": true,
+    "address": "127.0.0.1:7433"
   }
 }

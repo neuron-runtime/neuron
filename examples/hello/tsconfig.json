@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["system.ts"]
+  "include": ["assembly.ts"]
 }

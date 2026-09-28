@@ -210,16 +210,16 @@ const sayHello = Capability({
   description: "Return a friendly greeting",
 })
   .capabilityRuntime({ name: "neuron:core:set" })
-  .inputSchema<{ name: string }>()
-  .outputSchema<{ name: string; message: string }>();
+  .paramsSchema<{ name: string }>()
+  .resultSchema<{ name: string; message: string }>();
 
 const manifest = Assembly({
   name: %q,
   version: "1.0.0",
   description: "A friendly hello assembly",
 })
-  .inputSchema<{ name: string }>()
-  .withParams((input) => sayHello.withInput({ name: input.name }))
+  .paramsSchema<{ name: string }>()
+  .withParams((data) => sayHello.withParams({ name: data.name }))
   .toManifest();
 
 export default manifest;
