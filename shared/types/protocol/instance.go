@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type InstanceKey struct {

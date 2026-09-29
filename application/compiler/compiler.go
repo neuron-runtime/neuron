@@ -3,9 +3,9 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // Compiler transforms a canonical Assembly manifest into the runtime

@@ -12,10 +12,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/application/build/builder"
-	ts "github.com/Muhammad-Jay/neuron/application/build/typescript"
-	yamlb "github.com/Muhammad-Jay/neuron/application/build/yaml"
-	"github.com/Muhammad-Jay/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/build/builder"
+	ts "github.com/neuron-runtime/neuron/application/build/typescript"
+	yamlb "github.com/neuron-runtime/neuron/application/build/yaml"
+	"github.com/neuron-runtime/neuron/application/language"
 )
 
 // Options and Builder are re-exported for callers of this package.

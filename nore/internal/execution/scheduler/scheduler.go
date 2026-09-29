@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type Scheduler struct {
-	bus              contracts.EventBus
-	executions       contracts.ExecutionRepository
-	executionStarted event.Subscription
+	bus                 contracts.EventBus
+	executions          contracts.ExecutionRepository
+	executionStarted    event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
 }

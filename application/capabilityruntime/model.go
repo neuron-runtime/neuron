@@ -3,7 +3,7 @@ package capabilityruntime
 import (
 	"runtime"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // Package is the immutable package obtained from a registry. It describes a

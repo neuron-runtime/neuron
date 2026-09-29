@@ -3,8 +3,8 @@ package version
 import (
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
-	neuronversion "github.com/Muhammad-Jay/neuron/shared/version"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	neuronversion "github.com/neuron-runtime/neuron/shared/version"
 	"github.com/spf13/cobra"
 )
 

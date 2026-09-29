@@ -4,7 +4,7 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/config"
 )
 
 // noreArgs parses the argument list the exact way the nore daemon binary does.

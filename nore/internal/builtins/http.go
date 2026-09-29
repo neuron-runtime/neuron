@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // HTTP performs a single HTTP request from the merged params/config and

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 
 	_ "modernc.org/sqlite"
 )

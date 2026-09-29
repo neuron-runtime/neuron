@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
-	"github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/shared/protocol/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 const (
@@ -80,7 +80,7 @@ func (b *EventBridge) Stream(ctx context.Context, room string) (<-chan protocol.
 					ID:            msg.EventID,
 					Type:          msg.Type.String(),
 					CorrelationID: msg.CorrelationID,
-					CapabilityID:     msg.CapabilityID,
+					CapabilityID:  msg.CapabilityID,
 					OccurredAt:    msg.OccurredAt.UnixNano(),
 					Payload:       msg.Payload,
 				}

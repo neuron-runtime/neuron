@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/github"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/local"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/store"
-	"github.com/Muhammad-Jay/neuron/application/config"
-	"github.com/Muhammad-Jay/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/github"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/store"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/project"
 )
 
 // Catalog bundles the wired capability runtime pipeline.

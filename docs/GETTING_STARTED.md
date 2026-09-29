@@ -12,11 +12,11 @@ flowchart LR
 
 ## Prerequisites
 
-- **The `neuron` binary** on your `PATH` (install from a [release](https://github.com/Muhammad-Jay/neuron/releases) or build from source — see [INSTALLATION.md](./INSTALLATION.md)).
+- **The `neuron` binary** on your `PATH` (install from a [release](https://github.com/neuron-runtime/neuron/releases) or build from source — see [INSTALLATION.md](./INSTALLATION.md)).
 - **The repository checked out**, to access the shipped example and the SDK workspace:
 
   ```bash
-  git clone https://github.com/Muhammad-Jay/neuron.git
+  git clone https://github.com/neuron-runtime/neuron.git
   cd neuron
   ```
 

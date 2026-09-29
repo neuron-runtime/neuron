@@ -1,6 +1,6 @@
 package event
 
-import "github.com/Muhammad-Jay/neuron/shared/types/core"
+import "github.com/neuron-runtime/neuron/shared/types/core"
 
 // LogLevel is the severity of a CapabilityLog payload.
 type LogLevel string

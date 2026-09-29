@@ -3,8 +3,8 @@ package contracts
 import (
 	"context"
 
-	executionmodel "github.com/Muhammad-Jay/neuron/nore/internal/execution"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type ExecutionRepository interface {

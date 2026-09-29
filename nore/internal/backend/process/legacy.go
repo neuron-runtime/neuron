@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // legacyInstance runs an capability runtime as a one-shot OS subprocess speaking the

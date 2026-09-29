@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 func TestExecutionRoomRoundTrip(t *testing.T) {

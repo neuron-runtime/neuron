@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	core2 "github.com/Muhammad-Jay/neuron/shared/types/core"
+	core2 "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 func validateInput(capability core2.Capability, input map[string]any) error {

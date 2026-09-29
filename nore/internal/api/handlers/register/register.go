@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +33,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	reg := assembly.RegisteredAssembly{
 		Key:                     key,
-		Assembly:                  req.Assembly,
+		Assembly:                req.Assembly,
 		ExecutionConfigurations: req.ExecutionConfigurations,
 		RegisteredAt:            now,
 		UpdatedAt:               now,

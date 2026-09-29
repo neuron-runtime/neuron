@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // metadata is the durable record persisted for an instance. Runtime objects
@@ -16,7 +16,7 @@ import (
 // reconstructed in memory from a Assembly when the instance is recreated.
 type metadata struct {
 	ID                string          `json:"id"`
-	AssemblyID          string          `json:"assembly_id"`
+	AssemblyID        string          `json:"assembly_id"`
 	Version           string          `json:"version,omitempty"`
 	Hash              string          `json:"hash,omitempty"`
 	Env               string          `json:"env,omitempty"`

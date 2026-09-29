@@ -6,8 +6,8 @@ package assembly
 import (
 	"time"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // RegisteredAssembly is the durable artifact persisted by /v1/register.

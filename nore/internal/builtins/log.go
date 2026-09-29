@@ -3,7 +3,7 @@ package builtins
 import (
 	"context"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // Log surfaces the capability's params as a CapabilityLog event and passes

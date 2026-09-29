@@ -7,7 +7,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/Muhammad-Jay/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/language"
 )
 
 // Options controls a single build invocation.

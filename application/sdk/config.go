@@ -1,6 +1,6 @@
 package sdk
 
-import "github.com/Muhammad-Jay/neuron/shared/types/core"
+import "github.com/neuron-runtime/neuron/shared/types/core"
 
 // Config is a developer-owned configuration namespace.
 //

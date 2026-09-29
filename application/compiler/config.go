@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // ExecutionConfigurations is the consolidated project/runtime configuration

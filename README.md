@@ -1,12 +1,14 @@
 # Neuron
 
+![Brand Logo](https://raw.githubusercontent.com/neuron-runtime/.github/main/profile/brand.png)
+
 **A runtime for building and operating complex software systems from composable, executable capabilities.**
 
 Neuron treats software as a composition of **capabilities** connected by **explicit relationships** and operated by a runtime that does not need to understand what those capabilities are.
 
 > Software should be composed from things that can do something, connected by explicit relationships, and operated by a runtime that does not need to understand what those things are.
 
-[Version](https://github.com/Muhammad-Jay/neuron/releases)
+[Version](https://github.com/neuron-runtime/neuron/releases)
 [Go](https://go.dev)
 [TypeScript](https://www.typescriptlang.org)
 [License](./LICENSE)
@@ -65,7 +67,7 @@ A Capability does not have to be a "microservice". A database query, an HTTP cal
 
 ## Build an Assembly
 
-Assemblies are defined in TypeScript with the (`@neuron/sdk`)`[@neuron/sdk](https://github.com/Muhammad-Jay/neuron/blob/main/packages/assembly-sdks/typescript)` — a typed, autocompleted assembly-definition language — or in YAML. Both authoring surfaces converge on the **same canonical manifest** before anything runtime-specific happens.
+Assemblies are defined in TypeScript with the (`@neuron/sdk`)`[@neuron/sdk](https://github.com/neuron-runtime/neuron/blob/main/packages/assembly-sdks/typescript)` — a typed, autocompleted assembly-definition language — or in YAML. Both authoring surfaces converge on the **same canonical manifest** before anything runtime-specific happens.
 
 Here is a real order-fulfillment definition. Three independent capabilities, wired by explicit relationships, executed by the Neuron runtime:
 
@@ -259,7 +261,7 @@ flowchart LR
 
 ```bash
 # The fastest way to feel Neuron — run the shipped order pipeline
-git clone https://github.com/Muhammad-Jay/neuron.git
+git clone https://github.com/neuron-runtime/neuron.git
 cd neuron/examples/ecommerce_order_ts
 pnpm install
 neuron build            # build the TS project, compile, register with the runtime
@@ -318,7 +320,7 @@ Neuron is one product: the `neuron` CLI plus the N.O.R.E. runtime engine, distri
 | Windows  | `amd64`          |
 
 
-1. Download the latest release archive for your platform from the [releases page](https://github.com/Muhammad-Jay/neuron/releases).
+1. Download the latest release archive for your platform from the [releases page](https://github.com/neuron-runtime/neuron/releases).
 2. Extract it and place `neuron` on your `PATH`.
 3. Verify:
 

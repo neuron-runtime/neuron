@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-LDFLAGS="-s -w -X github.com/Muhammad-Jay/neuron/shared/version.Version=${VERSION}"
+LDFLAGS="-s -w -X github.com/neuron-runtime/neuron/shared/version.Version=${VERSION}"
 TARGETS=(
   "linux amd64"
   "linux arm64"

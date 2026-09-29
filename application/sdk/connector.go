@@ -3,7 +3,7 @@ package sdk
 import (
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Binding is the developer-facing representation of a types Binding.

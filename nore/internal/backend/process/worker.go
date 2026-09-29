@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

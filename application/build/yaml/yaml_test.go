@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/build/builder"
-	yamlpkg "github.com/Muhammad-Jay/neuron/application/build/yaml"
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/application/build/builder"
+	yamlpkg "github.com/neuron-runtime/neuron/application/build/yaml"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
 )
 
 // writeProject lays out a minimal YAML Neuron project in dir.

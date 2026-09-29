@@ -4,7 +4,7 @@ import (
 	"context"
 	"maps"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // Set merges the capability's params with its configuration and returns the

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // Delay blocks for a configured "duration" (e.g. "5s"), honouring context

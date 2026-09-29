@@ -3,9 +3,9 @@ package engine
 import (
 	"context"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // execLogger is a contracts.Logger that turns log calls into CapabilityLog events
@@ -17,7 +17,7 @@ type execLogger struct {
 	bus           contracts.EventBus
 	executionID   core.ID
 	correlationID core.ID
-	capabilityID     core.ID
+	capabilityID  core.ID
 }
 
 func newExecLogger(bus contracts.EventBus, executionID, correlationID, capabilityID core.ID) *execLogger {
@@ -25,7 +25,7 @@ func newExecLogger(bus contracts.EventBus, executionID, correlationID, capabilit
 		bus:           bus,
 		executionID:   executionID,
 		correlationID: correlationID,
-		capabilityID:     capabilityID,
+		capabilityID:  capabilityID,
 	}
 }
 

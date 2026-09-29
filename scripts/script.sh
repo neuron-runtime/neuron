@@ -10,8 +10,7 @@ go_modules=(
   "./nore"
   "./shared"
   "./application"
-  "./packages/executor-sdks/golang"
-  "./examples/simple_response"
+"./packages/executor-sdks/golang"
 )
 
 for mod in "${go_modules[@]}"; do

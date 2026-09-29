@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/config"
 )
 
 func TestRequireUsesDefaultRegistriesWhenRegistryEmpty(t *testing.T) {
