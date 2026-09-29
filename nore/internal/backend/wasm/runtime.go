@@ -38,6 +38,15 @@ const (
 	// deadline. A runaway pure-compute WASI module is interrupted by wazero's
 	// WithCloseOnContextDone.
 	defaultTimeout = 10 * time.Minute
+	// compileTimeout bounds the compilation of a capability runtime module.
+	//
+	// Compilation is deliberately bounded by its own, generous budget rather
+	// than by the per-execution deadline. It is cold-start work performed once
+	// per module and shared by every instance, and on a large module it can take
+	// seconds. If it ran under the execution deadline, a caller that configured
+	// a short execution timeout could never make a first call succeed, because
+	// the budget would be consumed compiling before the module ever ran.
+	compileTimeout = 2 * time.Minute
 )
 
 // sharedRuntime is created once per process and reused by every instance.
@@ -173,8 +182,15 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 	}, nil
 }
 
-// Close releases the shared wazero runtime. Only call when all instances
-// have been closed and no execution will follow.
+// Close releases the shared compiled-module cache and the process-global wazero
+// runtime.
+//
+// This is process-wide and irreversible: the runtime is created once via
+// sync.OnceValues, so closing it permanently disables the WASM backend for
+// every instance in the process, and any later Start or Execute fails with
+// "runtime closed". It is therefore only safe at process shutdown, once all
+// instances have been closed and no execution will follow. It is not a
+// per-instance teardown, and callers must not use it to release one instance.
 func (r *Backend) Close(ctx context.Context) error {
 	return r.shared.close(ctx)
 }
@@ -208,15 +224,15 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 		req = &capabilityrt.Request{}
 	}
 
+	// timeout bounds how long the module may run. It is the smaller of the
+	// instance's configured budget and whatever the caller left on its own
+	// deadline, so a caller can always shorten an execution but never extend it.
 	timeout := i.timeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining < timeout {
 			timeout = remaining
 		}
 	}
-
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	stdin, err := json.Marshal(req)
 	if err != nil {
@@ -238,7 +254,18 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 		WithSysNanotime().
 		WithSysNanosleep()
 
-	compiled, err := i.compiledModule(execCtx)
+	// Cold start: compiling and instantiating the module is setup work, shared
+	// per module and performed once. It runs under the cold-start budget rather
+	// than the execution deadline, because a caller's execution timeout must
+	// bound how long the module may *run*, not how long its first load takes.
+	// It remains cancellable by the caller, so abandoning a call does not leave
+	// a compile running on the caller's behalf.
+	startCtx, cancelStart := context.WithTimeout(context.WithoutCancel(ctx), compileTimeout)
+	defer cancelStart()
+	stopOnCallerCancel := context.AfterFunc(ctx, cancelStart)
+	defer stopOnCallerCancel()
+
+	compiled, err := i.compileForExecution(startCtx)
 	if err != nil {
 		return nil, fmt.Errorf("capability runtime %s: compile wasm module %s: %w", i.type_, i.entrypoint, err)
 	}
@@ -246,10 +273,16 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 	// Instantiate without invoking start functions so we run _start ourselves
 	// against execCtx: a deadline then interrupts the call and auto-closes the
 	// module. Instantiation from the shared compiled module is concurrent-safe.
-	mod, err := i.runtime.shared.rt.InstantiateModule(execCtx, compiled, moduleConfig.WithStartFunctions())
+	mod, err := i.runtime.shared.rt.InstantiateModule(startCtx, compiled, moduleConfig.WithStartFunctions())
 	if err != nil {
 		return nil, fmt.Errorf("capability runtime %s: instantiate wasm module: %w", i.type_, err)
 	}
+
+	// From here on the module is running, so the execution deadline applies.
+	// wazero's WithCloseOnContextDone interrupts an in-flight _start when this
+	// context is done, which is what kills a runaway module.
+	runCtx, cancelRun := context.WithTimeout(ctx, timeout)
+	defer cancelRun()
 
 	_start := mod.ExportedFunction("_start")
 	if _start == nil {
@@ -257,9 +290,9 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 		return nil, fmt.Errorf("capability runtime %s: wasm module has no _start export", i.type_)
 	}
 
-	_, callErr := _start.Call(execCtx)
+	_, callErr := _start.Call(runCtx)
 
-	if ctxErr := execCtx.Err(); ctxErr != nil {
+	if ctxErr := runCtx.Err(); ctxErr != nil {
 		if errors.Is(ctxErr, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("capability runtime %s: timed out after %s", i.type_, timeout)
 		}
@@ -312,6 +345,35 @@ func (i *instance) compiledModule(ctx context.Context) (wazero.CompiledModule, e
 		return i.compiled, nil
 	}
 	compiled, err := i.runtime.shared.compiledModule(ctx, i.entrypoint)
+	if err != nil {
+		return nil, err
+	}
+	i.compiled = compiled
+	return compiled, nil
+}
+
+// compileForExecution resolves the compiled module under the cold-start budget
+// rather than the caller's execution deadline.
+//
+// The caller's context still cancels the wait: a caller that gives up does not
+// keep the compile running on its behalf. What is deliberately not allowed is
+// the execution deadline itself cutting the compile short, because that would
+// make the first execution of a module fail for a reason unrelated to the
+// module's behaviour.
+func (i *instance) compileForExecution(ctx context.Context) (wazero.CompiledModule, error) {
+	if i.compiled != nil {
+		return i.compiled, nil
+	}
+
+	compileCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compileTimeout)
+	defer cancel()
+
+	// Preserve caller cancellation: the compile stops if the caller goes away,
+	// but it is not bound by the caller's remaining execution budget.
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
+
+	compiled, err := i.runtime.shared.compiledModule(compileCtx, i.entrypoint)
 	if err != nil {
 		return nil, err
 	}

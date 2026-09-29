@@ -100,20 +100,33 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 			maxWorkers = defaultMaxWorkers
 		}
 
-		pool := &workerPool{
-			type_:      spec.Type,
-			version:    spec.Version,
-			entrypoint: spec.Entrypoint,
-			protocol:   protocol,
-			maxWorkers: maxWorkers,
-			rootDir:    spec.RootDir,
-			logger:     r.logger.With("capability_runtime", spec.Type, "version", spec.Version),
-		}
-
 		key := instanceKey(spec.Type, spec.Version)
+
+		// Pools are shared by capability runtime identity so that every instance
+		// of an assembly reuses the same warm workers instead of paying process
+		// startup per instance. Sharing makes the pool's lifetime a joint
+		// responsibility: it is refcounted by its holders and torn down only
+		// when the last holder releases it. Replacing or closing the pool
+		// outright here would terminate workers that other live instances are
+		// still executing on.
 		r.mu.Lock()
 		if existing, ok := r.pools[key]; ok {
-			existing.Close(ctx)
+			existing.acquire()
+			r.mu.Unlock()
+			return existing, nil
+		}
+		pool := newWorkerPool(spec, protocol, maxWorkers,
+			r.logger.With("capability_runtime", spec.Type, "version", spec.Version))
+		// Deregister the pool when it tears down, so the next Start for this
+		// capability runtime builds a fresh pool instead of receiving a closed
+		// one whose workers are already gone. The identity check matters: a
+		// teardown racing a later Start must not evict the newer pool.
+		pool.onShutdown = func() {
+			r.mu.Lock()
+			if r.pools[key] == pool {
+				delete(r.pools, key)
+			}
+			r.mu.Unlock()
 		}
 		r.pools[key] = pool
 		r.mu.Unlock()
@@ -125,7 +138,10 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 	}
 }
 
-// Close shuts down all pools managed by this runtime.
+// Close shuts down every pool this backend manages, regardless of how many
+// holders each pool has. This is the backend-level teardown performed when the
+// runtime itself is shutting down; per-instance teardown goes through the
+// BackendInstance Close contract and only releases a single holder.
 func (r *Backend) Close(ctx context.Context) error {
 	r.mu.Lock()
 	pools := make([]*workerPool, 0, len(r.pools))
@@ -137,7 +153,7 @@ func (r *Backend) Close(ctx context.Context) error {
 
 	var errs []error
 	for _, p := range pools {
-		if err := p.Close(ctx); err != nil {
+		if err := p.shutdown(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
