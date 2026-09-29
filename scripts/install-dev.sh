@@ -53,6 +53,17 @@ if ! go version >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
+# Regenerate the shared protocol buffers from their .proto source so the dev
+# build never runs on a corrupted or stale generated file. Skipped with a
+# warning when protoc is not installed.
+# ---------------------------------------------------------------------------
+if command -v protoc >/dev/null 2>&1; then
+  "$ROOT/scripts/generate-proto.sh"
+else
+  echo "==> Skipped protoc regeneration (protoc not on PATH); using committed generated code"
+fi
+
+# ---------------------------------------------------------------------------
 # Build binaries into the repo-owned dev directory
 # ---------------------------------------------------------------------------
 echo "==> Building neuron CLI"
