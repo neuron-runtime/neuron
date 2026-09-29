@@ -365,7 +365,7 @@ func (p *workerPool) startWorker(ctx context.Context) (*worker, error) {
 		capabilityrt.EnvProtocol+"="+p.protocol,
 		capabilityrt.EnvType+"="+p.type_,
 		capabilityrt.EnvVersion+"="+p.version,
-		"NEURON_CAPABILITY_RUNTIME_SOCKET="+socketPath,
+		capabilityrt.EnvSocket+"="+socketPath,
 	)
 	if p.rootDir != "" {
 		cmd.Dir = p.rootDir
@@ -374,7 +374,7 @@ func (p *workerPool) startWorker(ctx context.Context) (*worker, error) {
 	// The capability runtime process signals readiness by writing this file when its
 	// gRPC server is accepting connections.
 	readyFile := filepath.Join(socketDir, "ready")
-	cmd.Env = append(cmd.Env, "NEURON_CAPABILITY_RUNTIME_READY="+readyFile)
+	cmd.Env = append(cmd.Env, capabilityrt.EnvReady+"="+readyFile)
 
 	if err := cmd.Start(); err != nil {
 		stopProcess()

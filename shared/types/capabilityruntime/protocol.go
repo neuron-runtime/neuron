@@ -34,4 +34,14 @@ const (
 
 	// EnvVersion is the exact resolved version of the capability runtime.
 	EnvVersion = "NEURON_CAPABILITY_RUNTIME_VERSION"
+
+	// EnvSocket is the Unix domain socket path a gRPC capability runtime must
+	// bind. The runtime creates the socket directory, so the capability runtime
+	// never chooses this path itself.
+	EnvSocket = "NEURON_CAPABILITY_RUNTIME_SOCKET"
+
+	// EnvReady is the file a gRPC capability runtime creates once its server is
+	// accepting connections. The runtime polls for this file rather than
+	// sleeping, so a slow start does not become a fixed startup delay.
+	EnvReady = "NEURON_CAPABILITY_RUNTIME_READY"
 )

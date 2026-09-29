@@ -15,17 +15,17 @@ public static class ExecutorConstants
     public const string ProtocolJSONV1 = "neuron/capability-runtime-v1-json";
 
     /// <summary>Declares the protocol version the runtime expects.</summary>
-    public const string EnvProtocol = "NEURON_EXECUTOR_PROTOCOL";
+    public const string EnvProtocol = "NEURON_CAPABILITY_RUNTIME_PROTOCOL";
 
     /// <summary>The executor type (logical name) being executed.</summary>
-    public const string EnvType = "NEURON_EXECUTOR_TYPE";
+    public const string EnvType = "NEURON_CAPABILITY_RUNTIME_TYPE";
 
     /// <summary>The exact resolved version of the executor.</summary>
-    public const string EnvVersion = "NEURON_EXECUTOR_VERSION";
+    public const string EnvVersion = "NEURON_CAPABILITY_RUNTIME_VERSION";
 
     /// <summary>Unix socket path the runtime expects the gRPC server to bind.</summary>
-    public const string EnvSocket = "NEURON_EXECUTOR_SOCKET";
+    public const string EnvSocket = "NEURON_CAPABILITY_RUNTIME_SOCKET";
 
     /// <summary>File the executor writes once its gRPC server accepts connections.</summary>
-    public const string EnvReady = "NEURON_EXECUTOR_READY";
+    public const string EnvReady = "NEURON_CAPABILITY_RUNTIME_READY";
 }

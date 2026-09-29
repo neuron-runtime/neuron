@@ -11,12 +11,14 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 func main() {
 	// Signal readiness exactly as a real capability runtime does, so the test
 	// can prove it is killing a live, correctly-started process.
-	if ready := os.Getenv("NEURON_CAPABILITY_RUNTIME_READY"); ready != "" {
+	if ready := os.Getenv(capabilityrt.EnvReady); ready != "" {
 		_ = os.WriteFile(ready, nil, 0o600)
 	}
 
