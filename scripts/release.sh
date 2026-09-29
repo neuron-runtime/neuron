@@ -54,6 +54,15 @@ TARGETS=(
   "windows amd64"
 )
 
+# Regenerate the shared protocol buffers from source so release artifacts are
+# always built from fresh generated code. Skipped with a warning when protoc
+# is not installed; the committed generated files then stand in.
+if command -v protoc >/dev/null 2>&1; then
+  "$REPO_ROOT/scripts/generate-proto.sh"
+else
+  echo ">> warning: protoc not found; using committed generated code" >&2
+fi
+
 STAGING_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
