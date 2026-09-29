@@ -356,7 +356,8 @@ Execution history and retention are intended to become a **configurable storage 
 
 ## Security & isolation
 
-- **Default transport is local.** N.O.R.E. listens on a Unix socket (mode `0600`) owned by the local user. TCP is opt-in and the API is unauthenticated — exposing it over an untrusted network is unsupported.
+- **Default transport is local.** N.O.R.E. listens on a Unix socket (mode `0600`) owned by the local user, in a directory created with mode `0700`.
+- **The API is authenticated.** Every route except the health probe requires the daemon's API token as `Authorization: Bearer <token>`, compared in constant time. The daemon publishes the token in `<socket>.token` (mode `0600`) and generates one when none exists, so a local client needs no configuration. TCP is opt-in and refuses to start without a token; the token authenticates the caller but does not encrypt traffic, so a TCP listener belongs behind TLS termination.
 - **External capability runtimes are untrusted.** They are verified by digest before install, hosted out-of-process, and never loaded into the N.O.R.E. address space (with the deliberate exception of modules shipped as part of N.O.R.E. itself).
 - **Capabilities are metadata, not permissions.** A module manifest may declare capabilities; the runtime enforces actual permissions at the execution boundary.
 - **GitHub is a distribution source, not a security boundary.** Release artifacts are verified by digest before installation.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	sharedtoken "github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
@@ -69,6 +70,10 @@ func (c *connection) Close() error {
 type HTTPTransport struct {
 	client  *http.Client
 	baseURL string
+	// token is the N.O.R.E. API credential presented on every request. An
+	// empty token sends no credential, which only works against a daemon that
+	// runs unauthenticated.
+	token string
 }
 
 func NewHTTPTransport(client *http.Client, baseURL string) *HTTPTransport {
@@ -79,6 +84,22 @@ func NewHTTPTransport(client *http.Client, baseURL string) *HTTPTransport {
 		client:  client,
 		baseURL: strings.TrimRight(baseURL, "/"),
 	}
+}
+
+// WithToken returns the transport configured to authenticate with the given API
+// token.
+func (t *HTTPTransport) WithToken(token string) *HTTPTransport {
+	t.token = token
+	return t
+}
+
+// authorize attaches the API credential to a request. The token travels in a
+// header rather than the URL so it cannot leak into server access logs.
+func (t *HTTPTransport) authorize(req *http.Request) {
+	if t.token == "" {
+		return
+	}
+	req.Header.Set(sharedtoken.AuthorizationHeader, sharedtoken.Header(t.token))
 }
 
 func (t *HTTPTransport) Do(ctx context.Context, method, path string, body any, out any) error {
@@ -100,6 +121,7 @@ func (t *HTTPTransport) Do(ctx context.Context, method, path string, body any, o
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	t.authorize(req)
 
 	resp, err := t.client.Do(req)
 	if err != nil {
@@ -142,6 +164,7 @@ func (t *HTTPTransport) Stream(ctx context.Context, method, path string, body an
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	t.authorize(req)
 
 	resp, err := t.client.Do(req)
 	if err != nil {
@@ -192,9 +215,18 @@ func (t *HTTPTransport) OpenWebSocket(ctx context.Context, requestPath string) (
 		return nil, err
 	}
 
+	// The upgrade request is authenticated the same way as any other request.
+	// coder/websocket passes HTTPHeader onto the handshake, so the credential
+	// stays in a header instead of the URL.
+	header := http.Header{}
+	if t.token != "" {
+		header.Set(sharedtoken.AuthorizationHeader, sharedtoken.Header(t.token))
+	}
+
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		Subprotocols: []string{"neuron.v1"},
 		HTTPClient:   t.client,
+		HTTPHeader:   header,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("websocket dial %s: %w", wsURL, err)

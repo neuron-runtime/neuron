@@ -73,6 +73,8 @@ The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. W
 
 The daemon runs as a persistent background process: it survives the CLI process and keeps serving instances until you stop it with `neuron daemon stop`. The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
 
+The API requires a bearer token on every request except the health probe. The daemon generates one at startup and publishes it beside its socket in `nore.sock.token` (mode `0600`), so a local client authenticates automatically; `neuron` reads it from there, or from `NEURON_API_TOKEN` when the token file is not reachable (for example against `--remote`). The token is removed on graceful shutdown, because a credential outliving the process that issued it is a credential nobody rotated.
+
 
 | Transport            | Purpose                                                            |
 | -------------------- | ------------------------------------------------------------------ |
@@ -511,8 +513,10 @@ The CLI resolves configuration from several layers, later layers overriding earl
 
 | Variable          | Meaning                                       |
 | ----------------- | --------------------------------------------- |
-| `NEURON_SOCKET`   | Override the daemon Unix socket path          |
-| `NEURON_DATA_DIR` | Override the daemon persistent data directory |
+| `NEURON_SOCKET`         | Override the daemon Unix socket path          |
+| `NEURON_DATA_DIR`       | Override the daemon persistent data directory |
+| `NEURON_API_TOKEN`      | API token used to authenticate requests      |
+| `NEURON_API_TOKEN_FILE` | Override the token file path                 |
 
 
 Environment variables can also be used for any configuration value with the `NEURON_` prefix pattern (for example `NEURON_LOG_LEVEL`), and command-line flags always take precedence.

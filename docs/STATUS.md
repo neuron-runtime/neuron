@@ -82,7 +82,7 @@ The following exist and work, but are not yet hardened or committed to:
 
 ## Planned
 
-- **Runtime hardening** — authentication for the API, TLS for TCP, resource limits, and stronger process isolation.
+- **Runtime hardening** — TLS for the opt-in TCP endpoint (API token authentication is in place), resource limits, and stronger process isolation.
 - **Configurable execution-history retention policies** (`none | memory | local`).
 - **Broader registry ecosystem** and published module distribution.
 - **Additional capability runtime backends** (container, remote).

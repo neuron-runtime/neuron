@@ -271,12 +271,14 @@ Instances survive runtime restarts: on startup, N.O.R.E. restores persisted inst
 ## Security Model
 
 - The default transport is a Unix socket with mode `0600` — local to the owning user, no network exposure.
-- TCP is opt-in and the API currently has **no authentication**. Do not expose a TCP listener on an untrusted network.
+- Every API request except the health probe requires the daemon's **API token**, presented as `Authorization: Bearer <token>`. The socket alone is not a boundary: any local process can connect to it, and the API can execute capability runtimes.
+- The token lives in `<socket>.token` (mode `0600`), so a local `neuron` client authenticates with no configuration. A client that cannot read the file passes `NEURON_API_TOKEN`; `--token` sets it on the daemon, and `NEURON_API_TOKEN_FILE` relocates it.
+- TCP is opt-in and **refuses to start without a token**. Exposing N.O.R.E. on a network is still an operator decision: the token authenticates the caller but does not encrypt the traffic. Terminate TLS in front of the listener.
 - External capability runtimes are treated as untrusted code. They are verified and installed by the CLI before registration and are hosted out-of-process, isolating the runtime from third-party crashes and malicious behavior.
 - Capability declarations in module manifests are metadata, not permissions. Permissions are enforced by the runtime backends.
 
-> [!WARNING]
-> The API is unauthenticated and bound to a local socket by default. Token-based authentication is tracked before any loopback exposure.
+> [!NOTE]
+> Tokens authenticate but do not encrypt. A TCP listener sends the token, assembly definitions, and execution data in the clear, so it belongs on a trusted segment behind TLS termination.
 
 ---
 
