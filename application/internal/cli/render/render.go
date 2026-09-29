@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
-	"github.com/neuron-runtime/neuron/shared/utils"
 )
 
 // Instances renders a slice of instances as a formatted table to stdout.
 func Instances(instances []protocol.InstanceResponse) {
-	columns := []utils.Column{
+	columns := []Column{
 		{Title: "ID"},
 		{Title: "Assembly ID"},
 		{Title: "Blueprint Name"},
@@ -34,14 +33,14 @@ func Instances(instances []protocol.InstanceResponse) {
 		})
 	}
 
-	if err := utils.RenderTable(os.Stdout, columns, rows, utils.DefaultTableOptions()); err != nil {
-		fmt.Printf("failed to render table: %v\n", err)
+	if err := RenderTable(os.Stdout, columns, rows, DefaultTableOptions()); err != nil {
+		fmt.Fprintf(os.Stderr, "render: %v\n", err)
 	}
 }
 
 // Executions renders a slice of executions as a formatted table to stdout.
 func Executions(items []protocol.ExecutionItem) {
-	columns := []utils.Column{
+	columns := []Column{
 		{Title: "ID"},
 		{Title: "Correlation ID"},
 		{Title: "Status"},
@@ -62,8 +61,8 @@ func Executions(items []protocol.ExecutionItem) {
 		})
 	}
 
-	if err := utils.RenderTable(os.Stdout, columns, rows, utils.DefaultTableOptions()); err != nil {
-		fmt.Printf("failed to render table: %v\n", err)
+	if err := RenderTable(os.Stdout, columns, rows, DefaultTableOptions()); err != nil {
+		fmt.Fprintf(os.Stderr, "render: %v\n", err)
 	}
 }
 
