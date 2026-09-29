@@ -22,6 +22,10 @@ type Client struct {
 
 	mu      sync.Mutex
 	streams map[string]context.CancelFunc
+
+	// overflowed records that this client missed events because it could not
+	// keep up with the stream. Its connection has already been closed.
+	overflowed bool
 }
 
 func NewClient(conn *websocket.Conn, hub *Hub, provider RoomProvider) *Client {
@@ -195,14 +199,39 @@ func (c *Client) stopAllStreams() {
 	}
 }
 
+// sendMessage queues a message for the client.
+//
+// A client that cannot keep up must never be handed a silently truncated
+// stream. Execution events arrive in bursts, and dropping individual messages
+// would let a terminal event be lost while the connection stayed open, so the
+// consumer would be left waiting for a completion that never comes. Silently
+// discarding the message also made the loss unobservable to the operator.
+//
+// An overflow is therefore treated as a broken stream rather than a dropped
+// frame: the connection is closed with a policy-violation status, which
+// surfaces to the consumer as an error it can report.
 func (c *Client) sendMessage(msg shared.Message) {
 	select {
 	case c.send <- msg:
+		return
 	default:
-		// Client is too slow. Drop the message rather than blocking the
-		// publisher; a client that cannot keep up will observe a partial
-		// stream and can reconnect to resume from the persisted history.
 	}
+
+	c.markOverflowed()
+}
+
+// markOverflowed records the first overflow and closes the connection so the
+// client stops waiting on a stream that can no longer be trusted.
+func (c *Client) markOverflowed() {
+	c.mu.Lock()
+	if c.overflowed {
+		c.mu.Unlock()
+		return
+	}
+	c.overflowed = true
+	c.mu.Unlock()
+
+	_ = c.conn.Close(websocket.StatusPolicyViolation, "client too slow: event stream overflowed")
 }
 
 func (c *Client) sendError(requestID string, err error) {
