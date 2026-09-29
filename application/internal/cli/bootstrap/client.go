@@ -34,11 +34,13 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 	var conn connection.Connection
 
 	if cfg.Daemon.Endpoint != "" {
-		// Use HTTP for remote execution (No daemon needed)
-		conn = connection.New(connection.NewHTTPTransport(nil, cfg.Daemon.Endpoint))
+		// Use HTTP for remote execution (No daemon needed). The remote
+		// constructor is the single place that resolves the API credential, so
+		// it is used here rather than assembling a transport by hand.
+		conn = connection.NewRemote(cfg.Daemon.Endpoint)
 	} else {
 		// Use Unix Socket for local execution
-		conn = connection.New(connection.NewLocal(cfg.Daemon.Socket))
+		conn = connection.NewLocal(cfg.Daemon.Socket)
 	}
 
 	dCfg := daemon.ConfigFromEffective(cfg)

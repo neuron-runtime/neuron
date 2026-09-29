@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 )
 
 func NewLocal(socketPath string) Connection {
@@ -23,7 +26,28 @@ func NewLocal(socketPath string) Connection {
 	}
 
 	// The host is intentionally fake. The Unix socket determines the destination.
-	return New(NewHTTPTransport(client, "http://nore.local"))
+	transport := NewHTTPTransport(client, "http://nore.local")
+	if token, ok := LocalAPIToken(socketPath); ok {
+		transport.WithToken(token)
+	}
+	return New(transport)
+}
+
+// LocalAPIToken resolves the credential for a local daemon.
+//
+// The daemon publishes the token it requires beside its socket, so a client
+// given a socket path can authenticate without configuration. An explicit
+// NEURON_API_TOKEN wins, which is how a client authenticates against a remote
+// endpoint that has no local token file.
+func LocalAPIToken(socketPath string) (string, bool) {
+	if token := strings.TrimSpace(os.Getenv(apitoken.EnvToken)); token != "" {
+		return token, true
+	}
+	path := os.Getenv(apitoken.EnvTokenFile)
+	if path == "" {
+		path = apitoken.TokenFilePath(socketPath)
+	}
+	return apitoken.Read(path)
 }
 
 func LocalSocketExists(socketPath string) bool {
