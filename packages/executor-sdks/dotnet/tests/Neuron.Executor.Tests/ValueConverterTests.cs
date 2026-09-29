@@ -1,6 +1,6 @@
 using System.Text;
 using Neuron.Executor.Conversion;
-using Neuron.CapabilityRuntime.V1;
+using Neuron.Executor.Protocol.V1;
 
 namespace Neuron.Executor.Tests;
 

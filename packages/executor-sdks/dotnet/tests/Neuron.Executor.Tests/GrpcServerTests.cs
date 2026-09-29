@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Grpc.Net.Client;
 using Neuron.Executor.Conversion;
-using Neuron.CapabilityRuntime.V1;
+using Neuron.Executor.Protocol.V1;
 
 namespace Neuron.Executor.Tests;
 
@@ -23,17 +23,17 @@ public class GrpcServerTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", _socketPath);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_READY", _readyFile);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/capability-runtime-v1");
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvSocket, _socketPath);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvReady, _readyFile);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvProtocol, ExecutorConstants.ProtocolV1);
         return Task.CompletedTask;
     }
 
     public async Task DisposeAsync()
     {
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", null);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_READY", null);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", null);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvSocket, null);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvReady, null);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvProtocol, null);
 
         if (_channels.Count > 0)
         {
