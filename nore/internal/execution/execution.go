@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/types"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type Status string
@@ -44,7 +44,7 @@ type Execution struct {
 	Blueprint      *types.ExecutionBlueprint
 	mu             sync.RWMutex
 	status         Status
-	initialParams   map[string]any
+	initialParams  map[string]any
 	params         map[shared.ID]map[string]any
 	results        map[shared.ID]map[string]any
 	states         map[shared.ID]CapabilityExecutionState

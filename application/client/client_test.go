@@ -11,10 +11,10 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/Muhammad-Jay/neuron/application/connection"
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/application/connection"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // newTestWSServer spins up an httptest server that speaks the neuron.v1

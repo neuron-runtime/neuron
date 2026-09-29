@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // readRequestFromStdin reads a single JSON Request document from stdin.

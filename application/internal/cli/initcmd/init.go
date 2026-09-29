@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
-	"github.com/Muhammad-Jay/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	"github.com/neuron-runtime/neuron/application/language"
 	"github.com/spf13/cobra"
 )
 

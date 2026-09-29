@@ -33,7 +33,7 @@ sequenceDiagram
 
 
 
-[Version](https://github.com/Muhammad-Jay/neuron/releases)
+[Version](https://github.com/neuron-runtime/neuron/releases)
 [Go](https://go.dev)
 [License](../LICENSE)
 

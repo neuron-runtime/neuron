@@ -37,7 +37,7 @@ One-time setup on [npmjs.com](https://www.npmjs.com):
 
 1. Open the `@neuron/sdk` package → **Settings** → **Trusted Publisher** → **GitHub Actions**.
 2. Fill in:
-   - **Organization:** `Muhammad-Jay`
+   - **Organization:** `neuron-runtime`
    - **Repository:** `neuron`
    - **Workflow name:** `publish-sdk.yml` (must match the file name exactly)
    - **Environment:** leave empty unless the workflow uses a protected environment
@@ -64,7 +64,7 @@ One-time setup:
 1. On [nuget.org](https://www.nuget.org), create a **Trusted Publishing** policy:
    **Account → Trusted Publishing → Add policy**.
    - **Publisher:** GitHub Actions
-   - **Repository owner:** `Muhammad-Jay`
+   - **Repository owner:** `neuron-runtime`
    - **Repository:** `neuron`
    - **Workflow file:** `publish-executor-dotnet.yml` (must match exactly)
    - **Environment:** leave empty unless the workflow uses a protected environment
@@ -123,5 +123,5 @@ repository to reflect the published version outside of CI.
 - **npm:** `npm view @neuron/sdk version` and confirm the published tarball shows
   provenance (`npm view @neuron/sdk dist.attestations`).
 - **NuGet:** `dotnet nuget search Neuron.Executor` or the package page on nuget.org.
-- **Go:** `go list -m github.com/Muhammad-Jay/neuron/shared@v0.2.0` through the
+- **Go:** `go list -m github.com/neuron-runtime/neuron/shared@v0.2.0` through the
   public proxy.

@@ -81,7 +81,7 @@ A WASM executor is a WASI command. With Go, cross-compile the same source used f
 GOOS=wasip1 GOARCH=wasm go build -o capability.wasm .
 ```
 
-The source stays stdlib-only so it builds without a C toolchain and is portable. `examples/executors/echo` is built exactly this way: one source, a native binary and a `wasm32-wasi` module.
+The source stays stdlib-only so it builds without a C toolchain and is portable. `examples/capability-runtimes/echo` is built exactly this way: one source, a native binary and a `wasm32-wasi` module.
 
 The manifest declares the WASM runtime and the JSON protocol:
 
@@ -111,7 +111,7 @@ The contract a WASM executor must satisfy:
 - Implementation: `nore/internal/runtime/wasm`
 - Runtime engine: wazero (pure-Go WASI)
 - Contract: `shared/types/executor` and the legacy `neuron/executor-v1-json` transport
-- Example artifact: `examples/executors/echo` (single source, native + WASI)
+- Example artifact: `examples/capability-runtimes/echo` (single source, native + WASI)
 - Tests: `nore/internal/runtime/wasm/runtime_test.go` (round-trip, timeout, concurrency against the shared runtime, compiled-module cache, instance close safety)
 
 ---

@@ -3,7 +3,7 @@ package contracts
 import (
 	"context"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
 )
 
 type EventBus interface {

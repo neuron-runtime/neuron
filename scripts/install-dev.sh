@@ -73,8 +73,8 @@ ln -sfn "nore" "$DEV_DIR/nore-daemon"
 
 # The reference echo capability runtime is optional; build it when it compiles
 # so the first e2e smoke test has a real capability runtime to install.
-if (cd "$ROOT/examples/executors/echo" && GOWORK=off go build -o "$DEV_DIR/echo-executor" .) 2>/dev/null; then
-  echo "==> Built reference echo capability runtime (examples/executors/echo)"
+if (cd "$ROOT/examples/capability-runtimes/echo" && GOWORK=off go build -o "$DEV_DIR/echo-executor" .) 2>/dev/null; then
+  echo "==> Built reference echo capability runtime (examples/capability-runtimes/echo)"
 else
   echo "==> Skipped reference echo capability runtime (does not compile; not required)"
 fi

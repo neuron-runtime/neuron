@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/local"
-	execstore "github.com/Muhammad-Jay/neuron/application/capabilityruntime/store"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
+	execstore "github.com/neuron-runtime/neuron/application/capabilityruntime/store"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // wasmMagicHeader is the byte prefix every WebAssembly module starts with.
@@ -231,7 +231,7 @@ func TestLocalRegistryPipelineTest(t *testing.T) {
 
 	writeCapabilityRuntimePackage(t, root, "github:read", "1.2.0")
 	writeCapabilityRuntimePackage(t, root, "github:read", "2.0.0")
-	writeCapabilityRuntimePackage(t, root, "Muhammad-Jay:github:read", "1.0.0")
+	writeCapabilityRuntimePackage(t, root, "neuron-runtime:github:read", "1.0.0")
 
 	reg, err := local.New(root)
 	if err != nil {
@@ -478,7 +478,7 @@ func TestFrozenJSONRoundTrip(t *testing.T) {
 
 	regRoot := t.TempDir()
 	storeRoot := filepath.Join(t.TempDir(), "store")
-	writeCapabilityRuntimePackage(t, regRoot, "Muhammad-Jay:github:read", "1.2.0")
+	writeCapabilityRuntimePackage(t, regRoot, "neuron-runtime:github:read", "1.2.0")
 
 	reg, err := local.New(regRoot)
 	if err != nil {
@@ -495,13 +495,13 @@ func TestFrozenJSONRoundTrip(t *testing.T) {
 	installer := &capabilityruntime.Installer{Store: fsStore, Downloader: capabilityruntime.NewHTTPDownloader()}
 	resolver := capabilityruntime.NewResolver(catalog, fsStore, installer)
 
-	installed, err := resolver.Resolve(ctx, capabilityruntime.Requirement{Type: "Muhammad-Jay:github:read", Version: "^1.0.0", Registries: []string{"local"}})
+	installed, err := resolver.Resolve(ctx, capabilityruntime.Requirement{Type: "neuron-runtime:github:read", Version: "^1.0.0", Registries: []string{"local"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	frozen := installed.Frozen("^1.0.0")
-	if frozen.Type != "Muhammad-Jay:github:read" {
+	if frozen.Type != "neuron-runtime:github:read" {
 		t.Errorf("Frozen.Type = %q", frozen.Type)
 	}
 	if frozen.ResolvedVersion != "1.2.0" {

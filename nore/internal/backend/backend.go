@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"sync"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // Registry manages runtime backends and their instances. It is the central

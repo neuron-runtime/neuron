@@ -3,14 +3,14 @@ package event
 import (
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type Metadata struct {
 	EventID       core.ID
 	CorrelationID core.ID
 	ExecutionID   core.ID
-	CapabilityID     core.ID
+	CapabilityID  core.ID
 	OccurredAt    time.Time
 }
 
@@ -27,7 +27,7 @@ func New(eventType Type, executionID, correlationID, capabilityID core.ID, paylo
 			EventID:       core.NewID("evt_"),
 			ExecutionID:   executionID,
 			CorrelationID: correlationID,
-			CapabilityID:     capabilityID,
+			CapabilityID:  capabilityID,
 			OccurredAt:    time.Now().UTC(),
 		},
 		Payload: payload,

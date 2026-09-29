@@ -14,7 +14,7 @@ flowchart LR
 > The SDK defines assemblies. It does not execute them.
 > The manifest it produces is consumed by the Neuron compiler and runtime.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-3178C6?style=flat-square)](https://github.com/Muhammad-Jay/neuron/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-3178C6?style=flat-square)](https://github.com/neuron-runtime/neuron/releases)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/license-MIT-18181B?style=flat-square)](../../LICENSE)
 
@@ -197,7 +197,7 @@ Bindings can include static values alongside expressions:
 
 ```ts
 githubRead.withParams({
-  owner: "Muhammad-Jay",
+  owner: "neuron-runtime",
   repository: "neuron",
   path: "README.md",
 });
@@ -484,4 +484,4 @@ Tests live in `packages/assembly-sdks/typescript/test/` and cover capabilities, 
 
 ## License
 
-[MIT](https://github.com/Muhammad-Jay/neuron/blob/main/LICENSE) — see the repository `LICENSE` for terms. 
+[MIT](https://github.com/neuron-runtime/neuron/blob/main/LICENSE) — see the repository `LICENSE` for terms. 

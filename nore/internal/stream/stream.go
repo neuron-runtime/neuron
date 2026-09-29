@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Message is the normalized stream unit. Payload is raw JSON regardless of
@@ -19,7 +19,7 @@ type Message struct {
 	EventID       core.ID
 	Type          event.Type
 	CorrelationID core.ID
-	CapabilityID     core.ID
+	CapabilityID  core.ID
 	OccurredAt    time.Time
 	Payload       json.RawMessage
 }
@@ -99,7 +99,7 @@ func normalize(evt event.Event) Message {
 		EventID:       evt.Metadata.EventID,
 		Type:          evt.Type,
 		CorrelationID: evt.Metadata.CorrelationID,
-		CapabilityID:     evt.Metadata.CapabilityID,
+		CapabilityID:  evt.Metadata.CapabilityID,
 		OccurredAt:    evt.Metadata.OccurredAt,
 		Payload:       mustPayload(evt.Payload),
 	}

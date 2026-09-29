@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/application/client"
+	"github.com/neuron-runtime/neuron/application/client"
 )
 
 func main() {

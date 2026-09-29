@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 	"github.com/gosuri/uilive"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 const (

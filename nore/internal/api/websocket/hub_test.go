@@ -3,7 +3,7 @@ package websocket
 import (
 	"testing"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
 )
 
 func newTestClient(hub *Hub) *Client {

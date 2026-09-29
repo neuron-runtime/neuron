@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/local"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // BuildOptions controls how BuildLocal materializes local capability runtimes.

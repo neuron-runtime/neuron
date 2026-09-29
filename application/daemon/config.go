@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/config"
 )
 
 var (

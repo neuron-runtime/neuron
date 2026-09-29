@@ -219,7 +219,7 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   workflow are ready; create the tag when CI is green.
   ```
 - [ ] **Publish** `@neuron/sdk` to a package registry with `engines` metadata and clear versioning.
-- [ ] **Publish the shared Go module** (`github.com/Muhammad-Jay/neuron/shared`) so consumers can
+- [ ] **Publish the shared Go module** (`github.com/neuron-runtime/neuron/shared`) so consumers can
   ```
   depend on `executor-go` and the protocol contracts without vendoring.
   ```
@@ -261,6 +261,9 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   ```
   but the directory does not exist. (E5)
   RESOLVED (2026-09-13): the case study moved to `docs/capability-runtimes/2026-09-05-first-capability-runtime.md`.
+  RESOLVED (2026-09-28): the case study was removed along with the `docs/capability-runtimes/` directory;
+  `docs/` keeps only shipped-behavior reference docs, and the design-notes-sync item below was dropped
+  with it.
   ```
 - [x] **Document capability runtime naming + config requirement.** Explain `owner:capability:sub` and
   ```
@@ -269,10 +272,6 @@ Tick items off as they are completed. Group by type: **Fixes**, **Improvements**
   RESOLVED (2026-09-13): the SDK README documents `owner:capability:sub`, the built-in
   `neuron:core:set` default, and points at MODULES.md; GETTING_STARTED Part 3 states the
   `capabilityRuntimes.registries` requirement for external modules.
-  ```
-- [ ] **Design-notes sync.** `docs/capability-runtimes/2026-09-05-*.md` must never contradict shipped
-  ```
-  registry/installer behavior; update as the ecosystem evolves.
   ```
 - [ ] **Runtime deep dives.** Extend `docs/RUNTIME.md` with the execution plan, event breakdown,
   ```

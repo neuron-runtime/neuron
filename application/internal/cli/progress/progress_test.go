@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
 func TestReporterLineOutput(t *testing.T) {

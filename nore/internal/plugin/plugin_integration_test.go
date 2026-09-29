@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/registry"
-	core "github.com/Muhammad-Jay/neuron/shared/types/core"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/registry"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 const (

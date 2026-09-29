@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
 )
 
 // ErrWebSocketUnavailable is returned when a connection cannot establish a

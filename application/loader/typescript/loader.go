@@ -3,7 +3,7 @@ package typescript
 import (
 	"context"
 
-	"github.com/Muhammad-Jay/neuron/application/process"
+	"github.com/neuron-runtime/neuron/application/process"
 )
 
 type TSLoader struct {

@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
-	"github.com/Muhammad-Jay/neuron/shared/utils"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/shared/utils"
 )
 
 // Instances renders a slice of instances as a formatted table to stdout.

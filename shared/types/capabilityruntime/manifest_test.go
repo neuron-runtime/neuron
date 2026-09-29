@@ -12,7 +12,7 @@ func TestPackageArchiveName(t *testing.T) {
 	}{
 		{"github:read", "1.2.0", "github-read-1.2.0" + PackageArchiveSuffix},
 		{"example:echo", "1.0.0", "example-echo-1.0.0" + PackageArchiveSuffix},
-		{"Muhammad-Jay/github:read", "v1.0.0", "Muhammad-Jay-github-read-v1.0.0" + PackageArchiveSuffix},
+		{"neuron-runtime/github:read", "v1.0.0", "neuron-runtime-github-read-v1.0.0" + PackageArchiveSuffix},
 		{"  github:read  ", " 2.0.0 ", "github-read-2.0.0" + PackageArchiveSuffix},
 	}
 	for _, tc := range cases {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
 func printList(installed []capabilityruntime.Installed) {

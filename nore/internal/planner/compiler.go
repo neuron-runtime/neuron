@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
-	"github.com/Muhammad-Jay/neuron/nore/internal/types"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type Compiler struct {

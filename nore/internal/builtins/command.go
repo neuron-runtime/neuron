@@ -8,7 +8,7 @@ import (
 	"maps"
 	"os/exec"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // Command runs a local command and returns stdout/stderr/exit_code. It is

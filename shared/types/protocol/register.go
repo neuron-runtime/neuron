@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // RegisterRequest registers an assembly definition durably with N.O.R.E. It

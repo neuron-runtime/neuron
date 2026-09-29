@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 	"github.com/coder/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 type Connection interface {

@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
-	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/nore/internal/planner"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // newTestHandler wires the instances handler against an isolated sqlite store
@@ -49,7 +49,7 @@ func newTestHandler(t *testing.T) *Handler {
 func registerAssembly(t *testing.T, h *Handler, key protocol.InstanceKey) {
 	t.Helper()
 	_, _, err := h.assemblies.Register(context.Background(), assembly.RegisteredAssembly{
-		Key:    key,
+		Key:      key,
 		Assembly: shared.Assembly{Metadata: shared.Metadata{Name: key.AssemblyID}},
 	})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 	// Seed an instance metadata record as a previous process would have left it.
 	rec := map[string]any{
 		"id":                 "inst_stale",
-		"assembly_id":          key.AssemblyID,
+		"assembly_id":        key.AssemblyID,
 		"version":            key.Version,
 		"hash":               key.Hash,
 		"env":                key.Env,

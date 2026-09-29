@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // CapabilityState is the lifecycle state of a single capability.

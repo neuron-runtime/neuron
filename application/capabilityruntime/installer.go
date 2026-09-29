@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // Installer turns a resolved Package into an Installed capability runtime using the

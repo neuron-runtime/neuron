@@ -10,11 +10,11 @@ import (
 
 	goruntime "runtime"
 
-	"github.com/Muhammad-Jay/neuron/application/client"
-	"github.com/Muhammad-Jay/neuron/application/config"
-	"github.com/Muhammad-Jay/neuron/application/connection"
-	"github.com/Muhammad-Jay/neuron/application/daemon"
-	"github.com/Muhammad-Jay/neuron/application/runtime"
+	"github.com/neuron-runtime/neuron/application/client"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/connection"
+	"github.com/neuron-runtime/neuron/application/daemon"
+	"github.com/neuron-runtime/neuron/application/runtime"
 )
 
 // Options carries everything SetupClient needs. It is filled in by the CLI

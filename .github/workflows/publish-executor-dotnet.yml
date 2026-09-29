@@ -8,7 +8,7 @@
 #   1. Create a Trusted Publishing policy on nuget.org:
 #        Account -> Trusted Publishing -> Add policy
 #        Publisher:      GitHub Actions
-#        Repository owner: Muhammad-Jay
+#        Repository owner: neuron-runtime
 #        Repository:       neuron
 #        Workflow file:    publish-executor-dotnet.yml  (must match exactly)
 #        Environment:      (leave empty unless a protected environment is used)

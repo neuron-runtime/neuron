@@ -12,12 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/Muhammad-Jay/neuron/application/build/builder"
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/application/language"
-	"github.com/Muhammad-Jay/neuron/application/loader"
-	"github.com/Muhammad-Jay/neuron/application/loader/typescript"
-	"github.com/Muhammad-Jay/neuron/application/process"
+	"github.com/neuron-runtime/neuron/application/build/builder"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/loader"
+	"github.com/neuron-runtime/neuron/application/loader/typescript"
+	"github.com/neuron-runtime/neuron/application/process"
 )
 
 // SDKBin is the neuron-sdk executable name exposed by @neuron/sdk.

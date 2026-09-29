@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Muhammad-Jay/neuron/application/build/builder"
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/application/language"
-	"github.com/Muhammad-Jay/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/build/builder"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/project"
 )
 
 // Builder resolves YAML Neuron projects into the canonical manifest.

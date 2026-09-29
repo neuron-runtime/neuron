@@ -3,8 +3,8 @@ package compiler
 import (
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 func testManifest() *manifest.Assembly {
