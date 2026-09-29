@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package neuron.capability_runtime.v1;
 
-option go_package = "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1";
+option go_package = "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1";
 
 // CapabilityRuntimeService is the gRPC contract that capability runtime
 // processes implement. N.O.R.E. acts as the client; the capability runtime

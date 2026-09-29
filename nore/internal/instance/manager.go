@@ -7,13 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/nore/internal/execution"
-	"github.com/Muhammad-Jay/neuron/nore/internal/plugin"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	core2 "github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/nore/internal/plugin"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	core2 "github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 type Manager struct {
@@ -22,11 +22,11 @@ type Manager struct {
 	instancesByKey map[protocol.InstanceKey]*Instance
 	instancesByID  map[string]*Instance
 
-	parent   context.Context
-	workers  int
-	store    storage.Store
-	metadata *metadataStore
-	assemblies  *assembly.Repository
+	parent     context.Context
+	workers    int
+	store      storage.Store
+	metadata   *metadataStore
+	assemblies *assembly.Repository
 }
 
 func NewManager(parent context.Context, workers int, store storage.Store, assemblies *assembly.Repository) *Manager {
@@ -43,7 +43,7 @@ func NewManager(parent context.Context, workers int, store storage.Store, assemb
 		workers:        workers,
 		store:          store,
 		metadata:       newMetadataStore(store),
-		assemblies:        assemblies,
+		assemblies:     assemblies,
 	}
 	m.reconcile()
 	return m

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (h *Handler) GetInstanceByID(w http.ResponseWriter, r *http.Request) {
@@ -20,12 +20,12 @@ func (h *Handler) GetInstanceByID(w http.ResponseWriter, r *http.Request) {
 		Message: "instance",
 		Status:  http.StatusOK,
 		Data: protocol.InstanceResponse{
-			ID:       i.ID,
-			Status:   string(i.Status()),
+			ID:         i.ID,
+			Status:     string(i.Status()),
 			AssemblyID: i.Key.AssemblyID,
-			Version:  i.Key.Version,
-			Hash:     i.Key.Hash,
-			Env:      i.Key.Env,
+			Version:    i.Key.Version,
+			Hash:       i.Key.Hash,
+			Env:        i.Key.Env,
 		},
 	})
 }

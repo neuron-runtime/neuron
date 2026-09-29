@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 	"github.com/coder/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // RoomProvider supplies ordered per-subscriber event streams for rooms that

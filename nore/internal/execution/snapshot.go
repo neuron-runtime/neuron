@@ -4,22 +4,22 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type ExecutionSnapshot struct {
-	ID            core.ID                           `json:"id"`
-	CorrelationID core.ID                           `json:"correlation_id"`
-	InstanceID    core.ID                           `json:"instance_id,omitempty"`
-	Status        Status                            `json:"status"`
-	InitialParams map[string]any                    `json:"initial_params,omitempty"`
-	Params        map[core.ID]map[string]any        `json:"params,omitempty"`
-	Results       map[core.ID]map[string]any        `json:"results,omitempty"`
+	ID            core.ID                              `json:"id"`
+	CorrelationID core.ID                              `json:"correlation_id"`
+	InstanceID    core.ID                              `json:"instance_id,omitempty"`
+	Status        Status                               `json:"status"`
+	InitialParams map[string]any                       `json:"initial_params,omitempty"`
+	Params        map[core.ID]map[string]any           `json:"params,omitempty"`
+	Results       map[core.ID]map[string]any           `json:"results,omitempty"`
 	States        map[core.ID]CapabilityExecutionState `json:"states,omitempty"`
-	InFlight      int                               `json:"in_flight"`
-	StartedAt     *time.Time                        `json:"started_at,omitempty"`
-	CompletedAt   *time.Time                        `json:"completed_at,omitempty"`
-	Error         string                            `json:"error,omitempty"`
+	InFlight      int                                  `json:"in_flight"`
+	StartedAt     *time.Time                           `json:"started_at,omitempty"`
+	CompletedAt   *time.Time                           `json:"completed_at,omitempty"`
+	Error         string                               `json:"error,omitempty"`
 }
 
 func (e *Execution) Snapshot() *ExecutionSnapshot {

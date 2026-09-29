@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (h *Handler) RemoveInstance(w http.ResponseWriter, r *http.Request) {

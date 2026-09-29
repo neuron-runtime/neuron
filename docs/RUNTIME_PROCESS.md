@@ -163,7 +163,7 @@ The manifest declares the truth:
 
 ### 5.2 A one-shot JSON executor (legacy)
 
-Any program that reads one JSON request from stdin and writes one JSON response to stdout can be a process executor. Set `protocol` to `neuron/executor-v1-json` in the manifest. The reference implementation in `examples/executors/echo` shows the exact wire shape and stays dependency-free.
+Any program that reads one JSON request from stdin and writes one JSON response to stdout can be a process capability runtime. Set `protocol` to `neuron/capability-runtime-v1-json` in the manifest. The reference implementation in `examples/capability-runtimes/echo` shows the exact wire shape and stays dependency-free.
 
 ---
 

@@ -1,6 +1,6 @@
 package instance
 
-import "github.com/Muhammad-Jay/neuron/shared/types/protocol"
+import "github.com/neuron-runtime/neuron/shared/types/protocol"
 
 // Registry is deliberately implemented by Manager for the MVP.
 //

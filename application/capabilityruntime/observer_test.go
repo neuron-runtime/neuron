@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/local"
-	execstore "github.com/Muhammad-Jay/neuron/application/capabilityruntime/store"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
+	execstore "github.com/neuron-runtime/neuron/application/capabilityruntime/store"
 )
 
 // recordingObserver captures the sequence of Observer events emitted during

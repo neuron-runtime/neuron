@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/connection"
-	"github.com/Muhammad-Jay/neuron/application/daemon"
+	"github.com/neuron-runtime/neuron/application/connection"
+	"github.com/neuron-runtime/neuron/application/daemon"
 )
 
 // stubConnection implements connection.Connection to simulate a healthy or

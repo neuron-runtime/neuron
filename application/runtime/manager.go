@@ -3,8 +3,8 @@ package runtime
 import (
 	"context"
 
-	"github.com/Muhammad-Jay/neuron/application/connection"
-	"github.com/Muhammad-Jay/neuron/application/daemon"
+	"github.com/neuron-runtime/neuron/application/connection"
+	"github.com/neuron-runtime/neuron/application/daemon"
 )
 
 // connectionHealthAdapter adapts the connection interface to the daemon health

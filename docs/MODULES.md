@@ -24,7 +24,7 @@ flowchart LR
 | Family | Hosting | Resolution | Examples |
 | --- | --- | --- | --- |
 | **Built-in modules** | In-process inside N.O.R.E. | Never resolved or installed | `neuron:core:set` |
-| **External modules** | Out-of-process by N.O.R.E. | Resolved, verified, installed by the CLI | `example:echo`, `Muhammad-Jay:github:read` |
+| **External modules** | Out-of-process by N.O.R.E. | Resolved, verified, installed by the CLI | `example:echo`, `neuron-runtime:github:read` |
 
 This document is about the second family.
 
@@ -57,11 +57,11 @@ A module is referenced by a logical name: a `:`-separated path whose first segme
 | --- | --- | --- |
 | `example:echo` | `example` | `echo` |
 | `github:read` | `github` | `read` |
-| `Muhammad-Jay:github:read` | `Muhammad-Jay` | `github`, `read` |
+| `neuron-runtime:github:read` | `neuron-runtime` | `github`, `read` |
 
 The owner is always the first segment; at least one functional segment must follow. The same logical name is used everywhere in the authoring surface — in a Capability's capability runtime requirement, on the `neuron add` command line, and in the capability runtime manifest's `metadata.name`.
 
-The GitHub registry interprets a logical name as `owner/repo`, hyphen-joining the trailing path segments (`Muhammad-Jay:github:read` → `Muhammad-Jay/github-read`). The local store keeps the `:` delimiters as directory separators, so related modules stay grouped by owner.
+The GitHub registry interprets a logical name as `owner/repo`, hyphen-joining the trailing path segments (`neuron-runtime:github:read` → `neuron-runtime/github-read`). The local store keeps the `:` delimiters as directory separators, so related modules stay grouped by owner.
 
 ---
 
@@ -319,8 +319,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/packages/executor-sdks/golang"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 func main() {

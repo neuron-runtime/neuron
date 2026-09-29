@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // InstallRecord is the install.json persisted inside every installed capability runtime

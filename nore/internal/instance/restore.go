@@ -4,17 +4,17 @@ import (
 	"context"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/nore/internal/types"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // recordFor builds the durable metadata for a live instance at status.
 func recordFor(i *Instance, status Status) metadata {
 	return metadata{
 		ID:                i.ID,
-		AssemblyID:          i.Key.AssemblyID,
+		AssemblyID:        i.Key.AssemblyID,
 		Version:           i.Key.Version,
 		Hash:              i.Key.Hash,
 		Env:               i.Key.Env,
@@ -48,9 +48,9 @@ func restoreInstance(
 		ID: rec.ID,
 		Key: protocol.InstanceKey{
 			AssemblyID: rec.AssemblyID,
-			Version:  rec.Version,
-			Hash:     rec.Hash,
-			Env:      rec.Env,
+			Version:    rec.Version,
+			Hash:       rec.Hash,
+			Env:        rec.Env,
 		},
 		Blueprint:  &types.ExecutionBlueprint{Metadata: rec.BlueprintMetadata},
 		status:     status,

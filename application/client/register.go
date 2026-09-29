@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (c *Client) Register(ctx context.Context, req protocol.RegisterRequest) (protocol.RegisterResponse, error) {

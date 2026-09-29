@@ -3,7 +3,7 @@ package execution
 import (
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Status returns the current execution status. Every writer holds the write

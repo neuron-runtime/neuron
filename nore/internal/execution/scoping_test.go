@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	"github.com/Muhammad-Jay/neuron/nore/internal/types"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 func openTestStore(t *testing.T) storage.Store {

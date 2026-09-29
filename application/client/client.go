@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/Muhammad-Jay/neuron/application/connection"
-	wsmessage "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/application/connection"
+	wsmessage "github.com/neuron-runtime/neuron/shared/protocol/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // Client facilitates communication with the neuron server.

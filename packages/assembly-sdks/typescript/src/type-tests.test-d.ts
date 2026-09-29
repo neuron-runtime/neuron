@@ -42,14 +42,14 @@ githubRead.result.metadata.size satisfies Expression<number>;
 githubRead.result.fileData;
 
 githubRead.withParams({
-    owner: "Muhammad-Jay",
+    owner: "neuron-runtime",
     repository: "neuron",
     path: "README.md",
 });
 
 // @ts-expect-error required input path is missing.
 githubRead.withParams({
-    owner: "Muhammad-Jay",
+    owner: "neuron-runtime",
     repository: "neuron",
 });
 

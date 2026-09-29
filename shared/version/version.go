@@ -4,7 +4,7 @@
 // -ldflags -X so that every artifact reports the version of the source it was
 // built from without maintaining a separate in-tree version file:
 //
-//	go build -ldflags "-X github.com/Muhammad-Jay/neuron/shared/version.Version=v0.1.0" ...
+//	go build -ldflags "-X github.com/neuron-runtime/neuron/shared/version.Version=v0.1.0" ...
 //
 // Local development builds keep the default "dev" value.
 package version

@@ -6,7 +6,7 @@
   "author": "Muhammad Jay",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Muhammad-Jay/neuron.git",
+    "url": "https://github.com/neuron-runtime/neuron.git",
     "directory": "packages/assembly-sdks/typescript"
   },
   "type": "module",

@@ -1,4 +1,4 @@
-module github.com/Muhammad-Jay/neuron/shared
+module github.com/neuron-runtime/neuron/shared
 
 go 1.26.5
 

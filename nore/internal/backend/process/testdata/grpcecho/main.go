@@ -12,7 +12,7 @@ import (
 	"net"
 	"os"
 
-	v1 "github.com/Muhammad-Jay/neuron/shared/protocol/capabilityruntime/v1"
+	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 	"google.golang.org/grpc"
 )
 

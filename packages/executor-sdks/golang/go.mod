@@ -1,9 +1,9 @@
-module github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang
+module github.com/neuron-runtime/neuron/packages/executor-sdks/golang
 
 go 1.26.5
 
 require (
-	github.com/Muhammad-Jay/neuron/shared v0.0.0
+	github.com/neuron-runtime/neuron/shared v0.0.0
 	google.golang.org/grpc v1.83.2
 )
 
@@ -15,4 +15,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/Muhammad-Jay/neuron/shared => ../../../shared
+replace github.com/neuron-runtime/neuron/shared => ../../../shared

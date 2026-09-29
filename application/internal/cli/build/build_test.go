@@ -3,8 +3,8 @@ package build
 import (
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/application/config"
 )
 
 func testConfig() config.Config {

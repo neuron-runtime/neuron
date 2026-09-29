@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
 )
 
 type Analytics struct {
 	bus    contracts.EventBus
 	logger *slog.Logger
 
-	executionStarted event.Subscription
-	executionFailed  event.Subscription
+	executionStarted    event.Subscription
+	executionFailed     event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
 }
@@ -54,10 +54,10 @@ func New(bus contracts.EventBus, logger *slog.Logger) (*Analytics, error) {
 	}
 
 	return &Analytics{
-		bus:              bus,
-		logger:           logger,
-		executionStarted: started,
-		executionFailed:  failed,
+		bus:                 bus,
+		logger:              logger,
+		executionStarted:    started,
+		executionFailed:     failed,
 		capabilityCompleted: completed,
 		capabilityFailed:    svcFailed,
 	}, nil

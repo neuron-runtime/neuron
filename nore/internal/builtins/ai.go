@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
 // AIMock simulates an AI capability: it resolves a "prompt" from the

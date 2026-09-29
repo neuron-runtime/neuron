@@ -1,7 +1,7 @@
 package manifest
 
 import (
-	"github.com/Muhammad-Jay/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/project"
 )
 
 // FromResolvedProject converts a resolved YAML assembly into the canonical

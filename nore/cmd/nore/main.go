@@ -11,14 +11,14 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api"
-	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
-	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	"github.com/Muhammad-Jay/neuron/shared/version"
+	"github.com/neuron-runtime/neuron/nore/internal/api"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/nore/internal/planner"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	"github.com/neuron-runtime/neuron/shared/version"
 )
 
 func main() {

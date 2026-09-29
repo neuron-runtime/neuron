@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
 )
 
 type Hub struct {

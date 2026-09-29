@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
 )
 
 // stateChangingEventTypes are the event kinds after which an execution

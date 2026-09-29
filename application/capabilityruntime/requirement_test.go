@@ -12,7 +12,7 @@ func TestParseType(t *testing.T) {
 		wantErr  bool
 	}{
 		{"github:read", "github", []string{"read"}, false},
-		{"Muhammad-Jay:github:read", "Muhammad-Jay", []string{"github", "read"}, false},
+		{"neuron-runtime:github:read", "neuron-runtime", []string{"github", "read"}, false},
 		{"hashicorp:vault:auth", "hashicorp", []string{"vault", "auth"}, false},
 		{"foo", "", nil, true},
 		{":read", "", nil, true},
@@ -53,7 +53,7 @@ func TestToGitHubRepo(t *testing.T) {
 		want string
 	}{
 		{"github:read", "github/read"},
-		{"Muhammad-Jay:github:read", "Muhammad-Jay/github-read"},
+		{"neuron-runtime:github:read", "neuron-runtime/github-read"},
 		{"hashicorp:vault:auth", "hashicorp/vault-auth"},
 	}
 
@@ -74,7 +74,7 @@ func TestToLocalPath(t *testing.T) {
 		want string
 	}{
 		{"github:read", "github/read"},
-		{"Muhammad-Jay:github:read", "Muhammad-Jay/github/read"},
+		{"neuron-runtime:github:read", "neuron-runtime/github/read"},
 		{"hashicorp:vault:auth", "hashicorp/vault/auth"},
 	}
 
@@ -90,7 +90,7 @@ func TestToLocalPath(t *testing.T) {
 }
 
 func TestNormalizeTypeRoundTrip(t *testing.T) {
-	in := "Muhammad-Jay:github:read"
+	in := "neuron-runtime:github:read"
 	got, err := NormalizeType(in)
 	if err != nil {
 		t.Fatalf("NormalizeType: %v", err)
@@ -101,11 +101,11 @@ func TestNormalizeTypeRoundTrip(t *testing.T) {
 }
 
 func TestTypePath(t *testing.T) {
-	got, err := TypePath("Muhammad-Jay:github:read")
+	got, err := TypePath("neuron-runtime:github:read")
 	if err != nil {
 		t.Fatalf("TypePath: %v", err)
 	}
-	if got != "Muhammad-Jay/github/read" {
+	if got != "neuron-runtime/github/read" {
 		t.Errorf("TypePath = %q", got)
 	}
 	if _, err := TypePath("nope"); err == nil {

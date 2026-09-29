@@ -7,8 +7,8 @@ package register
 import (
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/build"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
+	"github.com/neuron-runtime/neuron/application/internal/cli/build"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/spf13/cobra"
 )
 

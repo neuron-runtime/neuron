@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"

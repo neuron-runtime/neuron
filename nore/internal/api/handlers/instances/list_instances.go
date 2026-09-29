@@ -3,8 +3,8 @@ package instances
 import (
 	"net/http"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (h *Handler) ListInstances(w http.ResponseWriter, r *http.Request) {
@@ -18,7 +18,7 @@ func (h *Handler) ListInstances(w http.ResponseWriter, r *http.Request) {
 		items = append(items, protocol.InstanceResponse{
 			ID:                i.ID,
 			Status:            string(i.Status()),
-			AssemblyID:          i.Key.AssemblyID,
+			AssemblyID:        i.Key.AssemblyID,
 			BlueprintMetadata: i.Blueprint.Metadata,
 			Version:           i.Key.Version,
 			Hash:              i.Key.Hash,

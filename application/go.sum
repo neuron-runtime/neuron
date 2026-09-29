@@ -1,7 +1,7 @@
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/Muhammad-Jay/neuron/shared v0.0.0-20260905200234-63564fa7a003 h1:0y8CQQ5Qub4IR2/HYUHTQCdSd6URpuXfo45G9EvfIkk=
-github.com/Muhammad-Jay/neuron/shared v0.0.0-20260905200234-63564fa7a003/go.mod h1:+Ldx0CUsOUOqDFnEgfh4zEhSn9K5Bxx040kAGul5ECM=
+github.com/neuron-runtime/neuron/shared v0.0.0-20260905200234-63564fa7a003 h1:0y8CQQ5Qub4IR2/HYUHTQCdSd6URpuXfo45G9EvfIkk=
+github.com/neuron-runtime/neuron/shared v0.0.0-20260905200234-63564fa7a003/go.mod h1:+Ldx0CUsOUOqDFnEgfh4zEhSn9K5Bxx040kAGul5ECM=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/briandowns/spinner v1.23.2 h1:Zc6ecUnI+YzLmJniCfDNaMbW0Wid1d5+qcTq4L2FW8w=

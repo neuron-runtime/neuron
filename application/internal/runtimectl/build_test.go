@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/source/local"
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime/store"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime/store"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // writePoweredLocalCapabilityRuntime lays out a version directory whose payload does

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 var ErrBusClosed = errors.New("event bus is closed")

@@ -8,7 +8,7 @@
 #   1. Sign in to https://www.npmjs.com and open the @neuron/sdk package.
 #   2. Settings -> Trusted Publisher -> GitHub Actions.
 #   3. Publisher:      GitHub
-#      Organization:   Muhammad-Jay
+#      Organization:   neuron-runtime
 #      Repository:     neuron
 #      Workflow name:  publish-sdk.yml   (must match this file exactly)
 #      Environment:    (leave empty unless a protected environment is used)

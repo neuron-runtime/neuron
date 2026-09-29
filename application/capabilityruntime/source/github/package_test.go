@@ -3,7 +3,7 @@ package github
 import (
 	"testing"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 func TestPackageArchiveAsset(t *testing.T) {

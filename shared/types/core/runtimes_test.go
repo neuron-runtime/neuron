@@ -38,7 +38,7 @@ func TestIsCoreRuntimeType(t *testing.T) {
 		"neuron:set",
 		"neuron:ai",
 		"github:read",
-		"Muhammad-Jay:github:read",
+		"neuron-runtime:github:read",
 		"example:echo",
 		"",
 		"setx",

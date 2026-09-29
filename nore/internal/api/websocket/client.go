@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
 	"github.com/coder/websocket"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
 )
 
 type Client struct {
