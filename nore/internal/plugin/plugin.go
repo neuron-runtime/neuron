@@ -16,12 +16,12 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/backend"
-	"github.com/Muhammad-Jay/neuron/nore/internal/backend/process"
-	"github.com/Muhammad-Jay/neuron/nore/internal/backend/wasm"
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	core "github.com/Muhammad-Jay/neuron/shared/types/core"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/nore/internal/backend"
+	"github.com/neuron-runtime/neuron/nore/internal/backend/process"
+	"github.com/neuron-runtime/neuron/nore/internal/backend/wasm"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // config stores frozen capability runtime specifications keyed by the logical

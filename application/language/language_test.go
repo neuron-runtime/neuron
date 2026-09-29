@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/language"
 )
 
 func TestNormalize(t *testing.T) {

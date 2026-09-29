@@ -4,7 +4,7 @@
 // TypeScript-authored assembly).
 package data
 
-import "github.com/Muhammad-Jay/neuron/shared/types/core"
+import "github.com/neuron-runtime/neuron/shared/types/core"
 
 // DeepSnakeCase returns a copy of v with every map key converted to
 // snake_case, applied recursively to nested maps and slices. Non-map values

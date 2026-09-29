@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/application/config"
-	noredaemon "github.com/Muhammad-Jay/neuron/application/daemon"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/ui"
+	"github.com/neuron-runtime/neuron/application/config"
+	noredaemon "github.com/neuron-runtime/neuron/application/daemon"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	"github.com/neuron-runtime/neuron/application/internal/cli/ui"
 	"github.com/spf13/cobra"
 )
 

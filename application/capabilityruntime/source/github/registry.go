@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
 // RepoRef identifies a GitHub repository as owner/name.

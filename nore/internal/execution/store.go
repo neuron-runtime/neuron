@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage/sqlite"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type ExecutionStore struct {

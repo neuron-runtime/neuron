@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/application/build"
-	"github.com/Muhammad-Jay/neuron/application/compiler"
-	"github.com/Muhammad-Jay/neuron/application/compiler/manifest"
-	"github.com/Muhammad-Jay/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/build"
+	"github.com/neuron-runtime/neuron/application/compiler"
+	"github.com/neuron-runtime/neuron/application/compiler/manifest"
+	"github.com/neuron-runtime/neuron/application/language"
 )
 
 func TestScaffoldYAMLCompiles(t *testing.T) {

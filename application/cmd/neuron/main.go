@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Muhammad-Jay/neuron/application/internal/cli"
+	"github.com/neuron-runtime/neuron/application/internal/cli"
 )
 
 func main() {

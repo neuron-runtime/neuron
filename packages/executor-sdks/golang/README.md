@@ -24,14 +24,14 @@ flowchart LR
 ## Module
 
 ```text
-github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang
+github.com/neuron-runtime/neuron/packages/executor-sdks/golang
 ```
 
 Requirements:
 
 - Go 1.26 or newer
 - `google.golang.org/grpc`
-- the shared Neuron contract module `github.com/Muhammad-Jay/neuron/shared`
+- the shared Neuron contract module `github.com/neuron-runtime/neuron/shared`
 
 ---
 
@@ -135,8 +135,8 @@ import (
 	"log"
 	"strings"
 
-	executor "github.com/Muhammad-Jay/neuron/packages/executor-sdks/golang"
-	shadexec "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	executor "github.com/neuron-runtime/neuron/packages/executor-sdks/golang"
+	shadexec "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // Document is the capability runtime's input contract.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // NormalizeInstanceTarget maps a user-facing target to the canonical string

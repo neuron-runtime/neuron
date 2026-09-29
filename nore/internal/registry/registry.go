@@ -6,14 +6,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/builtins"
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/builtins"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type Registry struct {
-	mu        sync.RWMutex
-	runtimes  map[core.CapabilityRuntimeType]contracts.CapabilityRuntime
+	mu       sync.RWMutex
+	runtimes map[core.CapabilityRuntimeType]contracts.CapabilityRuntime
 }
 
 func New() *Registry {

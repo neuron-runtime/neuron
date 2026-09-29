@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 // StreamExecutionEvents exposes the execution's event stream over
@@ -57,7 +57,7 @@ func (h *Handler) StreamExecutionEvents(w http.ResponseWriter, r *http.Request) 
 				ID:            msg.EventID,
 				Type:          msg.Type.String(),
 				CorrelationID: msg.CorrelationID,
-				CapabilityID:     msg.CapabilityID,
+				CapabilityID:  msg.CapabilityID,
 				OccurredAt:    msg.OccurredAt.UnixNano(),
 				Payload:       msg.Payload,
 			})

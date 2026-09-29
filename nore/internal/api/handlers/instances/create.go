@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/utils"
-	"github.com/Muhammad-Jay/neuron/nore/internal/storage"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
@@ -41,9 +41,9 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 	} else {
 		domainKey = protocol.InstanceKey{
 			AssemblyID: req.Key.AssemblyID,
-			Version:  req.Key.Version,
-			Hash:     req.Key.Hash,
-			Env:      req.Key.Env,
+			Version:    req.Key.Version,
+			Hash:       req.Key.Hash,
+			Env:        req.Key.Env,
 		}
 	}
 
@@ -61,12 +61,12 @@ func (h *Handler) CreateInstance(w http.ResponseWriter, r *http.Request) {
 		Message: "instance ready",
 		Status:  http.StatusOK,
 		Data: protocol.InstanceResponse{
-			ID:       i.ID,
-			Status:   string(i.Status()),
+			ID:         i.ID,
+			Status:     string(i.Status()),
 			AssemblyID: i.Key.AssemblyID,
-			Version:  i.Key.Version,
-			Hash:     i.Key.Hash,
-			Env:      i.Key.Env,
+			Version:    i.Key.Version,
+			Hash:       i.Key.Hash,
+			Env:        i.Key.Env,
 		},
 	})
 }
@@ -80,9 +80,9 @@ func (h *Handler) ensureRegistered(r *http.Request, req protocol.CreateInstanceR
 
 	key := protocol.InstanceKey{
 		AssemblyID: req.Key.AssemblyID,
-		Version:  req.Key.Version,
-		Hash:     req.Key.Hash,
-		Env:      req.Key.Env,
+		Version:    req.Key.Version,
+		Hash:       req.Key.Hash,
+		Env:        req.Key.Env,
 	}
 	if key.Version == "" {
 		key.Version = "latest"
@@ -107,7 +107,7 @@ func (h *Handler) ensureRegistered(r *http.Request, req protocol.CreateInstanceR
 	now := time.Now().UTC()
 	_, _, err = h.assemblies.Register(ctx, assembly.RegisteredAssembly{
 		Key:          key,
-		Assembly:       *req.Assembly,
+		Assembly:     *req.Assembly,
 		RegisteredAt: now,
 		UpdatedAt:    now,
 	})

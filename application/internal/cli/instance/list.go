@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Muhammad-Jay/neuron/application/config"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/bootstrap"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/render"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/utils"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	"github.com/neuron-runtime/neuron/application/internal/cli/render"
+	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
 )
 

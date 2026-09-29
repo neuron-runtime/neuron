@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/config"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/command"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/progress"
-	"github.com/Muhammad-Jay/neuron/application/internal/runtimectl"
-	"github.com/Muhammad-Jay/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	"github.com/neuron-runtime/neuron/application/internal/cli/progress"
+	"github.com/neuron-runtime/neuron/application/internal/runtimectl"
+	"github.com/neuron-runtime/neuron/application/project"
 	"github.com/spf13/cobra"
 )
 
@@ -79,7 +79,7 @@ func NewAddCmd() *cobra.Command {
 into the project's .neuron/capabilityRuntimes.json.
 
  name@version selects an exact or constrained version (e.g. github:read or
- Muhammad-Jay:github:read@^1.0.0). Without a version the best matching
+ neuron-runtime:github:read@^1.0.0). Without a version the best matching
  version is installed. The global --force flag re-fetches the package even
  when it is already installed.
 `,

@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/config"
-	"github.com/Muhammad-Jay/neuron/application/language"
-	"github.com/Muhammad-Jay/neuron/application/project"
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/language"
+	"github.com/neuron-runtime/neuron/application/project"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // AuthoringInputs assembles the project's authoring inputs for a build

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	exec "github.com/Muhammad-Jay/neuron/nore/internal/execution"
-	"github.com/Muhammad-Jay/neuron/nore/internal/types"
+	exec "github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/data"
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/data"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 )
 
 func buildTransitionEnvironment(execution *exec.Execution, sourceNode types.ExecutionNode, output map[string]any) resolver.Environment {

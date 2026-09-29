@@ -35,7 +35,7 @@ func DefaultCELConfig() CELConfig {
 
 type celCompiler struct {
 	transitionEnv *cel.Env
-	capabilityEnv    *cel.Env
+	capabilityEnv *cel.Env
 	config        CELConfig
 }
 
@@ -76,7 +76,7 @@ func NewCELCompiler(config CELConfig) (Compiler, error) {
 
 	return &celCompiler{
 		transitionEnv: transitionEnv,
-		capabilityEnv:    capabilityEnv,
+		capabilityEnv: capabilityEnv,
 		config:        config,
 	}, nil
 }

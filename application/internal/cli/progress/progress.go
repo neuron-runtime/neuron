@@ -12,8 +12,8 @@ package progress
 import (
 	"io"
 
-	"github.com/Muhammad-Jay/neuron/application/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/application/internal/cli/ui"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/internal/cli/ui"
 )
 
 // Reporter renders capabilityruntime.Observer events for one command invocation.

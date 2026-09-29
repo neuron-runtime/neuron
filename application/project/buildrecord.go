@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 const buildRecordFile = "build.json"

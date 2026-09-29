@@ -1,9 +1,9 @@
-module github.com/Muhammad-Jay/neuron/nore
+module github.com/neuron-runtime/neuron/nore
 
 go 1.26.5
 
 require (
-	github.com/Muhammad-Jay/neuron/shared v0.0.0-20260905200234-63564fa7a003
+	github.com/neuron-runtime/neuron/shared v0.0.0-20260905200234-63564fa7a003
 	github.com/coder/websocket v1.8.15
 	github.com/google/cel-go v0.30.0
 	github.com/tetratelabs/wazero v1.12.0

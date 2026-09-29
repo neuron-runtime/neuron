@@ -132,14 +132,14 @@ describe("Capability.withParams()", () => {
       });
 
     const node = svc.withParams({
-      owner: "Muhammad-Jay",
+      owner: "neuron-runtime",
       repository: "neuron",
     });
 
     expect(node).toBeInstanceOf(Object);
     expect(node.capabilityRef).toBe("github.read");
     expect(node.bindings).toEqual({
-      owner: "'Muhammad-Jay'",
+      owner: "'neuron-runtime'",
       repository: "'neuron'",
     });
   });

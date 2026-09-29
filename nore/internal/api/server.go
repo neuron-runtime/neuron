@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/api/routes"
-	"github.com/Muhammad-Jay/neuron/nore/internal/instance"
-	"github.com/Muhammad-Jay/neuron/nore/internal/planner"
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/api/routes"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/nore/internal/planner"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 type Server struct {

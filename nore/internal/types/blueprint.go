@@ -1,8 +1,8 @@
 package types
 
 import (
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
-	shared "github.com/Muhammad-Jay/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // ExecutionBlueprint is the compiled, reusable representation of a Assembly.
@@ -37,7 +37,7 @@ type CompiledValidation struct {
 }
 
 type ExecutionTransition struct {
-	BindingID     shared.ID
+	BindingID          shared.ID
 	TargetCapabilityID shared.ID
 
 	Mappings    []CompiledMapping

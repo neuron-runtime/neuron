@@ -6,12 +6,12 @@ import (
 
 	"sync"
 
-	exec "github.com/Muhammad-Jay/neuron/nore/internal/execution"
-	"github.com/Muhammad-Jay/neuron/shared/types/core"
+	exec "github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/contracts"
-	"github.com/Muhammad-Jay/neuron/nore/internal/event"
-	"github.com/Muhammad-Jay/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 )
 
 type CapabilityRuntimeEngine struct {

@@ -3,7 +3,7 @@ package contracts
 import (
 	"context"
 
-	core2 "github.com/Muhammad-Jay/neuron/shared/types/core"
+	core2 "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Field is a single structured key/value pair attached to a log message.

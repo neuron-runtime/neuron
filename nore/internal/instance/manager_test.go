@@ -3,8 +3,8 @@ package instance
 import (
 	"testing"
 
-	"github.com/Muhammad-Jay/neuron/nore/internal/assembly"
-	"github.com/Muhammad-Jay/neuron/shared/types/protocol"
+	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 func TestWithCapabilityRuntimesInvalidPayloadReturnsError(t *testing.T) {

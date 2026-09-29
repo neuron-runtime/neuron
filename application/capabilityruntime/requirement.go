@@ -39,14 +39,14 @@ func (r Requirement) Validate() error {
 // owner and whose remaining segments are the functional path:
 //
 //	"github:read"                 -> Owner: "github", PathSegments: ["read"]
-//	"Muhammad-Jay:github:read"    -> Owner: "Muhammad-Jay", PathSegments: ["github", "read"]
+//	"neuron-runtime:github:read"    -> Owner: "neuron-runtime", PathSegments: ["github", "read"]
 //	"hashicorp:vault:auth"        -> Owner: "hashicorp", PathSegments: ["vault", "auth"]
 type NameSplit struct {
-	Owner        string   // e.g. "Muhammad-Jay"
+	Owner        string   // e.g. "neuron-runtime"
 	PathSegments []string // e.g. ["github", "read"]
 }
 
-// ParseType decomposes a logical capability runtime name such as "Muhammad-Jay:github:read"
+// ParseType decomposes a logical capability runtime name such as "neuron-runtime:github:read"
 // or "github:read". The first segment is always the owner; at least one
 // functional segment must follow it.
 func ParseType(capabilityRuntimeType string) (*NameSplit, error) {
@@ -78,7 +78,7 @@ func ParseType(capabilityRuntimeType string) (*NameSplit, error) {
 // path segments are hyphen-joined because GitHub has no nested repositories.
 //
 //	"github:read"              -> "github/read"
-//	"Muhammad-Jay:github:read" -> "Muhammad-Jay/github-read"
+//	"neuron-runtime:github:read" -> "neuron-runtime/github-read"
 func (n *NameSplit) ToGitHubRepo() string {
 	repoName := strings.Join(n.PathSegments, "-")
 	return fmt.Sprintf("%s/%s", n.Owner, repoName)
@@ -92,7 +92,7 @@ func (n *NameSplit) ToLocalPath() string {
 }
 
 // TypePath converts a logical name directly to its store-relative path,
-// e.g. "Muhammad-Jay:github:read" -> "Muhammad-Jay/github/read".
+// e.g. "neuron-runtime:github:read" -> "neuron-runtime/github/read".
 func TypePath(capabilityRuntimeType string) (string, error) {
 	split, err := ParseType(capabilityRuntimeType)
 	if err != nil {

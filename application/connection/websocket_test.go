@@ -11,7 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	shared "github.com/Muhammad-Jay/neuron/shared/protocol/websocket"
+	shared "github.com/neuron-runtime/neuron/shared/protocol/websocket"
 )
 
 func TestToWebSocketURL(t *testing.T) {

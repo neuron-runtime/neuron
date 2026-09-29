@@ -30,7 +30,7 @@ Each archive contains both the `neuron` CLI and the `nore` runtime engine. On ev
 
 ### 1. Download the archive
 
-Go to the [releases page](https://github.com/Muhammad-Jay/neuron/releases) and download the archive for your operating system and architecture:
+Go to the [releases page](https://github.com/neuron-runtime/neuron/releases) and download the archive for your operating system and architecture:
 
 ```text
 neuron-0.1.0-linux-amd64.tar.gz
@@ -98,7 +98,7 @@ Building from source is only necessary when contributing, testing unreleased cha
 ### Clone and build
 
 ```bash
-git clone https://github.com/Muhammad-Jay/neuron.git
+git clone https://github.com/neuron-runtime/neuron.git
 cd neuron
 go build -o neuron ./application/cmd/neuron
 ```
@@ -125,7 +125,7 @@ go build -o nore ./nore/cmd/nore
 Local builds report the development version (`dev`). Official releases stamp the release version into the binary:
 
 ```bash
-go build -ldflags "-X github.com/Muhammad-Jay/neuron/shared/version.Version=v0.1.0" \
+go build -ldflags "-X github.com/neuron-runtime/neuron/shared/version.Version=v0.1.0" \
   -o neuron ./application/cmd/neuron
 ```
 

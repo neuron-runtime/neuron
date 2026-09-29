@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	capabilityrt "github.com/Muhammad-Jay/neuron/shared/types/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // ReadManifest loads and validates an runtime.json manifest from path.
