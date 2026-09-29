@@ -38,13 +38,18 @@ func (s *WebSocketHandler) Hub() *Hub {
 	return s.hub
 }
 
+// HandleWebSocket upgrades a request to a WebSocket session.
+//
+// Origin verification is left to the coder/websocket default, which rejects an
+// Origin that does not match the request Host. Disabling it would let any
+// page a user visits open an authenticated connection to the local daemon
+// through their browser.
 func (s *WebSocketHandler) HandleWebSocket(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols:       []string{"neuron.v1"},
-		InsecureSkipVerify: true,
+		Subprotocols: []string{"neuron.v1"},
 	})
 	if err != nil {
 		return

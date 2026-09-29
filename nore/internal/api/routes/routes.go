@@ -15,7 +15,21 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
-func BuildRoutes(mux *http.ServeMux, mgr *instance.Manager, assemblies *assembly.Repository, compiler *planner.Compiler) http.Handler {
+// BuildRoutes registers every API route on mux and returns the wrapped request
+// chain that must actually be served.
+//
+// Middleware order is deliberate. Recovery is outermost so it also covers
+// panics raised by the layers inside it. Authentication follows, so an
+// unauthenticated request is rejected before it reaches logging-heavy or
+// handler code. Logging is innermost so it records requests that were actually
+// accepted, keeping rejected probes out of the access log.
+func BuildRoutes(
+	mux *http.ServeMux,
+	mgr *instance.Manager,
+	assemblies *assembly.Repository,
+	compiler *planner.Compiler,
+	token string,
+) http.Handler {
 	// Health
 	mux.HandleFunc("GET /health", health.Health)
 
@@ -43,8 +57,8 @@ func BuildRoutes(mux *http.ServeMux, mgr *instance.Manager, assemblies *assembly
 	reg := register.New(mgr, assemblies, compiler)
 	mux.HandleFunc("POST /v1/register", reg.Register)
 
-	handler := middleware.Recovery(mux)
-	handler = middleware.Logging(handler)
+	handler := middleware.Logging(mux)
+	handler = middleware.NewTokenAuth(token).Wrap(handler)
 
-	return handler
+	return middleware.Recovery(handler)
 }
