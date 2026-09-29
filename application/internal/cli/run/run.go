@@ -122,11 +122,15 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID, renderer); err != nil {
+		terminal, err := streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID, renderer)
+		if err != nil {
 			_ = renderer.Close()
 			return err
 		}
-		return renderer.Close()
+		if err := renderer.Close(); err != nil {
+			return err
+		}
+		return terminalOutcome(terminal)
 	}
 
 	fmt.Printf("execution started\n")
@@ -134,6 +138,29 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  instance_id:  %s\n", execResult.InstanceID)
 	fmt.Printf("  status:       %s\n", execResult.Status)
 	return nil
+}
+
+// terminalOutcome turns the execution's final event into a command result.
+//
+// The renderer already presented the failure to a human, but a failed or
+// cancelled execution must also be observable by a script. Returning an error
+// here is what makes `neuron run` exit non-zero, so CI and shell pipelines can
+// tell a completed execution from a failed one.
+func terminalOutcome(terminal protocol.StreamEvent) error {
+	switch terminal.Type {
+	case "execution.failed":
+		var p struct {
+			Message string `json:"Message"`
+		}
+		if err := json.Unmarshal(terminal.Payload, &p); err == nil && p.Message != "" {
+			return fmt.Errorf("execution failed: %s", p.Message)
+		}
+		return errors.New("execution failed")
+	case "execution.cancelled":
+		return errors.New("execution cancelled")
+	default:
+		return nil
+	}
 }
 
 // presentationMode maps CLI flags to an output mode. JSON wins over verbose so
@@ -219,25 +246,42 @@ func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.Instanc
 // execution reaches a terminal state, feeding each event to the renderer. It
 // prefers the WebSocket transport and falls back to Server-Sent Events for
 // transports that cannot open a WebSocket session.
-func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) error {
+func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) (protocol.StreamEvent, error) {
+	// sawTerminal guards against reporting success for a stream that simply
+	// stopped. The daemon closes the connection when a client falls behind, and
+	// a transport failure looks identical to a clean end-of-stream from here.
+	// Without this, a truncated stream is indistinguishable from a completed
+	// run and `neuron run` waits on a terminal event that will never arrive.
+	var terminal protocol.StreamEvent
+	sawTerminal := false
+
 	err := c.StreamExecutionEventsWS(ctx, instanceID, executionID, func(evt protocol.StreamEvent) error {
 		if herr := renderer.Handle(ctx, evt); herr != nil {
 			return herr
 		}
 		if output.IsTerminalEvent(evt) {
+			terminal, sawTerminal = evt, true
 			return errExecutionTerminal
 		}
 		return nil
 	})
 
 	switch {
-	case err == nil, errors.Is(err, errExecutionTerminal), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return nil
 	case errors.Is(err, connection.ErrWebSocketUnavailable):
 		return streamEventsAndWaitSSE(ctx, c, instanceID, executionID, renderer)
+	case err == nil, errors.Is(err, errExecutionTerminal),
+		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Clean end of stream, or the caller stopped watching.
 	default:
-		return err
+		return terminal, fmt.Errorf("execution stream ended before completion: %w", err)
 	}
+
+	// A stream that ended without a terminal event is truncated, not
+	// successful. Report it rather than exiting zero for an unknown outcome.
+	if !sawTerminal {
+		return terminal, errors.New("execution stream ended before the execution reported a final state")
+	}
+	return terminal, nil
 }
 
 // errExecutionTerminal is sent by the streaming callback when the execution
@@ -246,7 +290,7 @@ var errExecutionTerminal = errors.New("execution reached terminal state")
 
 // streamEventsAndWaitSSE is the legacy Server-Sent Events streaming path, kept
 // as a fallback for transports without WebSocket support.
-func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) error {
+func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) (protocol.StreamEvent, error) {
 	eventCh := make(chan protocol.StreamEvent, 64)
 	errCh := make(chan error, 1)
 
@@ -260,21 +304,21 @@ func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID st
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return protocol.StreamEvent{}, ctx.Err()
 		case err := <-errCh:
 			if err != nil && !strings.Contains(err.Error(), "context canceled") {
-				return err
+				return protocol.StreamEvent{}, err
 			}
-			return nil
+			return protocol.StreamEvent{}, nil
 		case evt, ok := <-eventCh:
 			if !ok {
-				return nil
+				return protocol.StreamEvent{}, nil
 			}
 			if herr := renderer.Handle(ctx, evt); herr != nil {
-				return herr
+				return evt, herr
 			}
 			if output.IsTerminalEvent(evt) {
-				return nil
+				return evt, nil
 			}
 		}
 	}
