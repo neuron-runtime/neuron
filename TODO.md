@@ -1,285 +1,134 @@
-# TODO
+## Execution & Scheduler
 
-Personal development checklist for Neuron. This file is intentionally **not tracked in git**
-(it is listed in `.gitignore`) it is a working todo list, not documentation.
+- [ ]  **Add parallel-execution stress tests**
+    - **Files:** `nore/internal/execution/scheduler/`, `nore/internal/execution/`, `nore/internal/execution/engine/`
+    - Test multiple executions running simultaneously, fan-out branches, and mixed completion order.
+    - Specifically verify that `inFlight` reaches zero and every execution reaches a terminal state.
+    - Current inspection found no obvious scheduler deadlock, but this behavior is not sufficiently tested.
+- [ ]  **Test event-bus backpressure under concurrent executions**
+    - **File:** `nore/internal/event/bus.go`
+    - `Publish()` blocks when a subscriber's buffer is full. This is intentional backpressure, but scheduler and engine interaction should be stress-tested with many executions/events so a slow subscriber cannot effectively stall execution indefinitely.
+- [ ]  **Handle execution cancellation explicitly**
+    - **Files:** `nore/internal/execution/execution.go`, `nore/internal/execution/wait.go`, `nore/internal/instance/instance.go`
+    - `StatusCancelled` exists, but there is no `MarkCancelled`/execution cancellation path.
+    - Define how cancellation propagates to running capability runtimes and how the execution becomes terminal.
 
-Tick items off as they are completed. Group by type: **Fixes**, **Improvements**,
-**Distribution**, **Documentation**.
+## Runtime Configuration
 
----
+- [ ]  **Move execution configuration from capabilities to capability runtimes**
+    - **Files:** `packages/assembly-sdks/typescript/src/capability.ts`, `packages/assembly-sdks/typescript/src/manifest.ts`, `application/compiler/manifest/manifest.go`, `application/compiler/compiler.go`, `shared/types/core/capability.go`, `shared/types/protocol/hash.go`, `nore/internal/execution/engine/`, affected tests/docs/examples
+    - Remove the current capability-level `.runtimeConfig(...)` / `ExecutionConfig` API.
+    - Replace it with runtime configuration supplied through `.runtime(...)`:
+        
+        ```
+        .runtime({
+          name: "...",
+          version: "...",
+          registry: "...",
+          runtimeConfig: {
+            retry: {...},
+            execution: {
+              mode: "detach"
+            },
+            resources: {...}
+          }
+        })
+        ```
+        
+    - `runtimeConfig` belongs to the **runtime declaration attached to that capability**, not to the capability's input data.
+    - A capability using `acme:http` may have a different `runtimeConfig` from another capability using the same `acme:http` runtime.
+    - Do **not** deduplicate runtime configurations merely because the runtime identity is the same.
+    - Do **not** reject multiple capabilities using the same runtime with different runtime configurations.
+    - The runtime artifact and resolved runtime identity may be shared/cached, while the effective runtime configuration remains specific to the capability invocation.
+    - Capability input and runtime execution configuration must remain completely separate:
+        - `params` = input data supplied to the capability.
+        - `runtimeConfig` = instructions controlling how N.O.R.E. handles execution of that capability through its Capability Runtime.
+    - `runtimeConfig` must never be inserted into the capability invocation `params` or otherwise treated as user input to the runtime capability.
+    - Define one common runtime configuration schema applicable to all Capability Runtimes. The initial schema should support execution controls such as:
+        - `execution.mode`
+        - `execution.timeout`
+        - `retry`
+        - `resources`
+        - additional runtime lifecycle/resource controls as the runtime system evolves.
+    - The schema describes **how Neuron handles the runtime invocation**, not arbitrary configuration data for the implementation of a particular runtime.
+    - Preserve the distinction between runtime artifact metadata and invocation configuration:
+        - runtime artifact/`runtime.json` describes what the Capability Runtime is and how it is hosted;
+        - `runtimeConfig` describes how that particular capability invocation should be executed.
+    - Carry the runtime configuration through compilation into the execution representation associated with that capability's runtime invocation.
+    - Ensure the configuration survives manifest serialization/deserialization and assembly compilation without being lost.
+    - Update `HashAssembly` so changes to a capability's `runtimeConfig` affect the assembly/deployment identity.
+    - Update the N.O.R.E. execution engine so it retrieves `runtimeConfig` from the capability's runtime declaration rather than from capability input/configuration.
+    - Apply runtime configuration at the runtime invocation boundary:
+        - `execution.mode` controls wait/detach behavior.
+        - `execution.timeout` controls the invocation deadline.
+        - `retry` controls retry/backoff behavior for that runtime invocation.
+        - `resources` controls runtime resource constraints where the selected backend supports them.
+    - Ensure two capabilities using the same runtime can execute with different runtime configurations simultaneously.
+    - Ensure runtime artifact resolution/installation remains independent from runtime configuration. Resolving `acme:http@1.2.0` should identify/install the artifact once as needed, while each capability invocation retains its own `runtimeConfig`.
+    - Add compiler, manifest, hashing, resolution, and execution tests covering:
+        - a capability with runtime configuration;
+        - two capabilities using the same runtime with different runtime configurations;
+        - two simultaneous invocations of the same runtime with different `execution.mode` values;
+        - runtime configuration changes affecting assembly/deployment identity;
+        - runtime configuration never appearing in capability input;
+        - runtime artifact resolution remaining independent from invocation-specific runtime configuration;
+        - runtime configuration being available to the N.O.R.E. runtime/backend lifecycle.
+- [ ]  **Actually apply capability-runtime execution settings**
+    - **Files:** `nore/internal/execution/engine/executor_engine.go`, runtime backend implementations, `shared/types/capabilityruntime/`, affected tests
+    - Implement the runtime-level settings once the new ownership model is established.
+    - `execution.mode` must control runtime/execution handling rather than being treated as capability data.
+    - `timeout` must establish the appropriate execution context deadline.
+    - `retry` must be enforced around capability-runtime invocation with explicit retry/backoff semantics.
+    - `resources` must be represented as runtime execution constraints and only enforced by backends that support the requested resource controls.
+    - Unsupported configuration must fail validation or be explicitly ignored according to a documented compatibility policy; do not silently imply that an option is enforced when it is not.
+- [ ]  **Remove obsolete capability execution configuration**
+    - **Files:** `packages/assembly-sdks/typescript/src/capability.ts`, `packages/assembly-sdks/typescript/src/manifest.ts`, `application/compiler/manifest/manifest.go`, `shared/types/core/capability.go`, affected YAML/JSON examples and tests
+    - Remove `CapabilityComposition.execution`, `CapabilityManifest.execution`, `manifest.Capability.Execution`, `core.Capability.RuntimeConfigurations`, and related capability-level execution plumbing once the runtime-level configuration model is implemented.
+    - Do not retain duplicate capability-level and runtime-level configuration paths.
 
-## Fixes
+## Capability Runtime / Packaging
 
-- [ ] **API authentication.** N.O.R.E.'s API is unauthenticated and bound to a local socket
-  ```
-  by default. Define a token-based model before any loopback exposure.
-  ```
-- [ ] **Worker crash/restart recovery.** Exercise worker-pool restart behavior after repeated
-  ```
-  capability runtime failures under load; fix whatever explodes.
-  ```
-- [ ] **Windows daemon lifecycle.** Verify socket-path handling and `neuron daemon` start/stop
-  ```
-  on Windows (best-effort so far: Linux/macOS only).
-  ```
-- [ ] **Storage path normalization.** `storage.directory` accepts relative paths (e.g.
-  ```
-  `./.neuron/data`) that are resolved against the daemon's working directory; resolve them
-  against the project root and pass an absolute path to `--data-dir`.
-  ```
-- [x] **Two-config-file problem for TS projects with external capability runtimes.** TS authoring is
-  ```
-  `neuron.config.ts` but capability runtime resolution reads `neuron.yaml`; `config.executorRegistries`
-  is compiled into the manifest (`application/compiler/config.go`) and never consulted at
-  resolution time (`executorctl.BuildCatalog`). Decide: make one the single source, or make
-  the manifest path fully functional. (docs/FIRST_EXECUTOR.md A1)
-  RESOLVED (UX convergence, 2026-09-13): the SDK config surface (`neuron.config.ts`,
-  `defineConfig`) was removed; `neuron.config.*` is the single source of truth; the
-  manifest no longer transports a `config`/`ProjectConfig` block (assembly `variables` come
-  from config); resolution reads `cfg.Executors.Registries`.
-  ```
-- [x] **`local://` dead default registry.** `defaults.go` ships `{name: local, url: local://}`
-  ```
-  but `BuildCatalog` silently filters entries with URL `local://`. Fresh projects are
-  pre-broken for external capability runtimes from `local`. Remove the default or make it functional;
-  explode loudly on unknown registry names instead of dropping them. (A2/A4)
-  RESOLVED (UX convergence, 2026-09-13): the bundled `local://` default was removed from
-  `Defaults()`; only registries declared in `neuron.config.*` are consulted. The remaining
-  half — erroring loudly on unknown registry names — is tracked below.
-  ```
-- [ ] **Unknown registry names silently dropped in `BuildCatalog`.** Only `github` and
-  ```
-  `local` are recognized; anything else is ignored without a warning, surfacing later as
-  "capability runtime registry not configured". (A4)
-  ```
-- [ ] **`defaultRegistries` never populated.** Declared in `config.go` and used as the
-  ```
-  requirement fallback but `Defaults()` never sets it; requirements without an explicit
-  `registry` get no fallback and a confusing "no capability runtime registries" error. Ship
-  `["local", "github"]` defaults and make the error state the exact fix. (A3)
-  PARTIAL (UX convergence, 2026-09-13): `Defaults()` ships `["local"]`; `github` is
-  deliberately opt-in. Confirm the fallback path resolves correctly for the shipped
-  value and tighten the error to name the exact fix.
-  ```
-- [x] **SDK default capability runtime name = capability name.** Capabilities without
-  ```
-  `.capabilityRuntime()` get a capability runtime name equal to the capability name
-  (e.g. `content.extract`), which fails `ParseType` at registration
-  ("must contain at least one ':' separator"). Validate in the SDK or relax `ParseType`;
-  document the `owner:capability:sub` convention. (B1)
-  RESOLVED (2026-09-13): a capability without `.capabilityRuntime()` now defaults to the
-  built-in `neuron:core:set` (in-process, no resolution). The `owner:capability:sub`
-  convention is documented in the SDK README.
-  ```
-- [ ] **Local-registry identity reconciliation skipped.** The installer verifies
-  ```
-  name/version match only when `pkg.Manifest == nil` (`installer.go:78`); the local
-  registry always sets the manifest, so a mismatched `metadata.name` installs under an
-  unrelated type path. Always verify identity. (B4)
-  ```
-- [ ] **Instance status not persisted on clean stop.** `StopInstances` does not write
-  ```
-  `stopped`; restored instances show `failed`. Persist terminal status on shutdown. (D5)
-  ```
-- [ ] **Orphaned capability runtime processes on daemon SIGKILL.** Spawned capability runtimes have no
-  ```
-  kill-on-parent-death process group; gRPC capability runtimes with no connection-loss watcher block
-  in `Serve` forever. Add Pdeathsig/setsid handling or connection-loss detection. (D7)
-  ```
-- [ ] **Stale socket file left on shutdown.** The daemon closes the listener but never
-  ```
-  unlinks the socket path. Unlink on graceful shutdown. (D3)
-  ```
+- [ ]  **Finish executor → capability-runtime terminology migration**
+    - **Files:** `README.md`, `docs/GETTING_STARTED.md`, `docs/RELEASING.md`, `packages/executor-sdks/`, `TODO.md`
+    - Current implementation uses capability runtimes, while parts of the documentation and SDK naming still use executor terminology.
+    - Keep compatibility/public package names where necessary, but remove stale internal terminology and references such as `executor.json`, `executorctl`, and old runtime paths where they no longer describe the implementation.
+- [ ]  **Fix stale runtime-store documentation**
+    - **File:** `shared/types/capabilityruntime/resolved.go`
+    - Documentation still references the old executor/runtime store location while the implementation uses the capability-runtime store.
+- [ ]  **Migrate the capability-runtime installation directory**
+    - **Files:** capability-runtime store/configuration and any CLI, installer, resolver, documentation, tests, or examples referencing `~/.neuron/executors/`
+    - Change the canonical local runtime store from `~/.neuron/executors/` to `~/.neuron/capability-runtime/`.
+    - Update all code paths that construct, read, write, install, resolve, or document the old path.
+    - Preserve compatibility/migration behavior only where it is intentionally required; do not leave the old directory as the canonical location.
+    - Add or update tests covering runtime discovery and installation using the new location.
+- [ ]  **Remove duplicate capability assignment**
+    - **File:** `application/capabilityruntime/source/local/registry.go`
+    - `pkg.Capabilities` is assigned the same manifest value twice. Remove the redundant assignment.
 
+## Build / Compiler
 
+- [ ]  **Verify compiler/runtime configuration preservation**
+    - **Files:** `application/compiler/compiler.go`, `shared/types/protocol/hash.go`
+    - The compiler generates runtime configuration fields and `HashAssembly` includes them, but the runtime does not currently consume all of them.
+    - Add tests ensuring a configuration change changes the deployment/build identity where it is supposed to, without implying that unsupported behavior is implemented.
 
-## Improvements
+## First-Party Runtime Architecture
 
-- [x] **Real-time Websocket Connection** `application/connection` uses an `http.Client`
-  ```
-  implement websocket connection 
-  with room subscribtions and structure json data.
-  ```
-- [x] **Single config surface decision.** Pick one source of truth for capability runtime-registry
-  ```
-  config: either consume the manifest's `executorRegistries` at resolution time, or make
-  `neuron.yaml` the documented single source and drop the misleading TS path. "Both, with
-  one ignored" is the current trap. (docs/FIRST_EXECUTOR.md A1)
-  RESOLVED (UX convergence, 2026-09-13): `neuron.config.*` is the sole source; SDK
-  config surface (`neuron.config.ts`, `defineConfig`) removed; manifest `config` block
-  removed; resolution reads `cfg.Executors.Registries`.
-  ```
-- [x] **`neuron init --lang ts` scaffolding.** Generate a runnable TS project (package.json,
-  ```
-  `assembly.ts`, `neuron.config.json` with `lang: typescript`, `entry: assembly.ts`, and a
-  `local` registry block) so fresh projects are not pre-broken for external capability runtimes.
-  (F4)
-  RESOLVED (2026-09-13): TypeScript is the default scaffold (`neuron init`), producing
-  `neuron.config.json` (`lang: typescript`, `entry: assembly.ts`), `package.json` with
-  `@neuron/sdk`, `tsconfig.json`, a runnable `assembly.ts`, and the implicit capability runtime
-  root `neuron/capabilityRuntimes/` via `capabilityRuntimes.localRoots`.
-  ```
-- [ ] **`neuron daemon status` command.** Show running/stopped, PID, data dir, socket path,
-  ```
-  uptime. Today the daemon can only be observed through full lifecycle commands. (D1)
-  ```
-- [ ] **Surface daemon stderr by default.** A failing daemon start reports only "context
-  ```
-  deadline exceeded"; attach daemon stderr unless quiet, or point at a log path. (D2)
-  ```
-- [ ] **Rename `core.ServiceType` → `core.ExecutorType`.** The runtime type holds the
-  ```
-  executor identity, not the service identity; the misnomer compounds the service/executor
-  confusion at every layer. Align the `type`/`name`/`Type`/`Tag` vocabulary once. (B2)
-  ```
-- [ ] **Remove dead config.** `neuron.config.ts` `script.build` (`cli/config.ts`), SDK
-  ```
-  `Project.entryFile` (`cli/project.ts:33`, recomputed in `build.ts:15`), and
-  `storage.provider` (file-based today; example ships `postgres`). Delete or wire up. (C2/C3/E2)
-  ```
-- [ ] **SDK manifest validation.** Validate the built `AssemblyManifest` shape before writing
-  ```
-  `.neuron/manifest.json`; today only the default-export presence is checked and malformed
-  manifests fail later in the Go compiler. (C5)
-  ```
-- [ ] **Short-circuit config-file discovery.** Warn (or error) when multiple
-  ```
-  `neuron.config.*` candidates exist; last-found-wins is silent today. (C4)
-  ```
-- [ ] **Clarify or enforce `capabilities[]` in `runtime.json`.** It is required-by-schema but
-  ```
-  never matched against assembly capability names; both examples repeat the capability runtime
-  name inside it, reinforcing the capability/capability-runtime conflation. (B3)
-  ```
-- [ ] **Path-resolution consistency.** Expand `capabilityRuntimes.registries[].url` (local) against
-  ```
-  the project root like `storage.directory`/`storeDir`, not the CLI working directory. (F2)
-  ```
-- [ ] **Config slice merge semantics.** Viper replaces `capabilityRuntimes.registries` instead of
-  ```
-  merging, silently dropping the default `github` registry when a user declares `local`.
-  (F3)
-  ```
-- [x] **`neuron instance` with no subcommand prints help.** It exits silently today; teach
-  ```
-  the user the subcommands instead. (E6)
-  RESOLVED (2026-09-13): the instance root command renders its help; the dead commented
-  single-instance lookup was removed.
-  ```
-- [ ] **Execution-history retention policies.** Implement `storage.executionHistory:
-  ```
-  none | memory | local`; execution semantics must not depend on persistence.
-  ```
-- [ ] `neuron execution` **inspection command.** Re-add as a real surface that lists
-  ```
-  executions across instances (currently only visible via `neuron instance list`).
-  ```
-- [ ] **Per-capability-runtime resource limits.** CPU, memory, file count, and runtime limits in the
-  ```
-  process runtime.
-  ```
-- [ ] **Stronger process isolation.** Sandboxing (seccomp, namespaces) or a dedicated runtime
-  ```
-  backend for external modules.
-  ```
-- [ ] **Concurrency backpressure.** Bound in-flight executions per instance and per daemon.
-- [ ] **Execution record audit.** Decide which persisted record fields matter in the product
-  ```
-  model vs. internal use.
-  ```
-- [ ] **TLS for the opt-in TCP endpoint.** Document client-side verification.
-- [ ] **Protocol negotiation.** Add explicit `neuron/capability-runtime-v1` version/capability negotiation
-  ```
-  checks in the runtimes' handshake.
-  ```
-- [ ] **Capability runtime examples (Go).** Add gRPC-only, JSON-only, and two-runtime reference
-  ```
-  capability runtimes.
-  ```
-- [ ] **Request deadlines end-to-end.** Propagate CLI-provided execution deadlines through the
-  ```
-  whole execution path instead of relying on transport timeouts.
-  ```
-
-
-
-## Distribution
-
-- [x] **Build and publish first capability runtime**
-  ```
-  Build the .NET SDK 'executor-dotnet', in the packages/ folder and make sure it implement the neuron runtime protocol. the capability runtime should be written in .NET, and it should contain the typescript Capability package in it repo,
-  Not yet pushed to GitHub / not yet published to a registry:
-  - packages/executor-sdks/dotnet/Neuron.Executor: builds, 26 tests green, packs as NuGet. Referenced by ProjectReference from the content-extract repo.
-  - content-extract repo (Desktop/content-extract): .NET capability runtime (neuron/capability-runtime-v1 gRPC), runtime.json manifest, @neuron/content-extract TS package, release.sh, CI + release workflows. Locally E2E-verified via `neuron build` + `neuron run` through the local catalog.
-  - Remaining for a public release: push content-extract to GitHub, create v1.0.0 tag, publish Neuron.Executor to NuGet, replace the sibling-checkout ProjectReference/file: dependency with versioned package references.
-  ```
-
-- [ ] **Publish first official** `v0.1.0` **release.** `scripts/release.sh` and the tag-triggered
-  ```
-  workflow are ready; create the tag when CI is green.
-  ```
-- [ ] **Publish** `@neuron/sdk` to a package registry with `engines` metadata and clear versioning.
-- [ ] **Publish the shared Go module** (`github.com/neuron-runtime/neuron/shared`) so consumers can
-  ```
-  depend on `executor-go` and the protocol contracts without vendoring.
-  ```
-- [ ] **Public module ecosystem.** Publish the reference `echo` module and a starter catalog
-  ```
-  reachable by the default `github` registry; document catalog conventions.
-  ```
-- [ ] **Additional registry runtimes.** Progress on `oci` and `remote` capability runtimes.
-
-
-
-## Documentation
-
-- [x] **Stale event names in GETTING_STARTED.** The guide shows `service.evaluating`;
-  ```
-  the real events are `capability.started`/`capability.completed`/`execution.completed`
-  (`nore/internal/event/event_types.go`). Align the shipped runnable transcripts. (E1)
-  RESOLVED (2026-09-13): transcripts throughout GETTING_STARTED use the live event names.
-  ```
-- [x] **`neuron` root help says "workflow engine CLI".** Neuron is explicitly not a workflow
-  ```
-  engine (`application/internal/cli/cli.go:25`); change to "Neuron CLI". (E3)
-  RESOLVED (2026-09-13): root `Short` is "Neuron CLI".
-  ```
-- [x] **`application/README.md` daemon-lifecycle fix.** It claims the daemon stops when the
-  ```
-  CLI process exits; the daemon persists. Correct the text. (E4)
-  RESOLVED (2026-09-13): CLI reference now states the daemon persists until `neuron daemon stop`.
-  ```
-- [x] **Remove stale example config.** `examples/ecommerce_order_ts/neuron.config.ts` ships
-  ```
-  dead `script.build`, `storage.directory: "./home"`, and `storage.provider: "postgres"`;
-  `examples/ecommerce_order/neuron.yaml` ships an `official` registry that `BuildCatalog`
-  ignores. (E2)
-  RESOLVED (2026-09-13): `neuron.config.ts` is gone and both examples ship clean
-  `neuron.config.*` files; the `official` registry block no longer exists.
-  ```
-- [x] **Create or remove `docs/capability-runtimes/2026-09-05-*.md`.** Referenced by the item below
-  ```
-  but the directory does not exist. (E5)
-  RESOLVED (2026-09-13): the case study moved to `docs/capability-runtimes/2026-09-05-first-capability-runtime.md`.
-  RESOLVED (2026-09-28): the case study was removed along with the `docs/capability-runtimes/` directory;
-  `docs/` keeps only shipped-behavior reference docs, and the design-notes-sync item below was dropped
-  with it.
-  ```
-- [x] **Document capability runtime naming + config requirement.** Explain `owner:capability:sub` and
-  ```
-  that `neuron.yaml` `capabilityRuntimes.registries` is required for external capability runtimes
-  even in TS projects, in the SDK README and MODULES.md. (A1/B1/F1)
-  RESOLVED (2026-09-13): the SDK README documents `owner:capability:sub`, the built-in
-  `neuron:core:set` default, and points at MODULES.md; GETTING_STARTED Part 3 states the
-  `capabilityRuntimes.registries` requirement for external modules.
-  ```
-- [ ] **Runtime deep dives.** Extend `docs/RUNTIME.md` with the execution plan, event breakdown,
-  ```
-  and recovery paths.
-  ```
-- [ ] **Changelog / migration notes.** Record breaking changes between 0.1.x releases.
-- [ ] **Pre-1.0 API audit.** Audit every exported symbol in the SDK and `executor-go`; unexport
-  ```
-  anything that is not a deliberate contract.
-  ```
-
+- [ ]  **Replace `neuron:core:*` built-ins with normal first-party capability runtimes**
+    - **Files:** `nore/internal/builtins/`, `nore/internal/registry/`, `application/internal/cli/`, `application/capabilityruntime/`, runtime-resolution/build paths, and all affected tests/docs/examples
+    - Remove `nore/internal/builtins/` and the current in-process built-in runtime implementations entirely.
+    - Remove the special `neuron:core:*` runtime classification, detection, bypass, registry, aliases, and execution logic from N.O.R.E. and the CLI.
+    - Replace first-party runtime identities with the `neuron-runtime:<runtime>` namespace, for example:
+        - `neuron-runtime:http`
+        - `neuron-runtime:filesystem`
+        - `neuron-runtime:process`
+        - `neuron-runtime:execution`
+    - First-party runtimes must use the same capability-runtime artifact, manifest, resolution, verification, installation, storage, and backend mechanisms as external runtimes rather than being privileged in-process implementations.
+    - Build the first-party capability runtimes independently of N.O.R.E. so they can be implemented in any supported language and communicate through the language-independent capability-runtime protocol.
+    - Package each first-party runtime as a distributable runtime artifact and publish the artifacts through the Neuron runtime distribution source, initially GitHub under the `neuron-runtime` organization.
+    - Ensure the Neuron installation can ship the first-party runtime artifacts alongside Neuron and make them available through the same local capability-runtime installation/resolution model.
+    - Ensure the CLI resolver/installer can resolve and install a missing `neuron-runtime:*` artifact through the normal runtime flow rather than requiring special-case built-in handling.
+    - Remove or update every `.md`, documentation page, example, test, comment, configuration sample, SDK example, and source reference that uses or describes `neuron:core:*`, built-in capability runtimes, or the old in-process built-in model.
+    - Remove obsolete assumptions such as “built-in runtimes are never resolved or installed.”
+    - Establish `neuron-runtime:*` as the canonical first-party namespace and treat first-party and third-party capability runtimes as the same runtime artifact type.
+    - Add/update tests covering first-party runtime resolution, installation, artifact verification, backend startup, and execution through the normal capability-runtime path.

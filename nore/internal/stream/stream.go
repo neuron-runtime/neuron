@@ -24,11 +24,23 @@ type Message struct {
 	Payload       json.RawMessage
 }
 
+// reconcileInterval is how often a live stream re-reads persisted history while
+// it waits for events.
+const reconcileInterval = 25 * time.Millisecond
+
 // Subscribe delivers every event for the execution: persisted history first
 // (with an optional resume cursor), then live bus events. Events already
-// delivered via history are skipped when they also arrive live, so clients
-// see each event exactly once. The returned channel is closed when ctx ends
-// or the subscription is released.
+// delivered are skipped when they arrive again from the other source, so
+// clients see each event exactly once. The returned channel is closed when ctx
+// ends or the subscription is released.
+//
+// History is not a one-time snapshot. The bus hands an event to the persister
+// and to live subscribers independently, so an event published just before a
+// consumer subscribes can still be missing from the store when the first
+// history read happens. That event is then visible to neither the subscription
+// nor the snapshot, and a consumer waiting for the terminal event waits
+// forever. The stream therefore reconciles with the store while it is live
+// rather than trusting the initial snapshot.
 func Subscribe(ctx context.Context, bus *event.Bus, store *event.Store, executionID core.ID, after core.ID) (<-chan Message, error) {
 	if store == nil {
 		return nil, fmt.Errorf("event store is required")
@@ -41,21 +53,51 @@ func Subscribe(ctx context.Context, bus *event.Bus, store *event.Store, executio
 	go func() {
 		defer close(out)
 		live := subscribeLive(ctx, bus, executionID)
-
-		delivered := make(map[core.ID]struct{})
-		history, err := store.ListAfter(ctx, executionID, after)
-		if err == nil {
-			for _, evt := range history {
-				delivered[evt.Metadata.EventID] = struct{}{}
-				if !emit(ctx, out, normalize(evt)) {
-					return
-				}
-			}
+		if live != nil {
+			defer func() { _ = live.Close() }()
 		}
 
+		cursor := after
+		delivered := make(map[core.ID]struct{})
+
+		// emitOnce delivers evt unless it was already delivered, and reports
+		// whether the stream may continue.
+		emitOnce := func(evt event.Event) bool {
+			if _, seen := delivered[evt.Metadata.EventID]; seen {
+				return true
+			}
+			delivered[evt.Metadata.EventID] = struct{}{}
+			return emit(ctx, out, normalize(evt))
+		}
+
+		// reconcile emits everything the store has gained since the last read.
+		// A failed read is not fatal: live events are still delivered, and the
+		// next read retries.
+		reconcile := func() bool {
+			history, err := store.ListAfter(ctx, executionID, cursor)
+			if err != nil {
+				return true
+			}
+			for _, evt := range history {
+				if !emitOnce(evt) {
+					return false
+				}
+				cursor = evt.Metadata.EventID
+			}
+			return true
+		}
+
+		if !reconcile() {
+			return
+		}
 		if live == nil {
 			return
 		}
+
+		tick := time.NewTicker(reconcileInterval)
+		defer tick.Stop()
+		settled := false
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -64,10 +106,20 @@ func Subscribe(ctx context.Context, bus *event.Bus, store *event.Store, executio
 				if !ok {
 					return
 				}
-				if _, seen := delivered[evt.Metadata.EventID]; seen {
+				if !emitOnce(evt) {
+					return
+				}
+				settled = settled || evt.Type.IsTerminal()
+				if !reconcile() {
+					return
+				}
+			case <-tick.C:
+				// Once the terminal event is out there is nothing left to wait
+				// for, so stop polling the store for a finished execution.
+				if settled {
 					continue
 				}
-				if !emit(ctx, out, normalize(evt)) {
+				if !reconcile() {
 					return
 				}
 			}

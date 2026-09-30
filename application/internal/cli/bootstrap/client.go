@@ -31,14 +31,20 @@ type Options struct {
 func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), error) {
 	cfg := opts.Config
 
-	var conn connection.Connection
+	var (
+		conn  connection.Connection
+		local *connection.Local
+	)
 
 	if cfg.Daemon.Endpoint != "" {
-		// Use HTTP for remote execution (No daemon needed)
-		conn = connection.New(connection.NewHTTPTransport(nil, cfg.Daemon.Endpoint))
+		// Use HTTP for remote execution (No daemon needed). The remote
+		// constructor is the single place that resolves the API credential, so
+		// it is used here rather than assembling a transport by hand.
+		conn = connection.NewRemote(cfg.Daemon.Endpoint)
 	} else {
 		// Use Unix Socket for local execution
-		conn = connection.New(connection.NewLocal(cfg.Daemon.Socket))
+		local = connection.NewLocal(cfg.Daemon.Socket)
+		conn = local
 	}
 
 	dCfg := daemon.ConfigFromEffective(cfg)
@@ -58,6 +64,14 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 	if err := rtManager.Ensure(ctx, cfg.Daemon.Endpoint != ""); err != nil {
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("failed to ensure N.O.R.E runtime: %w", err)
+	}
+
+	// A daemon generates its API token when it starts, so a client that
+	// connected before the daemon was running has no credential to present yet.
+	// Resolving it after the daemon is up keeps the first command after a cold
+	// start from being rejected as unauthenticated.
+	if local != nil {
+		local.LoadAPIToken()
 	}
 
 	// Create the Client SDK to return to the CLI command

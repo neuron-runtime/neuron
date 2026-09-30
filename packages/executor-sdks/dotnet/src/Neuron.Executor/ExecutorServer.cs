@@ -9,15 +9,15 @@ namespace Neuron.Executor;
 /// <remarks>
 /// <para>
 /// Executors run as long-lived worker processes. The N.O.R.E. process runtime
-/// launches the binary with a Unix socket path in <c>NEURON_EXECUTOR_SOCKET</c>,
-/// waits for the ready file named in <c>NEURON_EXECUTOR_READY</c>, performs the
+/// launches the binary with a Unix socket path in <c>NEURON_CAPABILITY_RUNTIME_SOCKET</c>,
+/// waits for the ready file named in <c>NEURON_CAPABILITY_RUNTIME_READY</c>, performs the
 /// Initialize handshake, leases executions, and finally requests graceful
 /// termination with Shutdown.
 /// </para>
 /// <para>
 /// This SDK implements the <c>neuron/capability-runtime-v1</c> gRPC transport only. The
 /// legacy <c>neuron/capability-runtime-v1-json</c> stdin/stdout transport is deliberately
-/// not provided; attempting to run without <c>NEURON_EXECUTOR_SOCKET</c> or with
+/// not provided; attempting to run without <c>NEURON_CAPABILITY_RUNTIME_SOCKET</c> or with
 /// an unsupported declared protocol fails fast with an explicit error.
 /// </para>
 /// </remarks>

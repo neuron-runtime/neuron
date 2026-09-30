@@ -3,7 +3,7 @@ namespace Neuron.Executor;
 /// <summary>
 /// Thrown when the executor process environment does not satisfy the
 /// <c>neuron/capability-runtime-v1</c> transport contract, for example when it is
-/// launched without <c>NEURON_EXECUTOR_SOCKET</c>.
+/// launched without <c>NEURON_CAPABILITY_RUNTIME_SOCKET</c>.
 /// </summary>
 public sealed class ExecutorConfigurationException : Exception
 {

@@ -4,9 +4,9 @@ public class HandlerValidationTests : IDisposable
 {
     private static readonly string[] EscapedVariables =
     {
-        "NEURON_EXECUTOR_SOCKET",
-        "NEURON_EXECUTOR_READY",
-        "NEURON_EXECUTOR_PROTOCOL",
+        ExecutorConstants.EnvSocket,
+        ExecutorConstants.EnvReady,
+        ExecutorConstants.EnvProtocol,
     };
 
     public void Dispose()
@@ -39,7 +39,7 @@ public class HandlerValidationTests : IDisposable
             Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult()),
         };
 
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", null);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvSocket, null);
 
         await Assert.ThrowsAsync<ExecutorConfigurationException>(() => ExecutorServer.RunAsync(handler));
     }
@@ -53,8 +53,8 @@ public class HandlerValidationTests : IDisposable
             Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult()),
         };
 
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", "/tmp/neuron-test.sock");
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", "neuron/capability-runtime-v1-json");
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvSocket, "/tmp/neuron-test.sock");
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvProtocol, "neuron/capability-runtime-v1-json");
 
         await Assert.ThrowsAsync<ExecutorConfigurationException>(() => ExecutorServer.RunAsync(handler));
     }
@@ -72,9 +72,9 @@ public class HandlerValidationTests : IDisposable
             Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult()),
         };
 
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_SOCKET", socket);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_READY", ready);
-        Environment.SetEnvironmentVariable("NEURON_EXECUTOR_PROTOCOL", null);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvSocket, socket);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvReady, ready);
+        Environment.SetEnvironmentVariable(ExecutorConstants.EnvProtocol, null);
 
         using var cts = new CancellationTokenSource();
         var task = ExecutorServer.RunAsync(handler, cts.Token);

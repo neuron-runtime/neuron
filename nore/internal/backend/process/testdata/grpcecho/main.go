@@ -13,6 +13,7 @@ import (
 	"os"
 
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"google.golang.org/grpc"
 )
 
@@ -57,7 +58,7 @@ func main() {
 	flag.Parse()
 	addr := *socket
 	if addr == "" {
-		addr = os.Getenv("NEURON_CAPABILITY_RUNTIME_SOCKET")
+		addr = os.Getenv(capabilityrt.EnvSocket)
 	}
 	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
 		log.Fatalf("remove socket: %v", err)
@@ -66,7 +67,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
-	if ready := os.Getenv("NEURON_CAPABILITY_RUNTIME_READY"); ready != "" {
+	if ready := os.Getenv(capabilityrt.EnvReady); ready != "" {
 		if err := os.WriteFile(ready, []byte("ready"), 0o644); err != nil {
 			log.Fatalf("write ready: %v", err)
 		}

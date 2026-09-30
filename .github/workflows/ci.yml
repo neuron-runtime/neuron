@@ -33,11 +33,48 @@ jobs:
       - name: Vet
         run: go vet ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/...
 
+      # -race is not optional here. The runtime owns long-lived gRPC worker
+      # pools with shared maps and a process-wide WASM compiled-module cache,
+      # which is exactly the shape the race detector exists to catch.
       - name: Test
-        run: go test ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/...
+        run: go test -race ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/...
 
       - name: Build
         run: go build ./nore/... ./application/... ./shared/... ./packages/executor-sdks/golang/...
+
+  module-integrity:
+    name: Module integrity (outside the workspace)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      # The go.work file silently substitutes the local shared module for the
+      # declared requirement, so every workspace-mode build passes even when
+      # go.sum cannot be verified. Building each module with GOWORK=off is the
+      # only check that actually exercises module resolution and checksums.
+      - name: Build each module standalone
+        run: |
+          set -euo pipefail
+          for module in shared application nore packages/executor-sdks/golang; do
+            echo "::group::GOWORK=off go build ./... ($module)"
+            (cd "$module" && GOWORK=off go build ./...)
+            echo "::endgroup::"
+          done
+
+      - name: Verify module files are tidy
+        run: |
+          set -euo pipefail
+          for module in shared application nore packages/executor-sdks/golang; do
+            echo "::group::go mod tidy is a no-op ($module)"
+            (cd "$module" && GOWORK=off go mod tidy && git diff --exit-code -- go.mod go.sum)
+            echo "::endgroup::"
+          done
 
   sdk:
     name: TypeScript SDK

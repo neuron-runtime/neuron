@@ -3,6 +3,10 @@ syntax = "proto3";
 package neuron.capability_runtime.v1;
 
 option go_package = "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1";
+// Pins the generated C# namespace so the .NET executor SDK and generated code
+// agree. Without it protoc derives one from the proto package, which produced
+// names the SDK does not reference.
+option csharp_namespace = "Neuron.Executor.Protocol.V1";
 
 // CapabilityRuntimeService is the gRPC contract that capability runtime
 // processes implement. N.O.R.E. acts as the client; the capability runtime

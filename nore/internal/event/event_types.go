@@ -17,6 +17,18 @@ const (
 
 const All Type = 0xffff
 
+// IsTerminal reports whether the type ends an execution. A terminal event is
+// the last event an execution produces, so consumers that only wait for the
+// outcome of an execution can stop once one has been delivered.
+func (t Type) IsTerminal() bool {
+	switch t {
+	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (t Type) String() string {
 	switch t {
 	case ExecutionStarted:

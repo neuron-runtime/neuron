@@ -1,4 +1,4 @@
-package utils
+package render
 
 import (
 	"fmt"
@@ -10,8 +10,9 @@ import (
 	"golang.org/x/term"
 )
 
-// Column defines the configuration for a table column, including its header title
-// and optional width. If width is 0, the width is dynamically computed.
+// Column defines the configuration for a table column, including its header
+// title and an optional fixed width. A width of 0 lets the renderer derive the
+// width from the cell contents and the available terminal space.
 type Column struct {
 	Title string
 	Width int
@@ -27,7 +28,9 @@ type TableOptions struct {
 	MaxTotalWidth int
 }
 
-// DefaultTableOptions returns the standard modern color palette and full-width settings.
+// DefaultTableOptions returns the shared table styling. Colours are the CLI
+// palette and are intentionally not configurable; the table is presentation,
+// not part of any contract.
 func DefaultTableOptions() TableOptions {
 	return TableOptions{
 		BorderColor:   "#3F3F46",
@@ -38,7 +41,8 @@ func DefaultTableOptions() TableOptions {
 	}
 }
 
-// RenderTable renders a modern, responsive table to the provided writer.
+// RenderTable writes a bordered table to out, sized to the terminal when one is
+// attached and to a conservative default when output is piped or redirected.
 func RenderTable(out io.Writer, columns []Column, rows [][]string, opts TableOptions) error {
 	if len(columns) == 0 {
 		return fmt.Errorf("table must have at least one column")
@@ -114,8 +118,7 @@ func RenderTable(out io.Writer, columns []Column, rows [][]string, opts TableOpt
 		}
 	}
 
-	borderColor := lipgloss.Color(opts.BorderColor)
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(opts.BorderColor))
 
 	baseHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -144,20 +147,19 @@ func RenderTable(out io.Writer, columns []Column, rows [][]string, opts TableOpt
 
 	var topSep []string
 	for _, w := range colWidths {
-		topSep = append(topSep, repeatStr("─", w))
+		topSep = append(topSep, strings.Repeat("─", w))
 	}
 	renderedTable.WriteString(borderStyle.Render("╭") + borderStyle.Render(strings.Join(topSep, "┬")) + borderStyle.Render("╮") + "\n")
 
 	var headerCells []string
 	for i, col := range columns {
-		w := colWidths[i]
-		headerCells = append(headerCells, baseHeaderStyle.Width(w).Render(col.Title))
+		headerCells = append(headerCells, baseHeaderStyle.Width(colWidths[i]).Render(col.Title))
 	}
 	renderedTable.WriteString(borderStyle.Render("│") + lipgloss.JoinHorizontal(lipgloss.Top, joinRunes(headerCells, borderStyle.Render("│"))...) + borderStyle.Render("│") + "\n")
 
 	var midSep []string
 	for _, w := range colWidths {
-		midSep = append(midSep, repeatStr("─", w))
+		midSep = append(midSep, strings.Repeat("─", w))
 	}
 	renderedTable.WriteString(borderStyle.Render("├") + borderStyle.Render(strings.Join(midSep, "┼")) + borderStyle.Render("┤") + "\n")
 
@@ -182,7 +184,7 @@ func RenderTable(out io.Writer, columns []Column, rows [][]string, opts TableOpt
 
 	var botSep []string
 	for _, w := range colWidths {
-		botSep = append(botSep, repeatStr("─", w))
+		botSep = append(botSep, strings.Repeat("─", w))
 	}
 	renderedTable.WriteString(borderStyle.Render("╰") + borderStyle.Render(strings.Join(botSep, "┴")) + borderStyle.Render("╯") + "\n")
 
@@ -190,10 +192,8 @@ func RenderTable(out io.Writer, columns []Column, rows [][]string, opts TableOpt
 	return err
 }
 
-func repeatStr(s string, count int) string {
-	return strings.Repeat(s, count)
-}
-
+// joinRunes interleaves sep between parts, producing the cell and separator
+// sequence that lipgloss.JoinHorizontal expects.
 func joinRunes(parts []string, sep string) []string {
 	var result []string
 	for i, p := range parts {

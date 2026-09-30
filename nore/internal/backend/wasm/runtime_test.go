@@ -155,9 +155,22 @@ func TestTimesOut(t *testing.T) {
 	}
 	defer inst.Close(context.Background())
 
+	// Cold start is deliberately outside the execution deadline: compiling and
+	// instantiating a module is once-per-module setup shared by every instance,
+	// and a large module can take seconds to compile. It is bounded separately
+	// by compileTimeout, so warm the module here and assert that bound rather
+	// than folding compile latency into the execution-timeout assertion below.
+	start := time.Now()
+	if _, err := inst.(*instance).compiledModule(context.Background()); err != nil {
+		t.Fatalf("compile module: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > compileTimeout {
+		t.Errorf("cold start took %v, exceeding compileTimeout %v", elapsed, compileTimeout)
+	}
+
 	inst.(*instance).SetTimeout(300 * time.Millisecond)
 
-	start := time.Now()
+	start = time.Now()
 	_, err = inst.Execute(context.Background(), &capabilityrt.Request{Params: map[string]any{"value": "x"}})
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -165,8 +178,47 @@ func TestTimesOut(t *testing.T) {
 	if !bytes.Contains([]byte(err.Error()), []byte("timed out")) {
 		t.Errorf("error = %q, want timed out", err)
 	}
+	// A 300ms budget must interrupt a runaway module promptly, not merely
+	// eventually.
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("timeout took too long: %v", elapsed)
+	}
+}
+
+// TestCallerDeadlineShortensExecution verifies that a caller can always tighten
+// the execution budget: the effective timeout is the smaller of the instance
+// configuration and whatever remains on the caller's own deadline.
+func TestCallerDeadlineShortensExecution(t *testing.T) {
+	rt, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately no rt.Close: the Backend wraps the process-global wazero
+	// runtime, so closing it would tear down WASM support for every later test
+	// in this binary. TestMain closes the shared runtime exactly once at exit.
+
+	inst, err := rt.Start(context.Background(), newSpec("example:spin", fixtures.spin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close(context.Background())
+
+	if _, err := inst.(*instance).compiledModule(context.Background()); err != nil {
+		t.Fatalf("compile module: %v", err)
+	}
+
+	// Instance budget is deliberately longer than the caller's deadline.
+	inst.(*instance).SetTimeout(10 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if _, err := inst.Execute(ctx, &capabilityrt.Request{Params: map[string]any{"value": "x"}}); err == nil {
+		t.Fatal("expected the caller's deadline to end the execution")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("caller deadline took too long to apply: %v", elapsed)
 	}
 }
 

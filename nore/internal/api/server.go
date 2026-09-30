@@ -14,28 +14,38 @@ import (
 )
 
 type Server struct {
+	// handler is the fully wrapped request chain built by routes.BuildRoutes,
+	// including logging, panic recovery, and token authentication. The bare mux
+	// is not served: the middleware is part of the server's contract, not an
+	// optional layer.
+	handler   http.Handler
 	mux       *http.ServeMux
 	instances *instance.Manager
 }
 
-func NewServer(inst *instance.Manager, assemblies *assembly.Repository, compiler *planner.Compiler) *Server {
+// NewServer builds a server. The token authenticates every API request that is
+// not the health probe; an empty token leaves the API unauthenticated, which
+// the daemon permits only for a socket-scoped listener and refuses for TCP.
+func NewServer(inst *instance.Manager, assemblies *assembly.Repository, compiler *planner.Compiler, token string) *Server {
 	s := &Server{
 		mux:       http.NewServeMux(),
 		instances: inst,
 	}
 
-	routes.BuildRoutes(s.mux, s.instances, assemblies, compiler)
+	s.handler = routes.BuildRoutes(s.mux, s.instances, assemblies, compiler, token)
 
 	return s
 }
 
+// Handler returns the wrapped request chain, so an in-process consumer sees the
+// same logging, recovery, and authentication as a network client.
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.handler
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	httpServer := &http.Server{
-		Handler:           s.mux,
+		Handler:           s.handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

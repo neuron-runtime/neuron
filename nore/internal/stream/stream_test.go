@@ -137,6 +137,61 @@ func TestSubscribeResumesFromCursorWithoutBus(t *testing.T) {
 	}
 }
 
+func TestSubscribeReconcilesEventsPersistedAfterSubscription(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := event.NewBus()
+	store := newTestStore(t)
+	execID := core.NewID("exec_")
+
+	// A fast execution finishes before the consumer can subscribe. The bus
+	// hands every event to the persister and to live subscribers separately, so
+	// at subscription time the store may hold only part of the sequence. An
+	// event that is published but not yet persisted is visible to neither the
+	// subscription nor the initial history read.
+	started := event.New(event.ExecutionStarted, execID, "corr", "", event.ExecutionStartedPayload{})
+	ready := event.New(event.CapabilityReady, execID, "corr", "svc", event.CapabilityReadyPayload{})
+	completed := event.New(event.ExecutionCompleted, execID, "corr", "", event.ExecutionCompletedPayload{})
+
+	for _, evt := range []event.Event{started, ready, completed} {
+		if err := bus.Publish(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Save(ctx, started); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := Subscribe(ctx, bus, store, execID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg := <-events; msg.EventID != started.Metadata.EventID {
+		t.Fatalf("expected persisted event %s, got %s", started.Metadata.EventID, msg.EventID)
+	}
+
+	// The persister catches up. Nothing is published on the bus, so only a
+	// stream that reconciles with the store can deliver these.
+	if err := store.Save(ctx, ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, completed); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []event.Event{ready, completed} {
+		select {
+		case msg := <-events:
+			if msg.EventID != want.Metadata.EventID {
+				t.Fatalf("expected %s (%s), got %s (%s)", want.Metadata.EventID, want.Type, msg.EventID, msg.Type)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s (%s)", want.Metadata.EventID, want.Type)
+		}
+	}
+}
+
 func TestSubscribeRequiresExecutionID(t *testing.T) {
 	store := newTestStore(t)
 	if _, err := Subscribe(context.Background(), event.NewBus(), store, "", ""); err == nil {

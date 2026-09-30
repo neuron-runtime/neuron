@@ -6,9 +6,11 @@ import (
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 )
 
-// defaultExecutionTimeout is the maximum time an execution may run when the
-// caller context has no deadline. The runtime enforces this as a defensive
-// bound against runaway capability runtimes.
+// defaultExecutionTimeout is the maximum time a single capability execution may
+// run when the caller context has no deadline of its own. The runtime enforces
+// this as a defensive bound: a capability runtime that hangs must not be able to
+// hold a pooled worker forever, because with a small pool that would serialise
+// every other capability in the instance behind the stuck one.
 func defaultExecutionTimeout() time.Duration {
 	return 10 * time.Minute
 }

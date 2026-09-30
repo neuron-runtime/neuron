@@ -258,8 +258,8 @@ The runtime therefore never resolves anything — it receives a closed set of fr
 
 N.O.R.E. hosts external modules out-of-process. The runtime dispatches on `runtime.type`:
 
-- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [docs/RUNTIME_PROCESS.md](./RUNTIME_PROCESS.md).
-- **WASM runtime** — a WASI module loaded into an embedded, sandboxed runtime, with a fresh module instance per request. See [docs/RUNTIME_WASM.md](./RUNTIME_WASM.md).
+- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [the process runtime](./ARCHITECTURE.md#the-process-runtime).
+- **WASM runtime** — a WASI module loaded into an embedded, sandboxed runtime, with a fresh module instance per request. See [the WASM runtime](./ARCHITECTURE.md#the-wasm-runtime).
 
 The runtime never assumes an implementation language. The contract is the frozen resolved-capability-runtime record (runtime type, protocol, entrypoint, exact version) plus the declared wire protocol.
 
@@ -404,4 +404,4 @@ N.O.R.E. ships a small set of built-in modules for common operations. They run *
 
 The external-module ecosystem — GitHub-based resolution, catalogs, and published distribution — is **experimental** in this release and may change. The local registry, the archive contract, the manifest schema, and the process/WASM runtimes are stable enough to build and test against today.
 
-See [docs/STATUS.md](./STATUS.md) for the full surface classification.
+See [Project Status](../README.md#project-status) in the repository README for the full surface classification.

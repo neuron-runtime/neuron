@@ -6,13 +6,13 @@ A capability runtime is a program that exposes the Neuron execution contract: an
 
 ```mermaid
 flowchart LR
-    S[Neuron Capability<br/>content.extract] --> C[Capability Runtime Contract<br/>executor.json]
+    S[Neuron Capability<br/>content.extract] --> C[Capability Runtime Contract<br/>runtime.json]
     C --> D[.NET Capability Runtime<br/>Handler + ExecutorServer]
     D --> P[Process Runtime<br/>gRPC worker]
 ```
 
 [.NET 10](https://dotnet.microsoft.com)
-[License](../../LICENSE)
+[License](../../../LICENSE)
 
 ---
 
@@ -33,7 +33,7 @@ Requirements:
 
 This SDK implements the **`neuron/capability-runtime-v1`** wire protocol only: a long-lived gRPC server on a Unix domain socket, matching the worker model of the N.O.R.E. process runtime.
 
-The legacy `neuron/capability-runtime-v1-json` stdin/stdout transport is deliberately **not** provided. A capability runtime built with this SDK must be launched by the process runtime (the runtime injects `NEURON_EXECUTOR_SOCKET`); the SDK fails fast if that contract is missing.
+The legacy `neuron/capability-runtime-v1-json` stdin/stdout transport is deliberately **not** provided. A capability runtime built with this SDK must be launched by the process runtime (the runtime injects `NEURON_CAPABILITY_RUNTIME_SOCKET`); the SDK fails fast if that contract is missing.
 
 ---
 
@@ -138,11 +138,11 @@ The SDK reads its transport contract from the environment injected by the N.O.R.
 
 | Variable                   | When set / meaning                                                                                   |
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `NEURON_EXECUTOR_SOCKET`   | Path of the Unix domain socket where the gRPC server must listen. **Required.**                      |
-| `NEURON_EXECUTOR_READY`    | Path of a file to create once the server is accepting connections (the launcher waits for this file) |
-| `NEURON_EXECUTOR_PROTOCOL` | The protocol the runtime expects; the SDK verifies it matches `neuron/capability-runtime-v1`              |
-| `NEURON_EXECUTOR_TYPE`     | The logical capability runtime type, e.g. `content:document-metadata` (informational)                |
-| `NEURON_EXECUTOR_VERSION`  | The resolved capability runtime version (informational)                                             |
+| `NEURON_CAPABILITY_RUNTIME_SOCKET`   | Path of the Unix domain socket where the gRPC server must listen. **Required.**                      |
+| `NEURON_CAPABILITY_RUNTIME_READY`    | Path of a file to create once the server is accepting connections (the launcher waits for this file) |
+| `NEURON_CAPABILITY_RUNTIME_PROTOCOL` | The protocol the runtime expects; the SDK verifies it matches `neuron/capability-runtime-v1`              |
+| `NEURON_CAPABILITY_RUNTIME_TYPE`     | The logical capability runtime type, e.g. `content:document-metadata` (informational)                |
+| `NEURON_CAPABILITY_RUNTIME_VERSION`  | The resolved capability runtime version (informational)                                             |
 
 The SDK cleans up a stale socket file from a crashed process before listening, so a restart never fails because an old socket file is still present.
 
@@ -179,12 +179,12 @@ The gRPC contract lives once in `shared/protocol/capabilityruntime/v1/capability
 | Resource           | Path                                                     |
 | ------------------ | -------------------------------------------------------- |
 | Implementation     | `packages/executor-sdks/dotnet/`                              |
-| Go SDK (parity)    | [packages/executor-sdks/golang](../../packages/executor-sdks/golang/README.md) |
+| Go SDK (parity)    | [packages/executor-sdks/golang](../../../packages/executor-sdks/golang/README.md) |
 | gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
 | Contract types     | `shared/types/capabilityruntime`                                  |
-| Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |
-| Capability runtime model | [docs/MODULES.md](../../docs/MODULES.md)            |
+| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-runtime) |
+| Capability runtime model | [docs/MODULES.md](../../../docs/MODULES.md)            |
 
 ## License
 
-MIT — see the repository `[LICENSE](../../LICENSE)` for terms.
+MIT — see the repository `[LICENSE](../../../LICENSE)` for terms.
