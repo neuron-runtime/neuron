@@ -578,8 +578,7 @@ The release pipeline passes the release version through `-ldflags` so `neuron ve
 | **Getting started**     | Run your first assembly — [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)             |
 | **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](../docs/INSTALLATION.md) |
 | **Modules & capability runtimes** | The unified module model — [docs/MODULES.md](../docs/MODULES.md)                    |
-| **N.O.R.E.**            | The runtime engine in depth — [nore/README.md](../nore/README.md)                           |
-| **Architecture**        | Canonical pipeline and boundaries — [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)         |
+| **Architecture**        | Canonical pipeline, boundaries, and the runtime engine in depth — [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) |
 
 
 

@@ -6,7 +6,7 @@ A capability runtime is a program that exposes the Neuron execution contract: an
 
 ```mermaid
 flowchart LR
-    S[Neuron Capability<br/>content.document-metadata] --> C[Capability Runtime Contract<br/>executor.json]
+    S[Neuron Capability<br/>content.document-metadata] --> C[Capability Runtime Contract<br/>runtime.json]
     C --> G[Go Capability Runtime<br/>Handler + Serve]
     G --> P[Process Runtime<br/>gRPC worker]
     G --> W[WASM Runtime<br/>JSON over stdio]
@@ -15,7 +15,7 @@ flowchart LR
 
 
 [Go](https://go.dev)
-[License](../../LICENSE)
+[License](../../../LICENSE)
 
 ---
 
@@ -44,7 +44,7 @@ The same Go source works in both execution modes N.O.R.E. supports, selected aut
 - as a **long-lived gRPC worker** speaking `neuron/capability-runtime-v1` over a Unix domain socket, and
 - as a **one-shot command** speaking `neuron/capability-runtime-v1-json` on stdin/stdout.
 
-You never select the mode yourself. Write the capability runtime once, declare it once in `executor.json`, and the same source serves the `process` and `wasm` runtime backends — see [One source, two runtimes](#one-source-two-runtimes).
+You never select the mode yourself. Write the capability runtime once, declare it once in `runtime.json`, and the same source serves the `process` and `wasm` runtime backends — see [One source, two runtimes](#one-source-two-runtimes).
 
 ---
 
@@ -305,10 +305,9 @@ Two manifests, one pair of binaries. The process binary declares the gRPC protoc
 ```json
 {
   "apiVersion": "neuron/v1",
-  "kind": "Executor",
+  "kind": "CapabilityRuntime",
   "metadata": { "name": "content:document-metadata", "version": "1.0.0" },
   "runtime": { "type": "process", "entrypoint": "document-metadata", "protocol": "neuron/capability-runtime-v1" },
-  "services": ["content:document-metadata"],
   "capabilities": ["document.metadata.extract"],
   "platforms": { "linux-amd64": { "artifact": "document-metadata", "sha256": "..." } }
 }
@@ -317,10 +316,9 @@ Two manifests, one pair of binaries. The process binary declares the gRPC protoc
 ```json
 {
   "apiVersion": "neuron/v1",
-  "kind": "Executor",
+  "kind": "CapabilityRuntime",
   "metadata": { "name": "content:document-metadata", "version": "1.0.0" },
   "runtime": { "type": "wasm", "entrypoint": "document-metadata.wasm", "protocol": "neuron/capability-runtime-v1-json" },
-  "services": ["content:document-metadata"],
   "capabilities": ["document.metadata.extract"],
   "platforms": { "wasm32-wasi": { "artifact": "document-metadata.wasm" } }
 }
@@ -329,7 +327,7 @@ Two manifests, one pair of binaries. The process binary declares the gRPC protoc
 > [!NOTE]
 > `capabilities` describes what the capability runtime *claims* to provide; it is metadata, not permission. Actual permissions are enforced by the runtime at the execution boundary.
 
-To distribute both artifacts as one versioned unit, pack each pair into a canonical capability runtime package archive (`<name>-<version>-capability-runtime.neuron.tar.gz`: `executor.json` plus the platform artifact at the archive root). Registries prefer the archive over per-platform assets and reconcile the inner manifest at install time.
+To distribute both artifacts as one versioned unit, pack each pair into a canonical capability runtime package archive (`<name>-<version>-capability-runtime.neuron.tar.gz`: `runtime.json` plus the platform artifact at the archive root). Registries prefer the archive over per-platform assets and reconcile the inner manifest at install time.
 
 ---
 
@@ -372,9 +370,9 @@ The two declared protocols are language-neutral:
 | Implementation     | `packages/executor-sdks/golang/`                                  |
 | gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
 | Contract types     | `shared/types/capabilityruntime`                                  |
-| Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |
-| WASM runtime       | [docs/RUNTIME_WASM.md](../../docs/RUNTIME_WASM.md)       |
-| Capability runtime model | [docs/MODULES.md](../../docs/MODULES.md)            |
+| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-runtime) |
+| WASM runtime       | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-wasm-runtime)     |
+| Capability runtime model | [docs/MODULES.md](../../../docs/MODULES.md)            |
 | Reference capability runtime | `examples/capability-runtimes/echo` (single source, native + WASI) |
 
 
@@ -382,4 +380,4 @@ The two declared protocols are language-neutral:
 
 ## License
 
-MIT — see the repository `[LICENSE](../../LICENSE)` for terms.
+MIT — see the repository `[LICENSE](../../../LICENSE)` for terms.

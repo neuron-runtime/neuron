@@ -281,7 +281,7 @@ A Capability is the logical unit. A **Capability Runtime** is the machinery that
 - **Built-in modules** — shipped inside N.O.R.E., run in-process, require no resolution or installation (for example `neuron:core:set`).
 - **External modules (capability runtimes)** — authored, packaged, distributed, and hosted independently. N.O.R.E. resolves them, verifies them, installs them immutably, and executes them out-of-process as native processes or WebAssembly modules.
 
-External modules share one unified contract: an `executor.json` manifest (identity, runtime type, protocol, platforms), a canonical package archive, and a declared wire protocol (`neuron/capability-runtime-v1` over gRPC, or `neuron/capability-runtime-v1-json` over stdio).
+External modules share one unified contract: a `runtime.json` manifest (identity, runtime type, protocol, platforms), a canonical package archive, and a declared wire protocol (`neuron/capability-runtime-v1` over gRPC, or `neuron/capability-runtime-v1-json` over stdio).
 
 ```mermaid
 flowchart LR
@@ -340,16 +340,13 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 |                         |                                                                                                            |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **Getting started**     | Build and run your first Assembly in TypeScript — [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md)       |
-| **Architecture**        | The canonical pipeline and the boundaries that never blur — [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
+| **Architecture**        | The canonical pipeline, the boundaries that never blur, and how N.O.R.E. executes — [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
 | **Modules & capability runtimes** | The unified module model, packaging, resolution, and protocol — [docs/MODULES.md](./docs/MODULES.md)       |
-| **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
-| **Releasing**           | How each artifact is published, and the one-time registry setup — [docs/RELEASING.md](./docs/RELEASING.md) |
+| **Installation**        | Official release and from-source installs, plus how each artifact is released — [docs/INSTALLATION.md](./docs/INSTALLATION.md)                 |
 | **TypeScript SDK**      | Define assemblies as typed, composable capabilities — [packages/assembly-sdks/typescript/README.md](./packages/assembly-sdks/typescript/README.md)      |
 | **Go executor SDK**     | Build production capability runtimes — [packages/executor-sdks/golang/README.md](./packages/executor-sdks/golang/README.md)            |
 | **.NET executor SDK**  | Build production capability runtimes with C#/.NET — [packages/executor-sdks/dotnet/README.md](./packages/executor-sdks/dotnet/README.md) |
 | **CLI reference**       | Every `neuron` command and flag — [application/README.md](./application/README.md)                         |
-| **N.O.R.E.**            | The runtime engine in depth (maintainer-focused) — [nore/README.md](./nore/README.md)                      |
-| **Status**              | What is available, experimental, and planned — [docs/STATUS.md](./docs/STATUS.md)                          |
 
 
 
@@ -381,14 +378,48 @@ See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for the complete guide, inclu
 
 **Version** `0.1.0` — first public development release. The core is implemented and deliberately structured for long-term growth; everything is still subject to change until 1.0.
 
-- **Working today:** the `neuron` CLI, assembly definition in TypeScript and YAML, compilation and registration, N.O.R.E., built-in modules, external modules hosted as processes or WebAssembly, instances, and execution with live event streaming.
-- **Experimental:** the external module ecosystem, GitHub-based module resolution, and several runtime refinements.
-- **Planned:** runtime hardening (API authentication, resource limits, retention policies), broader module distribution, and additional execution models.
+```mermaid
+flowchart LR
+    A[Available<br/>implemented + tested] --> B[Experimental<br/>works, not hardened]
+    B --> C[Planned<br/>designed, not shipped]
+```
+
+### Available
+
+Implemented, tested, and intended to work in 0.1.0.
+
+| Area | Surface |
+| --- | --- |
+| **CLI** | `init`, `build`, `run` (live event streaming over WebSocket with an SSE fallback), `add` / `remove`, `capability runtime list` / `inspect`, `instance list` / `remove` / `clear`, `daemon stop`, `version` — plus global configuration and `NEURON_*` environment overrides |
+| **Authoring** | Full YAML authoring (the canonical, zero-tooling surface) and the `@neuron/sdk` typed TypeScript surface, converging on the same canonical manifest |
+| **Runtime** | Registration of compiled assemblies with a frozen, resolved capability runtime set; instances (create, list, remove, clear) with restoration on restart; execution planning, scheduling, CEL mappings and validations, cancellation, deadlines, and terminal execution states; persisted and live-streamed events; built-in capability runtimes in-process; external capability runtimes out-of-process as process workers or WASM modules; graceful shutdown |
+| **Capability runtimes** | The unified module model with semantic-version resolution; `github` and `local` registries; canonical `<name>-<version>-capability-runtime.neuron.tar.gz` archives with digest verification; immutable installation into `~/.neuron/capabilityRuntimes`; both protocols (`neuron/capability-runtime-v1` over gRPC, `neuron/capability-runtime-v1-json` over stdio); the reference `example:echo` module compiled for both runtimes from one Go source |
+| **Security** | Unix-socket-only default transport, and API-token authentication on every route except the health probe |
+
+### Experimental
+
+Present and working, but not yet hardened or committed to:
+
+- **External capability runtime resolution over GitHub Releases** — the network path is functional, but the ecosystem and catalog conventions are early. The registry is catalog-driven: unlisted module names are not guessed at.
+- **WASM capability runtime backend** — functional, but performance and capability breadth are not yet fully characterized.
+- **Execution introspection** — executions are visible through `neuron instance list`; a dedicated inspection command and execution-history retention policies are not configurable yet.
+- **Runtime refinements** — concurrency behavior, worker-pool tuning, and restart semantics are still evolving.
+
+### Planned
+
+- **Runtime hardening** — TLS for the opt-in TCP endpoint (API token authentication is in place), per-capability-runtime resource limits, and stronger process isolation.
+- **Configurable execution-history retention** (`none | memory | local`).
+- **Concurrency backpressure** and request deadlines propagated end to end.
+- **Broader registry ecosystem** and published module distribution.
+- **Additional capability runtime backends** (container, remote).
+- **Stabilization of the public contracts** — SDK API, capability runtime protocol, canonical manifest, and CLI surface — for 1.0 compatibility guarantees.
 
 > [!NOTE]
-> The docs describe current behavior and architectural direction. Where a capability is designed for but not yet shipped — container/remote runtimes, TLS, execution-retention policies — it is labeled as planned, not promised.
+> These docs describe current behavior and architectural direction. Where something is designed for but not yet shipped — container/remote runtimes, TLS, execution-retention policies — it is labeled as planned, not promised.
 
-See [docs/STATUS.md](./docs/STATUS.md) for the exact supported surface and [TODO.md](./TODO.md) for known work.
+### Versioning & compatibility
+
+The product version is `0.1.0`; `neuron version` reports it. The `@neuron/sdk` is versioned independently as `0.1.0` and is not yet published to a package registry; it is consumed from this repository. The public contracts — the SDK API, the capability runtime protocol, the canonical manifest, and the CLI surface — are under active development and may change without notice before 1.0.
 
 ## Roadmap
 

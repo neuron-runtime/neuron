@@ -279,12 +279,12 @@ This produces `examples/capability-runtimes/catalog/`, containing for each modul
 
 ```text
 catalog/example/echo/1.0.0/
-    executor.json                              module manifest
+    runtime.json                                capability runtime manifest
     echo                                       native binary (process runtime)
     example-echo-1.0.0-capability-runtime.neuron.tar.gz  canonical package archive
 ```
 
-`executor.json` declares identity, runtime type, protocol, and platform artifacts.
+`runtime.json` declares identity, runtime type, protocol, and platform artifacts.
 
 ### Register the catalog as a local registry
 
@@ -384,6 +384,6 @@ The execution launches the installed module **out-of-process**, passes your inpu
 | --- | --- |
 | **TypeScript SDK** | Every SDK feature in depth — [packages/assembly-sdks/typescript/README.md](../packages/assembly-sdks/typescript/README.md) |
 | **Modules & executors** | The unified module model, packaging, and authoring — [docs/MODULES.md](./MODULES.md) |
-| **Architecture** | How the platform is put together — [docs/ARCHITECTURE.md](./ARCHITECTURE.md) |
+| **Architecture** | How the platform is put together, and how N.O.R.E. executes — [docs/ARCHITECTURE.md](./ARCHITECTURE.md) |
 | **CLI reference** | Every `neuron` command and flag — [application/README.md](../application/README.md) |
-| **Status** | What is available, experimental, and planned — [docs/STATUS.md](./STATUS.md) |
+| **Status** | What is available, experimental, and planned — [README.md](../README.md#project-status) |
