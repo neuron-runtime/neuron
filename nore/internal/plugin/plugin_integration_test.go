@@ -259,7 +259,7 @@ func TestDecodeResolvedCapabilityRuntimesNil(t *testing.T) {
 
 func TestDecodeResolvedCapabilityRuntimesRoundTrip(t *testing.T) {
 	res := echoResolved(t, "example:echo", capabilityrt.RuntimeKindProcess)
-	payload := map[string]any{"resolved_capability_runtimes": []any{
+	payload := map[string]any{capabilityrt.ResolvedCapabilityRuntimesKey: []any{
 		map[string]any{
 			"type":             res.Type,
 			"requestedVersion": res.RequestedVersion,

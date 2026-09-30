@@ -2,6 +2,19 @@ package capabilityruntime
 
 import "path/filepath"
 
+// ResolvedCapabilityRuntimesKey is the wire key under which the frozen
+// capability runtime set travels in a registered assembly's execution
+// configurations.
+//
+// The execution configuration payload is produced by the CLI and consumed by
+// N.O.R.E., which are separate Go modules that agree only through this
+// package. The frozen set is therefore the one part of that payload that is a
+// cross-module contract, and its key must be declared once, here, instead of
+// being re-spelled in a hand-maintained mirror struct on either side. Both
+// modules pin this constant in tests: the producer asserts it marshals the key,
+// the consumer asserts it decodes the key.
+const ResolvedCapabilityRuntimesKey = "resolved_capabilityRuntimes"
+
 // RuntimeInfo is the runtime portion of a frozen resolved capability
 // runtime. It is duplicated from the package manifest so the deployment
 // carries everything required to launch the artifact without re-reading

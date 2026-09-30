@@ -24,16 +24,15 @@ import (
 	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
-// config stores frozen capability runtime specifications keyed by the logical
-// type.
-type config struct {
-	ResolvedCapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"resolved_capability_runtimes"`
-}
-
 // DecodeResolvedCapabilityRuntimes extracts the frozen capability runtime set
 // from the opaque ExecutionConfigurations payload stored on a
 // RegisteredAssembly. The payload is JSON-round-tripped so it works for both
 // typed values and values re-read from disk as map[string]any.
+//
+// Only the frozen set crosses the module boundary today; every other
+// configuration key stays opaque to the runtime. The key itself comes from
+// shared so the CLI that writes it and the runtime that reads it cannot drift
+// apart.
 func DecodeResolvedCapabilityRuntimes(payload any) ([]capabilityrt.ResolvedCapabilityRuntime, error) {
 	if payload == nil {
 		return nil, nil
@@ -44,11 +43,21 @@ func DecodeResolvedCapabilityRuntimes(payload any) ([]capabilityrt.ResolvedCapab
 		return nil, fmt.Errorf("marshal execution configurations: %w", err)
 	}
 
-	var cfg config
-	if err := json.Unmarshal(buf, &cfg); err != nil {
-		return nil, fmt.Errorf("decode resolved capability runtimes: %w", err)
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(buf, &envelope); err != nil {
+		return nil, fmt.Errorf("decode execution configurations: %w", err)
 	}
-	return cfg.ResolvedCapabilityRuntimes, nil
+
+	raw, ok := envelope[capabilityrt.ResolvedCapabilityRuntimesKey]
+	if !ok {
+		return nil, nil
+	}
+
+	var resolved []capabilityrt.ResolvedCapabilityRuntime
+	if err := json.Unmarshal(raw, &resolved); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", capabilityrt.ResolvedCapabilityRuntimesKey, err)
+	}
+	return resolved, nil
 }
 
 // sharedRuntimes provides the process-wide set of runtime backends. It is
