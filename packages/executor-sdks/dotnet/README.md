@@ -6,13 +6,13 @@ A capability runtime is a program that exposes the Neuron execution contract: an
 
 ```mermaid
 flowchart LR
-    S[Neuron Capability<br/>content.extract] --> C[Capability Runtime Contract<br/>executor.json]
+    S[Neuron Capability<br/>content.extract] --> C[Capability Runtime Contract<br/>runtime.json]
     C --> D[.NET Capability Runtime<br/>Handler + ExecutorServer]
     D --> P[Process Runtime<br/>gRPC worker]
 ```
 
 [.NET 10](https://dotnet.microsoft.com)
-[License](../../LICENSE)
+[License](../../../LICENSE)
 
 ---
 
@@ -179,12 +179,12 @@ The gRPC contract lives once in `shared/protocol/capabilityruntime/v1/capability
 | Resource           | Path                                                     |
 | ------------------ | -------------------------------------------------------- |
 | Implementation     | `packages/executor-sdks/dotnet/`                              |
-| Go SDK (parity)    | [packages/executor-sdks/golang](../../packages/executor-sdks/golang/README.md) |
+| Go SDK (parity)    | [packages/executor-sdks/golang](../../../packages/executor-sdks/golang/README.md) |
 | gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
 | Contract types     | `shared/types/capabilityruntime`                                  |
-| Process runtime    | [docs/RUNTIME_PROCESS.md](../../docs/RUNTIME_PROCESS.md) |
-| Capability runtime model | [docs/MODULES.md](../../docs/MODULES.md)            |
+| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-runtime) |
+| Capability runtime model | [docs/MODULES.md](../../../docs/MODULES.md)            |
 
 ## License
 
-MIT — see the repository `[LICENSE](../../LICENSE)` for terms.
+MIT — see the repository `[LICENSE](../../../LICENSE)` for terms.

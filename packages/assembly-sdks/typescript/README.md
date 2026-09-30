@@ -16,7 +16,7 @@ flowchart LR
 
 [![Version](https://img.shields.io/badge/version-0.1.0-3178C6?style=flat-square)](https://github.com/neuron-runtime/neuron/releases)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)](https://www.typescriptlang.org)
-[![License](https://img.shields.io/badge/license-MIT-18181B?style=flat-square)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-18181B?style=flat-square)](../../../LICENSE)
 
 ---
 
@@ -69,7 +69,7 @@ const validateOrder = Capability({
 | `description` | Human-readable purpose (optional, for documentation and registries) |
 
 > [!NOTE]
-> Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.capabilityRuntime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.capabilityRuntime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../docs/MODULES.md).
+> Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.capabilityRuntime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.capabilityRuntime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../../docs/MODULES.md).
 
 ---
 
@@ -484,4 +484,4 @@ Tests live in `packages/assembly-sdks/typescript/test/` and cover capabilities, 
 
 ## License
 
-[MIT](https://github.com/neuron-runtime/neuron/blob/main/LICENSE) — see the repository `LICENSE` for terms. 
+[MIT](https://github.com/neuron-runtime/neuron/blob/main/LICENSE) — see the repository `LICENSE` for terms.
