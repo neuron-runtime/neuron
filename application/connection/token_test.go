@@ -2,6 +2,7 @@ package connection
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -193,5 +194,60 @@ func TestTokenIsNotSentInURL(t *testing.T) {
 	}
 	if strings.Contains(path, "secret") || strings.Contains(path, "token") {
 		t.Fatalf("request URL %q leaks the credential", path)
+	}
+}
+
+// unixRecordingServer serves HTTP over a Unix socket so a local connection can
+// be exercised end to end, including the credential it presents.
+func unixRecordingServer(t *testing.T, socket string, seen chan<- string) {
+	t.Helper()
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", socket, err)
+	}
+	srv := &httptest.Server{
+		Listener: listener,
+		Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case seen <- r.Header.Get(apitoken.AuthorizationHeader):
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+		})},
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+}
+
+// TestLocalLoadsAPITokenWrittenAfterConnect covers a client that connects
+// before the daemon is running: the daemon publishes its token when it starts,
+// so the credential has to be resolvable again afterwards.
+func TestLocalLoadsAPITokenWrittenAfterConnect(t *testing.T) {
+	dir := t.TempDir()
+	socket := filepath.Join(dir, "nore.sock")
+	seen := make(chan string, 4)
+	unixRecordingServer(t, socket, seen)
+
+	local := NewLocal(socket)
+	defer local.Close()
+
+	if err := apitoken.Write(apitoken.TokenFilePath(socket), "late-token"); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	local.LoadAPIToken()
+
+	if err := local.Do(context.Background(), http.MethodGet, "/v1/instances", nil, nil); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	select {
+	case got := <-seen:
+		if got != "Bearer late-token" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer late-token")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no request reached the server")
 	}
 }
