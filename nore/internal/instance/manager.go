@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
@@ -27,9 +28,14 @@ type Manager struct {
 	store      storage.Store
 	metadata   *metadataStore
 	assemblies *assembly.Repository
+
+	// detachedDrainTimeout is the budget each instance gives detached work to
+	// finish after the instance stops. A non-positive value selects the engine
+	// default.
+	detachedDrainTimeout time.Duration
 }
 
-func NewManager(parent context.Context, workers int, store storage.Store, assemblies *assembly.Repository) *Manager {
+func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository) *Manager {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -37,13 +43,14 @@ func NewManager(parent context.Context, workers int, store storage.Store, assemb
 		workers = 8
 	}
 	m := &Manager{
-		instancesByKey: make(map[protocol.InstanceKey]*Instance),
-		instancesByID:  make(map[string]*Instance),
-		parent:         parent,
-		workers:        workers,
-		store:          store,
-		metadata:       newMetadataStore(store),
-		assemblies:     assemblies,
+		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
+		instancesByID:        make(map[string]*Instance),
+		parent:               parent,
+		workers:              workers,
+		store:                store,
+		metadata:             newMetadataStore(store),
+		assemblies:           assemblies,
+		detachedDrainTimeout: detachedDrainTimeout,
 	}
 	m.reconcile()
 	return m
@@ -142,7 +149,8 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 	if err != nil {
 		return nil, false, err
 	}
-	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store, execOpt)
+	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store,
+		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout))
 	if err != nil {
 		return nil, false, err
 	}

@@ -8,18 +8,19 @@ import (
 )
 
 type ExecutionSnapshot struct {
-	ID            core.ID                              `json:"id"`
-	CorrelationID core.ID                              `json:"correlation_id"`
-	InstanceID    core.ID                              `json:"instance_id,omitempty"`
-	Status        Status                               `json:"status"`
-	InitialParams map[string]any                       `json:"initial_params,omitempty"`
-	Params        map[core.ID]map[string]any           `json:"params,omitempty"`
-	Results       map[core.ID]map[string]any           `json:"results,omitempty"`
-	States        map[core.ID]CapabilityExecutionState `json:"states,omitempty"`
-	InFlight      int                                  `json:"in_flight"`
-	StartedAt     *time.Time                           `json:"started_at,omitempty"`
-	CompletedAt   *time.Time                           `json:"completed_at,omitempty"`
-	Error         string                               `json:"error,omitempty"`
+	ID                core.ID                              `json:"id"`
+	CorrelationID     core.ID                              `json:"correlation_id"`
+	InstanceID        core.ID                              `json:"instance_id,omitempty"`
+	ParentExecutionID core.ID                              `json:"parent_execution_id,omitempty"`
+	Status            Status                               `json:"status"`
+	InitialParams     map[string]any                       `json:"initial_params,omitempty"`
+	Params            map[core.ID]map[string]any           `json:"params,omitempty"`
+	Results           map[core.ID]map[string]any           `json:"results,omitempty"`
+	States            map[core.ID]CapabilityExecutionState `json:"states,omitempty"`
+	InFlight          int                                  `json:"in_flight"`
+	StartedAt         *time.Time                           `json:"started_at,omitempty"`
+	CompletedAt       *time.Time                           `json:"completed_at,omitempty"`
+	Error             string                               `json:"error,omitempty"`
 }
 
 func (e *Execution) Snapshot() *ExecutionSnapshot {
@@ -32,18 +33,19 @@ func (e *Execution) Snapshot() *ExecutionSnapshot {
 	}
 
 	return &ExecutionSnapshot{
-		ID:            e.ID,
-		CorrelationID: e.CorrelationID,
-		InstanceID:    e.InstanceID,
-		Status:        e.status,
-		InitialParams: cloneMap(e.initialParams),
-		Params:        cloneParamsMap(e.params),
-		Results:       cloneParamsMap(e.results),
-		States:        states,
-		InFlight:      e.inFlight,
-		StartedAt:     e.startedAt,
-		CompletedAt:   e.completedAt,
-		Error:         e.executionError,
+		ID:                e.ID,
+		CorrelationID:     e.CorrelationID,
+		InstanceID:        e.InstanceID,
+		ParentExecutionID: e.ParentExecutionID,
+		Status:            e.status,
+		InitialParams:     cloneMap(e.initialParams),
+		Params:            cloneParamsMap(e.params),
+		Results:           cloneParamsMap(e.results),
+		States:            states,
+		InFlight:          e.inFlight,
+		StartedAt:         e.startedAt,
+		CompletedAt:       e.completedAt,
+		Error:             e.executionError,
 	}
 }
 
@@ -75,19 +77,20 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		return nil, err
 	}
 	e := &Execution{
-		ID:             snap.ID,
-		CorrelationID:  snap.CorrelationID,
-		InstanceID:     snap.InstanceID,
-		status:         snap.Status,
-		initialParams:  snap.InitialParams,
-		params:         snap.Params,
-		results:        snap.Results,
-		states:         snap.States,
-		inFlight:       snap.InFlight,
-		startedAt:      snap.StartedAt,
-		completedAt:    snap.CompletedAt,
-		executionError: snap.Error,
-		done:           make(chan struct{}),
+		ID:                snap.ID,
+		CorrelationID:     snap.CorrelationID,
+		InstanceID:        snap.InstanceID,
+		ParentExecutionID: snap.ParentExecutionID,
+		status:            snap.Status,
+		initialParams:     snap.InitialParams,
+		params:            snap.Params,
+		results:           snap.Results,
+		states:            snap.States,
+		inFlight:          snap.InFlight,
+		startedAt:         snap.StartedAt,
+		completedAt:       snap.CompletedAt,
+		executionError:    snap.Error,
+		done:              make(chan struct{}),
 	}
 	// Restored executions are never resumed, but a terminal snapshot must not
 	// block a Wait caller forever, so signal completion eagerly.

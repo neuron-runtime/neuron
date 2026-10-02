@@ -31,8 +31,9 @@ import "github.com/neuron-runtime/neuron/shared/types/core"
 func Default() *core.RuntimeConfig {
 	return &core.RuntimeConfig{
 		Execution: &core.RuntimeExecution{
-			// wait is the only mode the engine implements. detach is accepted
-			// and carried, but currently behaves as wait.
+			// wait is the default: N.O.R.E. blocks for the result before
+			// continuing the plan. An author opts into handing the work to a
+			// separate child execution with detach.
 			Mode: core.RuntimeExecutionModeWait,
 
 			// Timeout is deliberately left empty. An empty timeout means no

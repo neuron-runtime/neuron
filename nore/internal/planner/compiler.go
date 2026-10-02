@@ -26,14 +26,21 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	triggerIDs := make([]shared.ID, 0, len(assembly.Specification.Triggers))
 
 	for _, trigger := range assembly.Specification.Triggers {
-		capability := resolveRuntimeConfig(cloneCapability(trigger.Capability))
+		capability, err := resolveRuntimeConfig(cloneCapability(trigger.Capability))
+		if err != nil {
+			return nil, err
+		}
 		if err := addCapability(capabilities, capability); err != nil {
 			return nil, err
 		}
 		triggerIDs = append(triggerIDs, capability.Metadata.ID)
 	}
 	for _, capability := range assembly.Specification.Capabilities {
-		if err := addCapability(capabilities, resolveRuntimeConfig(cloneCapability(capability))); err != nil {
+		resolved, err := resolveRuntimeConfig(cloneCapability(capability))
+		if err != nil {
+			return nil, err
+		}
+		if err := addCapability(capabilities, resolved); err != nil {
 			return nil, err
 		}
 	}
@@ -108,7 +115,17 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	if metadata.Version == "" {
 		metadata.Version = "1"
 	}
-	return &types.ExecutionBlueprint{Metadata: metadata, Nodes: nodes, EntryCapabilityIDs: entryIDs}, nil
+
+	detached, err := buildDetachedScopes(nodes, metadata)
+	if err != nil {
+		return nil, err
+	}
+	return &types.ExecutionBlueprint{
+		Metadata:           metadata,
+		Nodes:              nodes,
+		EntryCapabilityIDs: entryIDs,
+		Detached:           detached,
+	}, nil
 }
 
 func (c *Compiler) compileTransition(binding shared.Binding) (types.ExecutionTransition, error) {
@@ -237,16 +254,25 @@ func cloneMetadata(metadata shared.Metadata) shared.Metadata {
 	return metadata
 }
 
-// resolveRuntimeConfig replaces a capability's declared runtime configuration
-// with the effective one N.O.R.E. will act on, filling in a default for
+// resolveRuntimeConfig validates what an author declared and replaces it with the
+// effective configuration N.O.R.E. will act on, filling in a default for
 // anything the author left unset.
+//
+// Validation happens here rather than only at authoring time so that a
+// malformed declaration fails registration even when it reaches the compiler
+// through a path that never called the authoring loader. Without it, N.O.R.E.
+// would carry a declaration it cannot honor — an unparsable timeout, an unknown
+// retry policy — until the first invocation of that capability.
 //
 // This runs once per execution plan, so the defaults cost nothing per
 // invocation, and it operates on the plan's own copy of the capability. The
 // registered assembly stays exactly as it was authored.
-func resolveRuntimeConfig(capability shared.Capability) shared.Capability {
+func resolveRuntimeConfig(capability shared.Capability) (shared.Capability, error) {
+	if err := capability.RuntimeConfig.Validate(); err != nil {
+		return shared.Capability{}, fmt.Errorf("capability %s: %w", capability.Metadata.ID, err)
+	}
 	capability.RuntimeConfig = runtimeconfig.Resolve(capability.RuntimeConfig)
-	return capability
+	return capability, nil
 }
 
 func cloneCapability(capability shared.Capability) shared.Capability {

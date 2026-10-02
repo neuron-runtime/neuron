@@ -48,14 +48,15 @@ type RuntimeExecutionMode string
 
 const (
 	// RuntimeExecutionModeWait blocks until the capability runtime returns a
-	// result, then continues the execution plan. This is the only mode the
-	// engine implements.
+	// result, then continues the execution plan.
 	RuntimeExecutionModeWait RuntimeExecutionMode = "wait"
 
 	// RuntimeExecutionModeDetach continues the execution plan without waiting
-	// for the capability's result. The engine does not implement detach yet;
-	// the value is accepted and carried so authors can declare intent, but it
-	// currently behaves as wait.
+	// for the capability's result. N.O.R.E. hands the capability and everything
+	// downstream of it to a separately tracked child execution that may outlive
+	// its caller. Detach is a lifecycle boundary, not a severed dependency: the
+	// capability keeps its bindings, contracts, and failure semantics, and the
+	// child execution becomes terminal on its own result.
 	RuntimeExecutionModeDetach RuntimeExecutionMode = "detach"
 )
 

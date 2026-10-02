@@ -132,6 +132,34 @@ runtime:
 	}
 }
 
+func TestDetachedDrainTimeoutDefaultsTo30s(t *testing.T) {
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.DetachedDrainTimeout != "30s" {
+		t.Errorf("default detachedDrainTimeout = %q, want 30s", cfg.Runtime.DetachedDrainTimeout)
+	}
+}
+
+func TestDetachedDrainTimeoutFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", `
+runtime:
+  detachedDrainTimeout: 45s
+`)
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.DetachedDrainTimeout != "45s" {
+		t.Errorf("detachedDrainTimeout = %q, want 45s", cfg.Runtime.DetachedDrainTimeout)
+	}
+}
+
 func TestEntryExpandsAgainstProjectRoot(t *testing.T) {
 	dir := t.TempDir()
 

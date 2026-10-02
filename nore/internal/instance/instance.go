@@ -43,6 +43,10 @@ type options struct {
 	// resolvedCapabilityRuntimes is the frozen dependency set from the registered
 	// assembly. Non-core capability runtimes are launched as subprocesses.
 	resolvedCapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime
+
+	// detachedDrainTimeout is how long detached work may keep running after the
+	// instance stops. A non-positive value selects the engine default.
+	detachedDrainTimeout time.Duration
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -50,6 +54,16 @@ type options struct {
 func WithResolvedCapabilityRuntimes(resolved []capabilityrt.ResolvedCapabilityRuntime) Option {
 	return func(o *options) {
 		o.resolvedCapabilityRuntimes = resolved
+	}
+}
+
+// WithDetachedDrainTimeout sets how long detached capability work may continue
+// after the instance stops. Detached work outlives its caller by design, so
+// draining it is bounded rather than unlimited; a non-positive duration selects
+// the engine default.
+func WithDetachedDrainTimeout(timeout time.Duration) Option {
+	return func(o *options) {
+		o.detachedDrainTimeout = timeout
 	}
 }
 
@@ -146,7 +160,7 @@ func New(
 		return nil, fmt.Errorf("compile assemblies: %w", err)
 	}
 
-	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, workers)
+	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, workers, optsApplied.detachedDrainTimeout)
 	if err != nil {
 		cancel()
 		bus.Close()

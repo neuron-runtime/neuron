@@ -169,6 +169,7 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("runtime.execution.timeout", cfg.Runtime.Execution.Timeout)
 	v.SetDefault("runtime.workers.min", cfg.Runtime.Workers.Min)
 	v.SetDefault("runtime.workers.max", cfg.Runtime.Workers.Max)
+	v.SetDefault("runtime.detachedDrainTimeout", cfg.Runtime.DetachedDrainTimeout)
 
 	v.SetDefault("daemon.endpoint", cfg.Daemon.Endpoint)
 	v.SetDefault("daemon.socket", cfg.Daemon.Socket)

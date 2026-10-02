@@ -74,7 +74,7 @@
         - runtime configuration never appearing in capability input;
         - runtime artifact resolution remaining independent from invocation-specific runtime configuration;
         - runtime configuration being available to the N.O.R.E. runtime/backend lifecycle.
-- [ ]  **Actually apply capability-runtime execution settings**
+- [x]  **Actually apply capability-runtime execution settings**
     - **Files:** `nore/internal/execution/engine/executor_engine.go`, runtime backend implementations, `shared/types/capabilityruntime/`, affected tests
     - **Status:** the effective configuration is now available on `contracts.ExecutionContext.RuntimeConfig` (defaults resolved by `nore/internal/runtimeconfig` at plan time), but the engine and backends do not yet act on it. This item covers enforcement only.
     - Implement the runtime-level settings once the new ownership model is established.
@@ -83,6 +83,7 @@
     - `retry` must be enforced around capability-runtime invocation with explicit retry/backoff semantics.
     - `resources` must be represented as runtime execution constraints and only enforced by backends that support the requested resource controls.
     - Unsupported configuration must fail validation or be explicitly ignored according to a documented compatibility policy; do not silently imply that an option is enforced when it is not.
+    - **Done.** `nore/internal/execution/engine/invocation.go` enforces `execution.timeout` (bounding the whole invocation, including retries and backoff) and `retry` (fixed/exponential backoff, every error retried except shutdown cancellation or an exhausted deadline) around capability-runtime invocation, publishing `capability.retry` per attempt. `execution.mode: detach` compiles a per-capability execution scope (`nore/internal/planner/detach.go`) and the scheduler hands the work to a separately tracked child execution (`parent_execution_id`) that the engine runs under a bounded drain window (`--detached-drain-timeout`, default `30s`), publishing `capability.detached`. `resources` remains an empty reserved group; because no backend enforces a constraint, any key under it is rejected at YAML decoding (`application/project/runtimeconfig_yaml.go`) so a declaration is never silently ignored, and `RuntimeConfig.Validate` is enforced at authoring and compilation time.
 - [x]  **Remove obsolete capability execution configuration**
     - **Files:** `packages/assembly-sdks/typescript/src/capability.ts`, `packages/assembly-sdks/typescript/src/manifest.ts`, `application/compiler/manifest/manifest.go`, `shared/types/core/capability.go`, affected YAML/JSON examples and tests
     - Remove `CapabilityComposition.execution`, `CapabilityManifest.execution`, `manifest.Capability.Execution`, `core.Capability.RuntimeConfigurations`, and related capability-level execution plumbing once the runtime-level configuration model is implemented.

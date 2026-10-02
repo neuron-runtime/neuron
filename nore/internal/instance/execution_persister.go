@@ -12,12 +12,15 @@ import (
 // stateChangingEventTypes are the event kinds after which an execution
 // snapshot must be flushed to the execution store. Log records are excluded:
 // they carry no execution state and are already persisted by the event store.
+// Retries are excluded for the same reason: a re-attempt does not change which
+// capability is running.
 var stateChangingEventTypes = []event.Type{
 	event.ExecutionStarted,
 	event.CapabilityReady,
 	event.CapabilityStarted,
 	event.CapabilityCompleted,
 	event.CapabilityFailed,
+	event.CapabilityDetached,
 	event.ExecutionCompleted,
 	event.ExecutionFailed,
 	event.ExecutionCancelled,

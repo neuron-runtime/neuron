@@ -12,6 +12,21 @@ type ExecutionBlueprint struct {
 	Nodes    map[shared.ID]ExecutionNode
 
 	EntryCapabilityIDs []shared.ID
+
+	// Detached holds the execution scope each detached capability owns,
+	// compiled once when the assembly was compiled.
+	//
+	// Detach is a lifecycle boundary, not a severed dependency: the detached
+	// capability keeps its bindings, contracts, and failure semantics, but the
+	// work it and everything downstream of it represents is handed to a
+	// separately tracked execution that may outlive its caller. Compiling those
+	// scopes here means splitting an execution costs no graph work at runtime
+	// and the registered assembly is never modified.
+	//
+	// Keys are detached capability IDs; each scope's entry capability is the key
+	// itself. Nesting is expressed by a scope's own Detached map, so a detached
+	// capability inside another detached scope owns a further scope of its own.
+	Detached map[shared.ID]*ExecutionBlueprint
 }
 
 type ExecutionNode struct {

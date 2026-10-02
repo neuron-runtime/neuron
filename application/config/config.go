@@ -66,6 +66,14 @@ type Config struct {
 type RuntimeConfig struct {
 	Execution ExecutionConfig `yaml:"execution" mapstructure:"execution"`
 	Workers   WorkerConfig    `yaml:"workers"   mapstructure:"workers"`
+
+	// DetachedDrainTimeout is how long detached capability work may keep
+	// running after N.O.R.E. begins shutting down, as a duration string such as
+	// "30s". Detached work outlives its caller by design, so the drain is
+	// bounded rather than unlimited. This is a local engine policy rather than a
+	// property of the registered assembly, so it is passed to the daemon and
+	// never enters a deployment.
+	DetachedDrainTimeout string `yaml:"detachedDrainTimeout,omitempty" mapstructure:"detachedDrainTimeout"`
 }
 
 // ExecutionConfig controls how executions behave by default.

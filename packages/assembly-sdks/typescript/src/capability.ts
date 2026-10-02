@@ -41,16 +41,18 @@ export interface RuntimeConfig {
 
 export interface RuntimeExecution {
   /**
-   * `wait` blocks until the runtime returns a result; `detach` continues the
-   * execution plan without it. Only `wait` is implemented today; `detach` is
-   * accepted and carried so intent can be expressed, and currently behaves as
-   * `wait`.
+   * `wait` blocks until the runtime returns a result; `detach` hands the
+   * capability and everything downstream of it to a separately tracked child
+   * execution that may outlive the caller, and the parent continues without
+   * waiting. Detach keeps the capability's bindings, contracts, and failure
+   * semantics; it moves where the work runs, not what it means.
    */
   mode?: "wait" | "detach";
   /**
-   * Bounds a single invocation, e.g. `"5s"` or `"30m"`. Omitted means no
-   * capability-level deadline was declared and the selected runtime backend
-   * applies its own invocation bound.
+   * Bounds a single invocation, e.g. `"5s"` or `"30m"`. It bounds the whole
+   * invocation, including every retry attempt and the backoff between them.
+   * Omitted means no capability-level deadline was declared and the selected
+   * runtime backend applies its own invocation bound.
    */
   timeout?: string;
 }

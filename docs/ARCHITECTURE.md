@@ -605,6 +605,14 @@ The `ExecutionContext` keeps two things rigorously apart:
 
 A `runtimeConfig` is resolved from the capability's runtime declaration, not from its input. The planner fills in N.O.R.E.'s defaults **once, when the plan is built**, so the engine always sees a complete configuration and no per-invocation defaulting cost is paid. The registered assembly keeps the configuration exactly as authored; defaults live on the plan and never mutate it. As a result, changing a default never rewrites a deployed assembly and never changes an assembly's identity hash — only what the author explicitly declares is frozen into the hash.
 
+The engine enforces what the plan carries at the invocation boundary:
+
+- **`execution.mode: wait`** awaits the result before continuing the plan. It is the default.
+- **`execution.mode: detach`** splits the plan at that capability: the capability and everything downstream of it become a separately tracked child execution (`parent_execution_id`) that may outlive the caller, while the parent continues. The split is compiled once, when the plan is built, so detaching costs no graph work at runtime. A detached task runs under a bounded drain window during shutdown (`--detached-drain-timeout`, default `30s`), and is marked `detached` in the parent rather than `completed`, because its work lives elsewhere.
+- **`execution.timeout`** bounds the whole invocation, including every retry attempt and the backoff between them — so an exponential backoff cannot keep a capability alive past the deadline its author declared.
+- **`retry`** retries every failure with fixed or exponential backoff, except shutdown cancellation and an already-exhausted deadline. Neuron has no capability-level error taxonomy, so it does not guess which failures are transient; each scheduled re-attempt emits `capability.retry`.
+- **`resources`** is a reserved group with no fields. No backend enforces resource constraints yet, so any key under it is rejected when the declaration is decoded rather than silently ignored — an option is never accepted unless it is actually honored.
+
 The capability runtime returns the result map. Errors from the capability runtime are distinguished:
 
 | Case | Meaning |

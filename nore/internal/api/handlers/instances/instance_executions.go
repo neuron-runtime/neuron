@@ -43,9 +43,10 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 	items := make([]protocol.ExecutionItem, 0)
 	for _, exec := range i.ListExecutions() {
 		item := protocol.ExecutionItem{
-			ID:            exec.ID,
-			CorrelationID: exec.CorrelationID,
-			Status:        string(exec.Status()),
+			ID:                exec.ID,
+			CorrelationID:     exec.CorrelationID,
+			Status:            string(exec.Status()),
+			ParentExecutionID: exec.ParentExecutionID,
 		}
 		if started := exec.StartedAt(); !started.IsZero() {
 			ns := started.UnixNano()

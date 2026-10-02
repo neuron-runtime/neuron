@@ -10,9 +10,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api"
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/planner"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
@@ -24,12 +26,13 @@ import (
 
 func main() {
 	var (
-		port     string
-		socket   string
-		workers  int
-		dataDir  string
-		tokenArg string
-		showVer  bool
+		port                 string
+		socket               string
+		workers              int
+		dataDir              string
+		tokenArg             string
+		detachedDrainTimeout time.Duration
+		showVer              bool
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
@@ -37,6 +40,7 @@ func main() {
 	flag.IntVar(&workers, "workers", 8, "capability runtime worker count")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "persistent data directory")
 	flag.StringVar(&tokenArg, "token", "", "API token for authenticating requests; empty loads the token from the socket's token file")
+	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.BoolVar(&showVer, "version", false, "print the N.O.R.E. version and exit")
 	flag.Parse()
 
@@ -81,7 +85,7 @@ func main() {
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, store, assemblies)
+	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
 	srv := api.NewServer(inst, assemblies, compiler, token)
 
 	type listenerEntry struct {

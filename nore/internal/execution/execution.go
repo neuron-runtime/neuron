@@ -28,6 +28,12 @@ const (
 	CapabilityRunning   CapabilityStatus = "running"
 	CapabilityCompleted CapabilityStatus = "completed"
 	CapabilityFailed    CapabilityStatus = "failed"
+
+	// CapabilityDetached marks a capability whose work was handed off to a
+	// separate execution instead of being run in place. It is terminal for the
+	// capability within this execution but not an error: the work continues,
+	// tracked under the task created for it.
+	CapabilityDetached CapabilityStatus = "detached"
 )
 
 type CapabilityExecutionState struct {
@@ -38,12 +44,19 @@ type CapabilityExecutionState struct {
 }
 
 type Execution struct {
-	ID             shared.ID
-	CorrelationID  shared.ID
-	InstanceID     shared.ID
-	Blueprint      *types.ExecutionBlueprint
-	mu             sync.RWMutex
-	status         Status
+	ID            shared.ID
+	CorrelationID shared.ID
+	InstanceID    shared.ID
+
+	// ParentExecutionID links a detached execution to the execution that handed
+	// its work off. It is empty for a root execution.
+	ParentExecutionID shared.ID
+
+	Blueprint *types.ExecutionBlueprint
+	mu        sync.RWMutex
+	status    Status
+	// initialParams is the input a root execution was invoked with. A detached
+	// execution is invoked with one capability's input instead, so it has none.
 	initialParams  map[string]any
 	params         map[shared.ID]map[string]any
 	results        map[shared.ID]map[string]any
