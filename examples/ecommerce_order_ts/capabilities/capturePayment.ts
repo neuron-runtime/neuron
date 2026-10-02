@@ -6,6 +6,6 @@ export const capturePayment = Capability({
   version: "1.0.0",
   description: "Capture an authorized payment",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<CapturePaymentInput>()
   .resultSchema<CapturePaymentOutput>();

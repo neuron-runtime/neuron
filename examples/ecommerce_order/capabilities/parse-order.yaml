@@ -9,6 +9,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     currency: USD
@@ -17,7 +21,3 @@ spec:
     - direction: input
       source: validation_data
       target: validation_data
-
-  execution:
-    mode: wait
-    timeout: 5s

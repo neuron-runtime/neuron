@@ -36,7 +36,10 @@ func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 	capabilityMap := make(map[string]core.Capability)
 
 	for _, rs := range m.Capabilities {
-		svc := convertCapability(rs)
+		svc, err := convertCapability(rs)
+		if err != nil {
+			return nil, err
+		}
 		capabilityMap[rs.Name] = svc
 		capabilities = append(capabilities, svc)
 	}
@@ -88,7 +91,7 @@ func (c *Compiler) InstanceKey(m *manifest.Assembly, env string) (protocol.Insta
 	}, nil
 }
 
-func convertCapability(s manifest.Capability) core.Capability {
+func convertCapability(s manifest.Capability) (core.Capability, error) {
 	var params, results []core.Port
 	for _, p := range s.Params {
 		params = append(params, core.Port{
@@ -105,13 +108,12 @@ func convertCapability(s manifest.Capability) core.Capability {
 		})
 	}
 
-	rtConfig := core.RuntimeConfigurations{}
-	if s.Execution != nil {
-		rtConfig.Timeout = s.Execution.Timeout
-		rtConfig.Retry = core.RetryPolicy{
-			MaxAttempts: s.Execution.Retries,
-			Backoff:     "exponential",
-		}
+	// The runtime configuration is authored per capability runtime
+	// invocation. The compiler validates what was declared and carries it
+	// through unchanged; it never substitutes a default, because deciding what
+	// an omission means belongs to the runtime engine, not to compilation.
+	if err := s.CapabilityRuntime.RuntimeConfig.Validate(); err != nil {
+		return core.Capability{}, fmt.Errorf("capability %s: %w", s.Name, err)
 	}
 
 	return core.Capability{
@@ -123,10 +125,10 @@ func convertCapability(s manifest.Capability) core.Capability {
 		},
 		Type:                     core.CapabilityRuntimeType(s.CapabilityRuntime.Name),
 		CapabilityConfigurations: s.Config,
-		RuntimeConfigurations:    rtConfig,
+		RuntimeConfig:            s.CapabilityRuntime.RuntimeConfig.Clone(),
 		Params:                   params,
 		Results:                  results,
-	}
+	}, nil
 }
 
 func convertBinding(conn manifest.Binding, capabilityMap map[string]core.Capability) (core.Binding, error) {

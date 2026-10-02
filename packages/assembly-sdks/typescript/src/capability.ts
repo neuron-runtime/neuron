@@ -1,4 +1,4 @@
-import type { PortManifest, CapabilityManifest } from "./manifest.js";
+import type { PortManifest, CapabilityManifest, CapabilityRuntimeManifest } from "./manifest.js";
 import {
   createExpressionProxy,
   createSourceContext,
@@ -14,12 +14,72 @@ import { schemaToManifest, type FieldRules, type InferSchema, type SchemaObject 
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ExecutionConfig {
+/**
+ * RuntimeConfig declares how N.O.R.E. executes a capability through its
+ * Capability Runtime. It instructs the runtime engine; it is never the
+ * capability's input data and is never passed to the runtime as params.
+ *
+ * It is scoped to the runtime declaration of a single capability. Two
+ * capabilities may use the same runtime with different runtimeConfigs and
+ * execute with them at the same time: the runtime artifact is still resolved
+ * and installed once, while each invocation keeps its own configuration.
+ *
+ * Every field is optional. Anything left unset is supplied by N.O.R.E.'s own
+ * defaults, so a runtimeConfig never has to be declared at all.
+ */
+export interface RuntimeConfig {
+  /** How a single invocation is driven. Defaults to `wait`. */
+  execution?: RuntimeExecution;
+  /** Whether and how a failed invocation is retried. Defaults to no retry. */
+  retry?: RuntimeRetry;
+  /**
+   * Runtime execution constraints. Currently a reserved group: no backend
+   * enforces resource limits yet, so nothing may be declared here.
+   */
+  resources?: RuntimeResources;
+}
+
+export interface RuntimeExecution {
+  /**
+   * `wait` blocks until the runtime returns a result; `detach` continues the
+   * execution plan without it. Only `wait` is implemented today; `detach` is
+   * accepted and carried so intent can be expressed, and currently behaves as
+   * `wait`.
+   */
   mode?: "wait" | "detach";
+  /**
+   * Bounds a single invocation, e.g. `"5s"` or `"30m"`. Omitted means no
+   * capability-level deadline was declared and the selected runtime backend
+   * applies its own invocation bound.
+   */
   timeout?: string;
-  retries?: number;
-  concurrency?: number;
-  continueOnFail?: boolean;
+}
+
+export interface RuntimeRetry {
+  /** Backoff strategy between attempts. Defaults to `none`. */
+  policy?: "none" | "fixed" | "exponential";
+  /**
+   * Total number of invocations to attempt, not additional retries. `1` means
+   * the capability is invoked exactly once and never retried.
+   */
+  maxAttempts?: number;
+  /** Delay before the first retry. Only meaningful for `fixed`/`exponential`. */
+  initialBackoff?: string;
+  /** Caps the growing delay. Only meaningful for `exponential`. */
+  maxBackoff?: string;
+}
+
+export interface RuntimeResources {}
+
+/**
+ * RuntimeDeclaration is the runtime a capability is executed through, plus the
+ * configuration N.O.R.E. uses to drive it.
+ */
+export interface RuntimeDeclaration {
+  name: string;
+  version?: string;
+  registry?: string;
+  runtimeConfig?: RuntimeConfig;
 }
 
 export type Condition = {
@@ -54,7 +114,6 @@ export interface CapabilityReference<TInput extends object, TOutput extends obje
   readonly result: Expressionify<TOutput>;
   withParams(bindings: ParamBindings<TInput>): CompositionNode<TInput, TOutput>;
   withParams<TSource extends object>(connection: Connection<TSource, TInput>): CompositionNode<TInput, TOutput>;
-  runtimeConfig(config: ExecutionConfig): CompositionNode<TInput, TOutput>;
   connect<TSource extends object>(
     define: (source: SourceContext<TSource>) => ParamBindings<TInput>
   ): Connection<TSource, TInput>;
@@ -69,7 +128,6 @@ export interface CapabilityComposition {
   capabilityRef: string;
   capabilityDef?: CapabilityDefinition<object, object>;
   bindings: Record<string, string>;
-  execution?: ExecutionConfig;
   incomingConditions: Array<{ expression: string; message?: string }>;
   /**
    * Capability refs this node's bindings/conditions reference. Each distinct
@@ -87,21 +145,11 @@ export interface CapabilityComposition {
 }
 
 // ---------------------------------------------------------------------------
-// Capability runtime config
-// ---------------------------------------------------------------------------
-
-interface CapabilityRuntimeConfig {
-  name: string;
-  version: string;
-  registry: string;
-}
-
-// ---------------------------------------------------------------------------
 // Capability state
 // ---------------------------------------------------------------------------
 
 type CapabilityState = {
-  capabilityRuntime: CapabilityRuntimeConfig;
+  runtime: CapabilityRuntimeManifest;
   version?: string;
   description?: string;
   inputPorts: PortManifest[];
@@ -124,7 +172,6 @@ export class CompositionNode<TInput extends object = object, TOutput extends obj
       capabilityRef,
       capabilityDef: compositionOverride?.capabilityDef,
       bindings: compositionOverride?.bindings ?? {},
-      execution: compositionOverride?.execution,
       incomingConditions: compositionOverride?.incomingConditions ?? [],
       sources: compositionOverride?.sources ?? [],
       anchor: compositionOverride?.anchor,
@@ -137,10 +184,6 @@ export class CompositionNode<TInput extends object = object, TOutput extends obj
 
   get bindings(): Record<string, string> {
     return this._composition.bindings;
-  }
-
-  get runtimeConfig(): ExecutionConfig | undefined {
-    return this._composition.execution;
   }
 
   get result(): Expressionify<TOutput> {
@@ -210,29 +253,32 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
   implements CapabilityReference<TInput, TOutput> {
   readonly ref: string;
   private readonly _state: CapabilityState;
-  private readonly _executionConfig?: ExecutionConfig;
 
-  constructor(ref: string, state?: Partial<CapabilityState>, executionConfig?: ExecutionConfig) {
+  constructor(ref: string, state?: Partial<CapabilityState>) {
     this.ref = ref;
     this._state = {
-      capabilityRuntime: state?.capabilityRuntime ?? { name: "neuron:core:set", version: "latest", registry: "local" },
+      runtime: state?.runtime ?? { name: "neuron:core:set", version: "latest", registry: "local" },
       version: state?.version,
       description: state?.description,
       inputPorts: state?.inputPorts ?? [],
       outputPorts: state?.outputPorts ?? [],
       inputRules: state?.inputRules ?? {},
     };
-    this._executionConfig = executionConfig;
   }
 
-  capabilityRuntime(config: { name: string; version?: string; registry?: string }): this {
-    return this.clone({
-      capabilityRuntime: {
-        name: config.name,
-        version: config.version ?? "latest",
-        registry: config.registry ?? "local",
-      },
-    }) as this;
+  /**
+   * Declares the Capability Runtime this capability is executed through, and
+   * optionally how N.O.R.E. should drive it.
+   *
+   * `runtimeConfig` is an instruction to the runtime engine, not input to the
+   * capability. It is never sent to the runtime as params, and it is scoped to
+   * this capability even when several capabilities share the same runtime.
+   *
+   * A capability with no `.runtime()` call defaults to the in-process
+   * `neuron:core:set` runtime.
+   */
+  runtime(declaration: RuntimeDeclaration): this {
+    return this.clone({ runtime: resolveRuntimeDeclaration(declaration) }) as this;
   }
 
   paramsSchema<T extends object>(): CapabilityDefinition<T, TOutput>;
@@ -280,13 +326,6 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
     });
   }
 
-  runtimeConfig(config: ExecutionConfig): CompositionNode<TInput, TOutput> {
-    return new CompositionNode<TInput, TOutput>(this.ref, {
-      capabilityDef: this as unknown as CapabilityDefinition<object, object>,
-      execution: config,
-    });
-  }
-
   connect<TSource extends object>(
     define: (source: SourceContext<TSource>) => ParamBindings<TInput>
   ): Connection<TSource, TInput> {
@@ -316,15 +355,20 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
       name: this.ref,
       version: this._state.version,
       description: this._state.description,
-      capabilityRuntime: {
-        name: this._state.capabilityRuntime.name,
-        version: this._state.capabilityRuntime.version,
-        registry: this._state.capabilityRuntime.registry,
-      },
+      capabilityRuntime: this.manifestRuntime(),
       params: this._state.inputPorts,
       results: this._state.outputPorts,
-      execution: this._executionConfig,
     };
+  }
+
+  /**
+   * Projects the resolved runtime declaration onto the manifest shape,
+   * omitting `runtimeConfig` entirely when none was declared. An author who
+   * declares no runtimeConfig produces no key at all, so N.O.R.E. supplies
+   * every default rather than the SDK manufacturing an empty one.
+   */
+  private manifestRuntime(): CapabilityRuntimeManifest {
+    return resolveRuntimeDeclaration(this._state.runtime);
   }
 
   asReference(): CapabilityReference<TInput, TOutput> {
@@ -336,13 +380,47 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
   ): CapabilityDefinition<TNextInput, TNextOutput> {
     return new CapabilityDefinition<TNextInput, TNextOutput>(this.ref, {
       ...this._state,
-      capabilityRuntime: { ...this._state.capabilityRuntime },
+      runtime: this.manifestRuntime(),
       inputPorts: [...this._state.inputPorts],
       outputPorts: [...this._state.outputPorts],
       inputRules: { ...this._state.inputRules },
       ...patch,
     });
   }
+}
+
+/**
+ * Deep-copies a declared runtimeConfig. A capability definition owns its own
+ * copy, so a runtimeConfig object an author reuses between capabilities can
+ * never be mutated through one of them, and the object handed out with the
+ * manifest cannot be mutated back into the definition. Groups are copied by
+ * value; none of them nest further.
+ */
+function cloneRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
+  const clone: RuntimeConfig = {};
+  if (config.execution) clone.execution = { ...config.execution };
+  if (config.retry) clone.retry = { ...config.retry };
+  if (config.resources) clone.resources = { ...config.resources };
+  return clone;
+}
+
+/**
+ * Projects an authored runtime declaration onto the manifest shape, applying
+ * the version/registry defaults and snapshotting any declared runtimeConfig.
+ *
+ * `runtimeConfig` is omitted entirely when the author declared none, so the
+ * manifest carries no empty group for N.O.R.E. to interpret.
+ */
+function resolveRuntimeDeclaration(declaration: RuntimeDeclaration): CapabilityRuntimeManifest {
+  const runtime: CapabilityRuntimeManifest = {
+    name: declaration.name,
+    version: declaration.version ?? "latest",
+    registry: declaration.registry ?? "local",
+  };
+  if (declaration.runtimeConfig !== undefined) {
+    runtime.runtimeConfig = cloneRuntimeConfig(declaration.runtimeConfig);
+  }
+  return runtime;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +433,7 @@ export function Capability<TInput extends object = object, TOutput extends objec
   return new CapabilityDefinition<TInput, TOutput>(config.name, {
     version: config.version,
     description: config.description,
-    capabilityRuntime: { name: "neuron:core:set", version: "latest", registry: "local" },
+    runtime: { name: "neuron:core:set", version: "latest", registry: "local" },
   });
 }
 
@@ -476,7 +554,6 @@ function cloneComposition(node: CapabilityComposition): CapabilityComposition {
     capabilityRef: node.capabilityRef,
     capabilityDef: node.capabilityDef,
     bindings: { ...node.bindings },
-    execution: node.execution,
     incomingConditions: node.incomingConditions.map((c) => ({ ...c })),
     sources: [...node.sources],
     anchor: node.anchor,

@@ -6,6 +6,6 @@ export const authorizePayment = Capability({
   version: "1.0.0",
   description: "Authorize payment for the order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<AuthorizePaymentInput>()
   .resultSchema<AuthorizePaymentOutput>();

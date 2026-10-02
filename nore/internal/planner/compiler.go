@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/runtimeconfig"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -25,14 +26,14 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	triggerIDs := make([]shared.ID, 0, len(assembly.Specification.Triggers))
 
 	for _, trigger := range assembly.Specification.Triggers {
-		capability := cloneCapability(trigger.Capability)
+		capability := resolveRuntimeConfig(cloneCapability(trigger.Capability))
 		if err := addCapability(capabilities, capability); err != nil {
 			return nil, err
 		}
 		triggerIDs = append(triggerIDs, capability.Metadata.ID)
 	}
 	for _, capability := range assembly.Specification.Capabilities {
-		if err := addCapability(capabilities, cloneCapability(capability)); err != nil {
+		if err := addCapability(capabilities, resolveRuntimeConfig(cloneCapability(capability))); err != nil {
 			return nil, err
 		}
 	}
@@ -236,9 +237,22 @@ func cloneMetadata(metadata shared.Metadata) shared.Metadata {
 	return metadata
 }
 
+// resolveRuntimeConfig replaces a capability's declared runtime configuration
+// with the effective one N.O.R.E. will act on, filling in a default for
+// anything the author left unset.
+//
+// This runs once per execution plan, so the defaults cost nothing per
+// invocation, and it operates on the plan's own copy of the capability. The
+// registered assembly stays exactly as it was authored.
+func resolveRuntimeConfig(capability shared.Capability) shared.Capability {
+	capability.RuntimeConfig = runtimeconfig.Resolve(capability.RuntimeConfig)
+	return capability
+}
+
 func cloneCapability(capability shared.Capability) shared.Capability {
 	capability.Metadata = cloneMetadata(capability.Metadata)
 	capability.CapabilityConfigurations = cloneConfiguration(capability.CapabilityConfigurations)
+	capability.RuntimeConfig = capability.RuntimeConfig.Clone()
 	capability.Params = append([]shared.Port(nil), capability.Params...)
 	capability.Results = append([]shared.Port(nil), capability.Results...)
 	return capability

@@ -9,6 +9,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     capture_result:
@@ -19,7 +23,3 @@ spec:
     - direction: input
       source: payment_intent_id
       target: payment_intent_id
-
-  execution:
-    mode: wait
-    timeout: 5s

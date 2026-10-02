@@ -164,6 +164,25 @@ func validateCapabilityBasic(
 		)
 	}
 
+	// The runtime configuration must be well-formed before it is folded into
+	// the manifest, so an author learns about a bad mode or duration at build
+	// time rather than at execution time.
+	if err := capability.Spec.CapabilityRuntime.RuntimeConfig.Validate(); err != nil {
+		errors = append(errors, err.Error())
+	}
+
+	// The legacy execution block has no equivalent for concurrency or
+	// continueOnFail. Rejecting them is deliberate: silently discarding them
+	// would tell an author their declaration had an effect when it had none.
+	if legacy := capability.Spec.Execution; legacy != nil {
+		if legacy.Concurrency > 0 {
+			errors = append(errors, "spec.execution.concurrency is not supported: worker ceilings belong to the runtime backend and cannot be set per capability invocation")
+		}
+		if legacy.ContinueOnFail {
+			errors = append(errors, "spec.execution.continueOnFail is not supported: assembly failure handling is declared by binding validations, not by a capability's runtime configuration")
+		}
+	}
+
 	if len(errors) > 0 {
 		return fmt.Errorf(
 			"%s",

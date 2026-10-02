@@ -111,7 +111,11 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 	output, err := cr.Execute(ctx, contracts.ExecutionContext{
 		ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
 		Capability: node.Capability, Params: input, CapabilityConfigurations: resolvedConfig,
-		Logger: newExecLogger(e.bus, execution.ID, execution.CorrelationID, capabilityID),
+		// The runtime configuration comes from the capability's runtime
+		// declaration, never from its input. The planner resolved defaults onto
+		// the plan, so this is always complete.
+		RuntimeConfig: node.Capability.RuntimeConfig,
+		Logger:        newExecLogger(e.bus, execution.ID, execution.CorrelationID, capabilityID),
 	})
 	if err != nil {
 		e.publishFailure(ctx, execution, capabilityID, err)

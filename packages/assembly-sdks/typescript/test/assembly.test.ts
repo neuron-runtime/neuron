@@ -219,22 +219,22 @@ describe("Assembly with full ecommerce pipeline", () => {
       shipment: { trackingNumber: string; carrier: string };
     }>();
     const validateOrder = Capability({ name: "validate-order" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({ order: record().required() })
       .resultSchema({ valid: boolean(), status: string() });
 
     const parseOrder = Capability({ name: "parse-order" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({ validationData: record().required() })
       .resultSchema({ currency: string(), items: record() });
 
     const enrichCustomer = Capability({ name: "enrich-customer" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({ customerId: string().required() })
       .resultSchema({ customerData: record() });
 
     const calculateTotals = Capability({ name: "calculate-totals" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({
         items: record().required(),
         customerTier: string(),
@@ -244,7 +244,7 @@ describe("Assembly with full ecommerce pipeline", () => {
       .resultSchema({ total: number() });
 
     const authorizePayment = Capability({ name: "authorize-payment" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({
         amountCents: number().required(),
         currency: string().required(),
@@ -253,12 +253,12 @@ describe("Assembly with full ecommerce pipeline", () => {
       .resultSchema({ paymentIntent: record() });
 
     const capturePayment = Capability({ name: "capture-payment" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({ paymentIntentId: string().required() })
       .resultSchema({ captureResult: record() });
 
     const createShipment = Capability({ name: "create-shipment" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({
         order: record().required(),
         email: string().email(),
@@ -266,7 +266,7 @@ describe("Assembly with full ecommerce pipeline", () => {
       .resultSchema({ shipment: record() });
 
     const sendConfirmation = Capability({ name: "send-confirmation" })
-      .capabilityRuntime({ name: "set" })
+      .runtime({ name: "set" })
       .paramsSchema({
         trackingNumber: string(),
         carrier: string(),

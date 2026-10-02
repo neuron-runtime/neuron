@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"github.com/neuron-runtime/neuron/application/project"
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // FromResolvedProject converts a resolved YAML assembly into the canonical
@@ -43,9 +44,10 @@ func capabilityFrom(rs project.ResolvedCapability) Capability {
 		Version:     rs.Definition.Metadata.Version,
 		Description: rs.Definition.Metadata.Description,
 		CapabilityRuntime: CapabilityRuntimeSpec{
-			Name:     spec.CapabilityRuntime.Type,
-			Version:  spec.CapabilityRuntime.Version,
-			Registry: spec.CapabilityRuntime.Source,
+			Name:          spec.CapabilityRuntime.Type,
+			Version:       spec.CapabilityRuntime.Version,
+			Registry:      spec.CapabilityRuntime.Source,
+			RuntimeConfig: runtimeConfigFrom(spec),
 		},
 		Config: spec.Config,
 	}
@@ -63,17 +65,53 @@ func capabilityFrom(rs project.ResolvedCapability) Capability {
 		}
 	}
 
-	if spec.Execution != nil {
-		svc.Execution = &ExecutionConfig{
-			Mode:           spec.Execution.Mode,
-			Timeout:        spec.Execution.Timeout,
-			Retries:        spec.Execution.Retries,
-			Concurrency:    spec.Execution.Concurrency,
-			ContinueOnFail: spec.Execution.ContinueOnFail,
+	return svc
+}
+
+// runtimeConfigFrom folds the YAML runtime configuration into the single
+// canonical location: the runtime declaration's runtimeConfig.
+//
+// The YAML surface still accepts a capability-level `execution:` block for
+// backwards compatibility. It is authoring sugar only. It never survives into
+// the canonical manifest as its own field, so there is exactly one place a
+// capability's runtime configuration can be expressed.
+//
+// When an author declares both, the nested `capability runtime: runtimeConfig:`
+// block wins, and the legacy `execution:` block fills only the values the
+// author left unset.
+func runtimeConfigFrom(spec project.CapabilitySpec) *core.RuntimeConfig {
+	declared := spec.CapabilityRuntime.RuntimeConfig.Clone()
+	if spec.Execution == nil {
+		return declared
+	}
+
+	if declared == nil {
+		declared = &core.RuntimeConfig{}
+	}
+	if declared.Execution == nil && (spec.Execution.Mode != "" || spec.Execution.Timeout != "") {
+		declared.Execution = &core.RuntimeExecution{}
+	}
+	if declared.Execution != nil {
+		if declared.Execution.Mode == "" && spec.Execution.Mode != "" {
+			declared.Execution.Mode = core.RuntimeExecutionMode(spec.Execution.Mode)
+		}
+		if declared.Execution.Timeout == "" && spec.Execution.Timeout != "" {
+			declared.Execution.Timeout = spec.Execution.Timeout
 		}
 	}
 
-	return svc
+	// The legacy field counted *retries*, meaning invocations beyond the
+	// first. The canonical field counts total attempts, so it is one higher.
+	// The legacy schema had no policy selector, and the compiler it replaced
+	// always assumed exponential backoff, so that is what is carried over.
+	if declared.Retry == nil && spec.Execution.Retries > 0 {
+		declared.Retry = &core.RuntimeRetry{
+			Policy:      core.RetryPolicyExponential,
+			MaxAttempts: spec.Execution.Retries + 1,
+		}
+	}
+
+	return declared
 }
 
 func bindingFrom(rc project.ResolvedBinding) Binding {

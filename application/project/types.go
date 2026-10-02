@@ -1,10 +1,17 @@
 package project
 
+import "github.com/neuron-runtime/neuron/shared/types/core"
+
 // This file contains the representation of user-authored YAML files.
 //
-// These types intentionally do not depend on N.O.R.E. core types.
-// The project package is responsible only for understanding the
-// developer's project definition.
+// These types intentionally do not depend on N.O.R.E.'s runtime internals: this
+// package is responsible only for understanding the developer's project
+// definition, and knows nothing about planning, scheduling, or execution.
+//
+// Where a declaration has to agree with the runtime on vocabulary, it reuses
+// the shared canonical types from shared/types/core rather than restating
+// them. A schema duplicated here would be a second definition that could drift
+// from the one the compiler and the runtime engine actually honour.
 
 //
 // ------------------------------------------------------------
@@ -131,11 +138,10 @@ type CapabilityMetadata struct {
 // This is the important distinction:
 //
 // Capability
-// ├── capability runtime
+// ├── capability runtime (including how N.O.R.E. executes it)
 // ├── config
 // ├── mappings
-// ├── validation
-// └── execution
+// └── validation
 type CapabilitySpec struct {
 	CapabilityRuntime CapabilityRuntimeSpec `yaml:"capability runtime"`
 
@@ -145,6 +151,13 @@ type CapabilitySpec struct {
 
 	Validation *ValidationConfig `yaml:"validation,omitempty"`
 
+	// Execution is the legacy capability-level execution block.
+	//
+	// Deprecated: declare runtime configuration under
+	// `capability runtime: runtimeConfig:` instead. This block is folded into
+	// that single canonical location when the YAML project is converted to a
+	// manifest, and never survives as its own field. See the runtime declaration
+	// on CapabilityRuntimeSpec for the supported schema.
 	Execution *ExecutionConfig `yaml:"execution,omitempty"`
 }
 
@@ -168,6 +181,16 @@ type CapabilityRuntimeSpec struct {
 
 	// Optional capability runtime-specific configuration.
 	Config map[string]any `yaml:"config,omitempty"`
+
+	// RuntimeConfig declares how N.O.R.E. should execute this capability
+	// through this runtime: execution mode and timeout, retry behavior, and
+	// resource constraints.
+	//
+	// Every field is optional. Anything left unset is supplied by N.O.R.E.'s
+	// own defaults, so an author never has to declare a runtimeConfig at all.
+	// This is not capability input and is never passed to the capability
+	// runtime as params.
+	RuntimeConfig *core.RuntimeConfig `yaml:"runtimeConfig,omitempty"`
 }
 
 // MappingDefinition describes how data is mapped into or out of
@@ -197,11 +220,26 @@ type ValidationConfig struct {
 	Output map[string]any `yaml:"output,omitempty"`
 }
 
-// ExecutionConfig contains capability-level execution behavior.
+// ExecutionConfig is the legacy capability-level execution block.
+//
+// Deprecated: it is folded into the canonical runtime configuration declared
+// under `capability runtime: runtimeConfig:`. Concurrency and ContinueOnFail
+// have no equivalent there and are rejected by validation rather than silently
+// ignored.
 type ExecutionConfig struct {
-	Mode           string `yaml:"mode,omitempty"`
-	Timeout        string `yaml:"timeout,omitempty"`
-	Retries        int    `yaml:"retries,omitempty"`
-	Concurrency    int    `yaml:"concurrency,omitempty"`
-	ContinueOnFail bool   `yaml:"continueOnFail,omitempty"`
+	// Mode is "wait" or "detach".
+	Mode string `yaml:"mode,omitempty"`
+
+	// Timeout bounds a single invocation, e.g. "5s".
+	Timeout string `yaml:"timeout,omitempty"`
+
+	// Retries counts invocations beyond the first attempt.
+	Retries int `yaml:"retries,omitempty"`
+
+	// Concurrency is rejected: worker ceilings belong to the runtime backend.
+	Concurrency int `yaml:"concurrency,omitempty"`
+
+	// ContinueOnFail is rejected: failure handling belongs to assembly
+	// validation, not to a single runtime invocation.
+	ContinueOnFail bool `yaml:"continueOnFail,omitempty"`
 }

@@ -9,6 +9,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     status: validated
@@ -18,7 +22,3 @@ spec:
     - direction: input
       source: execution.params.order
       target: order
-
-  execution:
-    mode: wait
-    timeout: 5s

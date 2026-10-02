@@ -139,7 +139,6 @@ function normalizeNode(node: CapabilityComposition): CapabilityComposition {
     capabilityRef: node.capabilityRef,
     capabilityDef: node.capabilityDef,
     bindings: node.bindings ?? {},
-    execution: node.execution,
     incomingConditions: node.incomingConditions ?? [],
     sources: node.sources ?? [],
     anchor: node.anchor,

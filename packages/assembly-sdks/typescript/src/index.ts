@@ -33,15 +33,20 @@ export type {
 
 export type {
   Connection,
-  ExecutionConfig,
   ParamBindings,
   ParamValue,
   CapabilityReference,
+  RuntimeConfig,
+  RuntimeDeclaration,
+  RuntimeExecution,
+  RuntimeRetry,
+  RuntimeResources,
 } from "./capability.js";
 
 export type {
   AssemblyManifest,
   CapabilityManifest,
+  CapabilityRuntimeManifest,
   BindingManifest,
   BindingMappingManifest,
   BindingValidationManifest,

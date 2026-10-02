@@ -91,7 +91,7 @@ const validateOrder = Capability({
   version: "1.0.0",
   description: "Validate an incoming order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order; valid: boolean }>();
 
@@ -100,7 +100,7 @@ const authorizePayment = Capability({
   version: "1.0.0",
   description: "Authorize payment for an order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order; amountCents: number; currency: string }>()
   .resultSchema<{ order: Order; amountCents: number }>();
 
@@ -109,7 +109,7 @@ const createShipment = Capability({
   version: "1.0.0",
   description: "Create a shipment for a paid order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order; trackingId: string }>();
 
@@ -392,7 +392,7 @@ Implemented, tested, and intended to work in 0.1.0.
 | --- | --- |
 | **CLI** | `init`, `build`, `run` (live event streaming over WebSocket with an SSE fallback), `add` / `remove`, `capability runtime list` / `inspect`, `instance list` / `remove` / `clear`, `daemon stop`, `version` — plus global configuration and `NEURON_*` environment overrides |
 | **Authoring** | Full YAML authoring (the canonical, zero-tooling surface) and the `@neuron/sdk` typed TypeScript surface, converging on the same canonical manifest |
-| **Runtime** | Registration of compiled assemblies with a frozen, resolved capability runtime set; instances (create, list, remove, clear) with restoration on restart; execution planning, scheduling, CEL mappings and validations, cancellation, deadlines, and terminal execution states; persisted and live-streamed events; built-in capability runtimes in-process; external capability runtimes out-of-process as process workers or WASM modules; graceful shutdown |
+| **Runtime** | Registration of compiled assemblies with a frozen, resolved capability runtime set; per-capability runtime configuration (execution mode and timeout, retry policy and backoff, reserved resource constraints) declared on the capability runtime and defaulted by N.O.R.E.; instances (create, list, remove, clear) with restoration on restart; execution planning, scheduling, CEL mappings and validations, cancellation, deadlines, and terminal execution states; persisted and live-streamed events; built-in capability runtimes in-process; external capability runtimes out-of-process as process workers or WASM modules; graceful shutdown |
 | **Capability runtimes** | The unified module model with semantic-version resolution; `github` and `local` registries; canonical `<name>-<version>-capability-runtime.neuron.tar.gz` archives with digest verification; immutable installation into `~/.neuron/capabilityRuntimes`; both protocols (`neuron/capability-runtime-v1` over gRPC, `neuron/capability-runtime-v1-json` over stdio); the reference `example:echo` module compiled for both runtimes from one Go source |
 | **Security** | Unix-socket-only default transport, and API-token authentication on every route except the health probe |
 
