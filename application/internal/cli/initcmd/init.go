@@ -209,7 +209,7 @@ const sayHello = Capability({
   version: "1.0.0",
   description: "Return a friendly greeting",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ name: string }>()
   .resultSchema<{ name: string; message: string }>();
 

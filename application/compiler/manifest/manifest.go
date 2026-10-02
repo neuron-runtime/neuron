@@ -1,5 +1,7 @@
 package manifest
 
+import "github.com/neuron-runtime/neuron/shared/types/core"
+
 // Assembly is the canonical, source-language-neutral representation of a
 // Neuron assembly definition. Every authoring syntax (YAML, TypeScript,
 // JSON, future languages) compiles down to this structure, which is then
@@ -26,14 +28,18 @@ type Metadata struct {
 
 // Capability describes one unit of computation.
 type Capability struct {
-	Name              string                `json:"name"`
-	Version           string                `json:"version,omitempty"`
-	Description       string                `json:"description,omitempty"`
+	Name        string `json:"name"`
+	Version     string `json:"version,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// CapabilityRuntime is the runtime declaration for this capability: which
+	// runtime executes it, where that runtime comes from, and how N.O.R.E.
+	// should drive it.
 	CapabilityRuntime CapabilityRuntimeSpec `json:"capabilityRuntime"`
-	Params            []Port                `json:"params"`
-	Results           []Port                `json:"results"`
-	Config            map[string]any        `json:"config,omitempty"`
-	Execution         *ExecutionConfig      `json:"execution,omitempty"`
+
+	Params  []Port         `json:"params"`
+	Results []Port         `json:"results"`
+	Config  map[string]any `json:"config,omitempty"`
 }
 
 // Port is a typed parameter or result slot.
@@ -46,18 +52,24 @@ type Port struct {
 
 // CapabilityRuntimeSpec identifies the runtime capability runtime required by a capability.
 type CapabilityRuntimeSpec struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Registry string `json:"registry"`
-}
+	// Name is the logical capability runtime identity (e.g. "example:echo").
+	Name string `json:"name"`
 
-// ExecutionConfig contains capability-level execution behavior.
-type ExecutionConfig struct {
-	Mode           string `json:"mode,omitempty"`
-	Timeout        string `json:"timeout,omitempty"`
-	Retries        int    `json:"retries,omitempty"`
-	Concurrency    int    `json:"concurrency,omitempty"`
-	ContinueOnFail bool   `json:"continueOnFail,omitempty"`
+	// Version is the version requirement to resolve against the registry.
+	Version string `json:"version"`
+
+	// Registry names the registry or distribution source to obtain the runtime from.
+	Registry string `json:"registry"`
+
+	// RuntimeConfig instructs N.O.R.E. how to execute this capability through
+	// this runtime. It is scoped to this capability's runtime invocation: two
+	// capabilities may declare the same runtime with different runtimeConfigs,
+	// while the runtime artifact itself is still resolved and installed once.
+	//
+	// RuntimeConfig is never capability input and is never passed to the
+	// capability runtime as params. A nil value means the author declared
+	// nothing and N.O.R.E. supplies every default.
+	RuntimeConfig *core.RuntimeConfig `json:"runtimeConfig,omitempty"`
 }
 
 // Binding describes a directed edge between two capabilities.

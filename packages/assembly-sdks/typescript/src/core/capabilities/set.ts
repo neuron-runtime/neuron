@@ -4,7 +4,7 @@ export const setCapability = Capability({
     name: 'neuron:core:set',
 }).paramsSchema()
 .resultSchema()
-.capabilityRuntime({
+.runtime({
     name: 'neuron:core:set',
     version: '1.0.0',
 })

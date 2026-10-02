@@ -9,6 +9,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     shipment:
@@ -26,7 +30,3 @@ spec:
     - direction: input
       source: email
       target: email
-
-  execution:
-    mode: wait
-    timeout: 5s

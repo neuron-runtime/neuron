@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neuron-runtime/neuron/application/build"
@@ -62,6 +63,22 @@ func TestScaffoldTypeScriptLayout(t *testing.T) {
 	for _, want := range []string{"neuron.config.json", "package.json", "tsconfig.json", "assembly.ts", "neuron/capabilityRuntimes/.gitkeep"} {
 		if _, err := os.Stat(filepath.Join(root, want)); err != nil {
 			t.Errorf("missing scaffold file %s: %v", want, err)
+		}
+	}
+
+	// The scaffold must use the current SDK surface. A scaffold that emits a
+	// removed builder produces a project that cannot build at all, which is
+	// worse than a compile error in this package.
+	assembly, err := os.ReadFile(filepath.Join(root, "assembly.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(assembly), ".runtime(") {
+		t.Errorf("scaffolded assembly must declare its runtime with .runtime():\n%s", assembly)
+	}
+	for _, removed := range []string{".capabilityRuntime(", ".runtimeConfig("} {
+		if strings.Contains(string(assembly), removed) {
+			t.Errorf("scaffolded assembly uses removed builder %q:\n%s", removed, assembly)
 		}
 	}
 

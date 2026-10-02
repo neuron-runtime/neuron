@@ -60,14 +60,29 @@ type normalizedMetadata struct {
 }
 
 type normalizedCapability struct {
-	ID          string                     `json:"id"`
-	Type        core.CapabilityRuntimeType `json:"type"`
-	Config      map[string]any             `json:"config"`
-	Params      []core.Port                `json:"params,omitempty"`
-	Results     []core.Port                `json:"results,omitempty"`
-	Timeout     string                     `json:"timeout,omitempty"`
-	MaxAttempts int                        `json:"max_attempts,omitempty"`
-	Backoff     string                     `json:"backoff,omitempty"`
+	ID      string                     `json:"id"`
+	Type    core.CapabilityRuntimeType `json:"type"`
+	Config  map[string]any             `json:"config"`
+	Params  []core.Port                `json:"params,omitempty"`
+	Results []core.Port                `json:"results,omitempty"`
+	// RuntimeConfig is the capability's declared runtime configuration, which
+	// is part of the assembly's deployment identity. N.O.R.E.'s own defaults
+	// are deliberately excluded: they are applied after registration and are
+	// never part of what an author deployed, so they must not invalidate an
+	// existing registration when the runtime engine is upgraded. A runtimeConfig
+	// that declares nothing is treated as no runtimeConfig, since both resolve
+	// to the same defaults.
+	RuntimeConfig *core.RuntimeConfig `json:"runtimeConfig,omitempty"`
+}
+
+// declaredRuntimeConfig drops a runtimeConfig that carries no declaration, so
+// that "declared an empty group" and "declared nothing" contribute identically
+// to the hash.
+func declaredRuntimeConfig(config *core.RuntimeConfig) *core.RuntimeConfig {
+	if config.IsEmpty() {
+		return nil
+	}
+	return config
 }
 
 type normalizedBinding struct {
@@ -82,26 +97,22 @@ func normalizeAssembly(assembly core.Assembly) normalizedAssembly {
 	capabilities := make([]normalizedCapability, 0, len(assembly.Specification.Capabilities)+len(assembly.Specification.Triggers))
 	for _, trigger := range assembly.Specification.Triggers {
 		capabilities = append(capabilities, normalizedCapability{
-			ID:          string(trigger.Metadata.ID),
-			Type:        trigger.Type,
-			Config:      trigger.CapabilityConfigurations,
-			Params:      append([]core.Port(nil), trigger.Params...),
-			Results:     append([]core.Port(nil), trigger.Results...),
-			Timeout:     trigger.RuntimeConfigurations.Timeout,
-			MaxAttempts: trigger.RuntimeConfigurations.Retry.MaxAttempts,
-			Backoff:     trigger.RuntimeConfigurations.Retry.Backoff,
+			ID:            string(trigger.Metadata.ID),
+			Type:          trigger.Type,
+			Config:        trigger.CapabilityConfigurations,
+			Params:        append([]core.Port(nil), trigger.Params...),
+			Results:       append([]core.Port(nil), trigger.Results...),
+			RuntimeConfig: declaredRuntimeConfig(trigger.RuntimeConfig),
 		})
 	}
 	for _, cap := range assembly.Specification.Capabilities {
 		capabilities = append(capabilities, normalizedCapability{
-			ID:          string(cap.Metadata.ID),
-			Type:        cap.Type,
-			Config:      cap.CapabilityConfigurations,
-			Params:      append([]core.Port(nil), cap.Params...),
-			Results:     append([]core.Port(nil), cap.Results...),
-			Timeout:     cap.RuntimeConfigurations.Timeout,
-			MaxAttempts: cap.RuntimeConfigurations.Retry.MaxAttempts,
-			Backoff:     cap.RuntimeConfigurations.Retry.Backoff,
+			ID:            string(cap.Metadata.ID),
+			Type:          cap.Type,
+			Config:        cap.CapabilityConfigurations,
+			Params:        append([]core.Port(nil), cap.Params...),
+			Results:       append([]core.Port(nil), cap.Results...),
+			RuntimeConfig: declaredRuntimeConfig(cap.RuntimeConfig),
 		})
 	}
 	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i].ID < capabilities[j].ID })

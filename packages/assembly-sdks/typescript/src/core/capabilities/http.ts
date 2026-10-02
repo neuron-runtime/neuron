@@ -16,7 +16,7 @@ export const http = Capability({
     name: "neuron:core:http"
 }).paramsSchema<HttpInputType>()
 .resultSchema<HttpOutputType>()
-.capabilityRuntime({
+.runtime({
     name: 'neuron:core:http',
     version: '1.0.0',
 })

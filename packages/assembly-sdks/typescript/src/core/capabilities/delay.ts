@@ -7,7 +7,7 @@ export const delay = Capability({
     duration: string(),
 }).resultSchema({
     delayed_for: string()
-}).capabilityRuntime({
+}).runtime({
     name: "neuron:core:delay",
     version: "1.0.0"
 })

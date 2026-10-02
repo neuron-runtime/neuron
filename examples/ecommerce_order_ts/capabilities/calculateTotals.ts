@@ -6,6 +6,6 @@ export const calculateTotals = Capability({
   version: "1.0.0",
   description: "Calculate order totals with tax and discounts",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<CalculateTotalsInput>()
   .resultSchema<CalculateTotalsOutput>();

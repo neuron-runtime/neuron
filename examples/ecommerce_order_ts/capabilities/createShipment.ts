@@ -6,6 +6,6 @@ export const createShipment = Capability({
   version: "1.0.0",
   description: "Create a shipment for the order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<CreateShipmentInput>()
   .resultSchema<CreateShipmentOutput>();

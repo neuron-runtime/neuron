@@ -15,8 +15,9 @@
 
 ## Runtime Configuration
 
-- [ ]  **Move execution configuration from capabilities to capability runtimes**
+- [x]  **Move execution configuration from capabilities to capability runtimes**
     - **Files:** `packages/assembly-sdks/typescript/src/capability.ts`, `packages/assembly-sdks/typescript/src/manifest.ts`, `application/compiler/manifest/manifest.go`, `application/compiler/compiler.go`, `shared/types/core/capability.go`, `shared/types/protocol/hash.go`, `nore/internal/execution/engine/`, affected tests/docs/examples
+    - **Implemented (modeling and plumbing).** The grouped `runtimeConfig` schema lives in `shared/types/core/runtimeconfig.go` and is wired end to end: TypeScript `.runtime({ runtimeConfig })`, manifest `capabilityRuntime.runtimeConfig`, YAML `capability runtime: runtimeConfig:` with legacy `execution:` folded in, compiler validation and cloning, hashing of declared configuration, and N.O.R.E. default resolution applied once per execution plan (`nore/internal/runtimeconfig`) and delivered on `contracts.ExecutionContext.RuntimeConfig`. Runtime settings now reach the N.O.R.E. boundary; enforcing them is tracked separately below.
     - Remove the current capability-level `.runtimeConfig(...)` / `ExecutionConfig` API.
     - Replace it with runtime configuration supplied through `.runtime(...)`:
         
@@ -75,16 +76,18 @@
         - runtime configuration being available to the N.O.R.E. runtime/backend lifecycle.
 - [ ]  **Actually apply capability-runtime execution settings**
     - **Files:** `nore/internal/execution/engine/executor_engine.go`, runtime backend implementations, `shared/types/capabilityruntime/`, affected tests
+    - **Status:** the effective configuration is now available on `contracts.ExecutionContext.RuntimeConfig` (defaults resolved by `nore/internal/runtimeconfig` at plan time), but the engine and backends do not yet act on it. This item covers enforcement only.
     - Implement the runtime-level settings once the new ownership model is established.
     - `execution.mode` must control runtime/execution handling rather than being treated as capability data.
     - `timeout` must establish the appropriate execution context deadline.
     - `retry` must be enforced around capability-runtime invocation with explicit retry/backoff semantics.
     - `resources` must be represented as runtime execution constraints and only enforced by backends that support the requested resource controls.
     - Unsupported configuration must fail validation or be explicitly ignored according to a documented compatibility policy; do not silently imply that an option is enforced when it is not.
-- [ ]  **Remove obsolete capability execution configuration**
+- [x]  **Remove obsolete capability execution configuration**
     - **Files:** `packages/assembly-sdks/typescript/src/capability.ts`, `packages/assembly-sdks/typescript/src/manifest.ts`, `application/compiler/manifest/manifest.go`, `shared/types/core/capability.go`, affected YAML/JSON examples and tests
     - Remove `CapabilityComposition.execution`, `CapabilityManifest.execution`, `manifest.Capability.Execution`, `core.Capability.RuntimeConfigurations`, and related capability-level execution plumbing once the runtime-level configuration model is implemented.
     - Do not retain duplicate capability-level and runtime-level configuration paths.
+    - **Done.** The dead TypeScript `.runtimeConfig()` / `ExecutionConfig` and `_composition.execution` plumbing, the manifest `ExecutionConfig`/`Capability.Execution`, and `core.Capability.RuntimeConfigurations` are removed. There is a single path: `capabilityRuntime.runtimeConfig`. The legacy YAML `execution:` block is retained only as deprecated authoring sugar and is folded into that one canonical location by the compiler; it never survives as its own field.
 
 ## Capability Runtime / Packaging
 
@@ -107,10 +110,11 @@
 
 ## Build / Compiler
 
-- [ ]  **Verify compiler/runtime configuration preservation**
+- [x]  **Verify compiler/runtime configuration preservation**
     - **Files:** `application/compiler/compiler.go`, `shared/types/protocol/hash.go`
     - The compiler generates runtime configuration fields and `HashAssembly` includes them, but the runtime does not currently consume all of them.
     - Add tests ensuring a configuration change changes the deployment/build identity where it is supposed to, without implying that unsupported behavior is implemented.
+    - **Done for identity.** `shared/types/protocol/hash_test.go` pins that declared `runtimeConfig` changes the hash while absent and empty configurations hash identically, and `application/compiler/runtimeconfig_test.go` pins that the compiler validates and clones without inventing values. Consumption/enforcement is tracked under "Actually apply capability-runtime execution settings".
 
 ## First-Party Runtime Architecture
 

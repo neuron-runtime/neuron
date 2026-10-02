@@ -6,6 +6,6 @@ export const sendConfirmation = Capability({
   version: "1.0.0",
   description: "Send order confirmation email",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<SendConfirmationInput>()
   .resultSchema<SendConfirmationOutput>();

@@ -6,6 +6,6 @@ export const validateOrder = Capability({
   version: "1.0.0",
   description: "Validate incoming order request",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<ValidateOrderInput>()
   .resultSchema<ValidateOrderOutput>();

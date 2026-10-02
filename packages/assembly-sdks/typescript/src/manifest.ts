@@ -1,3 +1,5 @@
+import type { RuntimeConfig } from "./capability.js";
+
 export interface AssemblyManifest {
   apiVersion: "neuron/v1";
   kind: "Assembly";
@@ -16,24 +18,33 @@ export interface CapabilityManifest {
   version?: string;
   description?: string;
 
-  capabilityRuntime: {
-    name: string;
-    version: string;
-    registry: string;
-  };
+  capabilityRuntime: CapabilityRuntimeManifest;
 
   params: PortManifest[];
   results: PortManifest[];
 
   config?: Record<string, unknown>;
+}
 
-  execution?: {
-    mode?: string;
-    timeout?: string;
-    retries?: number;
-    concurrency?: number;
-    continueOnFail?: boolean;
-  };
+/**
+ * CapabilityRuntimeManifest is the runtime a capability is executed through,
+ * plus the configuration N.O.R.E. uses to drive that single invocation.
+ *
+ * The runtime identity (name, version, registry) is what resolution and
+ * installation deduplicate on, so several capabilities may share one resolved
+ * artifact. `runtimeConfig` is not part of that identity: it stays attached to
+ * the capability whose invocation it governs.
+ */
+export interface CapabilityRuntimeManifest {
+  name: string;
+  version: string;
+  registry: string;
+  /**
+   * How N.O.R.E. executes this capability through this runtime. Absent means
+   * the author declared nothing and N.O.R.E. supplies every default. It is
+   * never capability input and never reaches the runtime as params.
+   */
+  runtimeConfig?: RuntimeConfig;
 }
 
 // PortManifest describes a single typed slot on the capability boundary:

@@ -57,7 +57,7 @@ const validateOrder = Capability({
   version: "1.0.0",
   description: "Validate an incoming order before processing",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
 ```
@@ -69,7 +69,53 @@ const validateOrder = Capability({
 | `description` | Human-readable purpose (optional, for documentation and registries) |
 
 > [!NOTE]
-> Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.capabilityRuntime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.capabilityRuntime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../../docs/MODULES.md).
+> Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.runtime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.runtime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../../docs/MODULES.md).
+
+### Runtime configuration
+
+A capability runtime declares **what** runs a capability. A `runtimeConfig` declares **how N.O.R.E. should drive** it: execution mode, timeout, retry behavior, and (reserved) resource constraints.
+
+```ts
+const callPartner = Capability({
+  name: "partner.call",
+  version: "1.0.0",
+})
+  .runtime({
+    name: "acme:http",
+    version: "^1.2.0",
+    registry: "github",
+    runtimeConfig: {
+      execution: { mode: "wait", timeout: "30s" },
+      retry: { policy: "exponential", maxAttempts: 4, initialBackoff: "100ms", maxBackoff: "2s" },
+    },
+  })
+  .paramsSchema<{ url: string }>();
+```
+
+Every field is optional and every group is optional. Anything left unset is supplied by N.O.R.E.'s own defaults, so a capability that does not care can omit `runtimeConfig` entirely.
+
+| Group | Field | Meaning |
+| --- | --- | --- |
+| `execution` | `mode` | `"wait"` (default) or `"detach"`. `detach` is accepted and carried, but currently behaves as `wait`. |
+| `execution` | `timeout` | Per-invocation duration, e.g. `"5s"`. Empty means no capability-level deadline; the runtime backend applies its own bound. |
+| `retry` | `policy` | `"none"` (default), `"fixed"`, or `"exponential"`. |
+| `retry` | `maxAttempts` | Total attempts, including the first. Defaults to `1` (never retried). |
+| `retry` | `initialBackoff` / `maxBackoff` | Durations between attempts. |
+| `resources` | — | Reserved for per-runtime resource constraints. |
+
+A `runtimeConfig` is **per capability**, not per capability runtime: two capabilities may share one runtime artifact while driving it differently.
+
+```ts
+const artifact = { name: "acme:http", version: "1.2.0", registry: "github" } as const;
+
+Capability({ name: "partner.call" }).runtime({ ...artifact, runtimeConfig: { execution: { mode: "wait" } } });
+Capability({ name: "partner.notify" }).runtime({ ...artifact, runtimeConfig: { execution: { mode: "detach" } } });
+```
+
+> [!IMPORTANT]
+> A `runtimeConfig` is an instruction to the runtime engine, not capability input. It is never merged into params or `config`, and is never sent to the capability runtime — the capability only ever receives the params you declare.
+
+What you declare is compiled, validated, and frozen into the registered assembly, so it participates in the assembly's identity hash. N.O.R.E.'s defaults are applied when an execution plan is built and do not change the hash, so changing a default never rewrites a deployed assembly.
 
 ---
 
@@ -96,7 +142,7 @@ const validateOrder = Capability({
   name: "order.validate",
   version: "1.0.0",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
 ```

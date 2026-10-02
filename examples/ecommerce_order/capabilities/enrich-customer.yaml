@@ -9,6 +9,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     customer_data:
@@ -23,7 +27,3 @@ spec:
     - direction: input
       source: customer_id
       target: customer_id
-
-  execution:
-    mode: wait
-    timeout: 5s

@@ -175,7 +175,7 @@ const validateOrder = Capability({
   version: "1.0.0",
   description: "Validate an incoming order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
 
@@ -184,7 +184,7 @@ const authorizePayment = Capability({
   version: "1.0.0",
   description: "Authorize payment for an order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order; amount: number }>()
   .resultSchema<{ order: Order; amount: number }>();
 ```
@@ -310,7 +310,7 @@ const echo = Capability({
   version: "1.0.0",
   description: "Echo a message through the reference module",
 })
-  .capabilityRuntime({ name: "example:echo", version: "^1.0.0", registry: "local" })
+  .runtime({ name: "example:echo", version: "^1.0.0", registry: "local" })
   .paramsSchema<{ message: string }>();
 ```
 

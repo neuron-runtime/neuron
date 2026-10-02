@@ -6,6 +6,6 @@ export const enrichCustomer = Capability({
   version: "1.0.0",
   description: "Enrich with customer data",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<EnrichCustomerInput>()
   .resultSchema<EnrichCustomerOutput>();

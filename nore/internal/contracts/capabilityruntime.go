@@ -36,7 +36,20 @@ type ExecutionContext struct {
 
 	// CapabilityConfigurations contains the fully resolved configuration for
 	// this single Capability execution. It contains no {{ ... }} placeholders.
+	//
+	// This is user-authored input to the capability and is deliberately
+	// distinct from RuntimeConfig.
 	CapabilityConfigurations map[string]any
+
+	// RuntimeConfig is the effective runtime configuration for this single
+	// capability invocation: how N.O.R.E. should drive the capability through
+	// its declared Capability Runtime. Defaults are already resolved, so every
+	// field is populated.
+	//
+	// It belongs to the runtime engine, not to the capability. Implementations
+	// must never merge it into Params or CapabilityConfigurations, and it is
+	// never sent to the capability runtime as capability input.
+	RuntimeConfig *core2.RuntimeConfig
 
 	// Logger is bound to this capability execution. Use it for any diagnostic
 	// output instead of writing to stdout.

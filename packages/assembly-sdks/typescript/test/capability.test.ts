@@ -45,9 +45,9 @@ describe("Capability", () => {
   });
 });
 
-describe("Capability capabilityRuntime", () => {
-  it("sets explicit capability runtime name, version, registry", () => {
-    const svc = Capability({ name: "http-call" }).capabilityRuntime({
+describe("Capability.runtime()", () => {
+  it("sets explicit runtime name, version, registry", () => {
+    const svc = Capability({ name: "http-call" }).runtime({
       name: "http.get",
       version: "2.0.0",
       registry: "github",
@@ -60,12 +60,91 @@ describe("Capability capabilityRuntime", () => {
     });
   });
 
-  it("defaults missing capability runtime version to latest", () => {
-    const svc = Capability({ name: "http-call" }).capabilityRuntime({ name: "http.get" });
+  it("defaults missing runtime version to latest and registry to local", () => {
+    const svc = Capability({ name: "http-call" }).runtime({ name: "http.get" });
     expect(svc.toManifest().capabilityRuntime).toEqual({
       name: "http.get",
       version: "latest",
       registry: "local",
+    });
+  });
+
+  it("emits no runtimeConfig key when none is declared", () => {
+    // An author who declares nothing must produce no key at all, so N.O.R.E.
+    // supplies every default rather than the SDK manufacturing an empty one.
+    const svc = Capability({ name: "http-call" }).runtime({ name: "http.get" });
+    expect("runtimeConfig" in svc.toManifest().capabilityRuntime).toBe(false);
+    expect(Object.keys(svc.toManifest().capabilityRuntime)).toEqual([
+      "name",
+      "version",
+      "registry",
+    ]);
+  });
+
+  it("carries a grouped runtimeConfig into the manifest runtime declaration", () => {
+    const svc = Capability({ name: "http-call" }).runtime({
+      name: "http.get",
+      runtimeConfig: {
+        execution: { mode: "detach", timeout: "5s" },
+        retry: { policy: "exponential", maxAttempts: 3, initialBackoff: "100ms" },
+      },
+    });
+
+    expect(svc.toManifest().capabilityRuntime).toEqual({
+      name: "http.get",
+      version: "latest",
+      registry: "local",
+      runtimeConfig: {
+        execution: { mode: "detach", timeout: "5s" },
+        retry: { policy: "exponential", maxAttempts: 3, initialBackoff: "100ms" },
+      },
+    });
+  });
+
+  it("keeps runtimeConfig out of the capability's params and results", () => {
+    // runtimeConfig instructs N.O.R.E.; it is never capability input.
+    const svc = Capability({ name: "http-call" })
+      .runtime({
+        name: "http.get",
+        runtimeConfig: { execution: { mode: "detach", timeout: "5s" } },
+      })
+      .paramsSchema({ url: string() })
+      .resultSchema({ status: number() });
+
+    const manifest = svc.toManifest();
+    expect(manifest.params.map((p) => p.name)).toEqual(["url"]);
+    expect(manifest.results.map((p) => p.name)).toEqual(["status"]);
+    expect(manifest.capabilityRuntime.runtimeConfig).toBeDefined();
+    expect(JSON.stringify(manifest.params)).not.toContain("runtimeConfig");
+    expect(JSON.stringify(manifest.results)).not.toContain("runtimeConfig");
+  });
+
+  it("gives two capabilities on the same runtime their own runtimeConfig", () => {
+    const shared = { name: "http.get", version: "1.0.0", registry: "github" };
+    const wait = Capability({ name: "wait-call" }).runtime({
+      ...shared,
+      runtimeConfig: { execution: { mode: "wait" } },
+    });
+    const detach = Capability({ name: "detach-call" }).runtime({
+      ...shared,
+      runtimeConfig: { execution: { mode: "detach" } },
+    });
+
+    expect(wait.toManifest().capabilityRuntime.runtimeConfig).toEqual({
+      execution: { mode: "wait" },
+    });
+    expect(detach.toManifest().capabilityRuntime.runtimeConfig).toEqual({
+      execution: { mode: "detach" },
+    });
+  });
+
+  it("does not let one capability's runtimeConfig leak through a shared object", () => {
+    const runtimeConfig = { execution: { mode: "wait" as const, timeout: "5s" } };
+    const svc = Capability({ name: "a" }).runtime({ name: "http.get", runtimeConfig });
+    runtimeConfig.execution.timeout = "99s";
+
+    expect(svc.toManifest().capabilityRuntime.runtimeConfig).toEqual({
+      execution: { mode: "wait", timeout: "5s" },
     });
   });
 });
@@ -175,14 +254,6 @@ describe("Capability.withParams()", () => {
   });
 });
 
-describe("Capability.runtimeConfig()", () => {
-  it("returns a composition node with execution config", () => {
-    const svc = Capability({ name: "a" });
-    const node = svc.runtimeConfig({ timeout: "10s", retries: 2 });
-    expect(node.runtimeConfig).toEqual({ timeout: "10s", retries: 2 });
-  });
-});
-
 describe("Capability.bind()", () => {
   it("collects capability invocations into a flat composition", () => {
     const a = Capability({ name: "a" });
@@ -247,7 +318,7 @@ describe("installable capability package pattern", () => {
         content: string(),
         sha: string(),
       })
-      .capabilityRuntime({ name: "github.read" });
+      .runtime({ name: "github.read" });
 
     expect(githubRead.ref).toBe("github.read");
     expect(githubRead.toManifest().params).toHaveLength(3);

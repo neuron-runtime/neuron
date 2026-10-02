@@ -161,6 +161,10 @@ metadata:
 spec:
   capability runtime:
     type: neuron:core:set
+    runtimeConfig:
+      execution:
+        mode: wait
+        timeout: 5s
 
   config:
     status: validated
@@ -170,11 +174,9 @@ spec:
     - direction: input
       source: execution.params.order
       target: order
-
-  execution:
-    mode: wait
-    timeout: 5s
 ```
+
+`runtimeConfig` declares how N.O.R.E. should *drive* the capability through its capability runtime — execution mode, timeout, retry behavior, and reserved resource constraints. It is grouped deliberately (`execution`, `retry`, `resources`), is per capability, and is never capability input. Every field is optional; N.O.R.E. supplies its own defaults for anything unset.
 
 Execution flows along the bindings. Each binding defines what data flows between the two capabilities (`mappings`, expressed in CEL) and optionally which conditions must hold (`validations`). Execution params are available to expressions as `execution.params`; the upstream capability's result as `source.result`.
 
@@ -199,7 +201,7 @@ const validate = Capability({
   version: "1.0.0",
   description: "Validate an incoming order",
 })
-  .capabilityRuntime({ name: "neuron:core:set" })
+  .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: object }>()
   .resultSchema<{ order: object; valid: boolean }>();
 
@@ -592,7 +594,16 @@ N.O.R.E. treats every capability as a capability runtime. An execution is always
 
 ## Executing one capability
 
-When an execution flows through the assembly, a capability's capability runtime is resolved from the registry (core capability runtime or adapter) and invoked with an `ExecutionContext`: the execution and correlation IDs, the capability definition, the resolved params, and a logger bound to the execution.
+When an execution flows through the assembly, a capability's capability runtime is resolved from the registry (core capability runtime or adapter) and invoked with an `ExecutionContext`: the execution and correlation IDs, the capability definition, the resolved params, the capability's effective runtime configuration, and a logger bound to the execution.
+
+The `ExecutionContext` keeps two things rigorously apart:
+
+| Field | Owned by | Reaches the capability runtime? |
+| --- | --- | --- |
+| `Params`, `CapabilityConfigurations` | the author's declaration | Yes — this is capability input |
+| `RuntimeConfig` | N.O.R.E. | No — it tells the engine how to drive the invocation |
+
+A `runtimeConfig` is resolved from the capability's runtime declaration, not from its input. The planner fills in N.O.R.E.'s defaults **once, when the plan is built**, so the engine always sees a complete configuration and no per-invocation defaulting cost is paid. The registered assembly keeps the configuration exactly as authored; defaults live on the plan and never mutate it. As a result, changing a default never rewrites a deployed assembly and never changes an assembly's identity hash — only what the author explicitly declares is frozen into the hash.
 
 The capability runtime returns the result map. Errors from the capability runtime are distinguished:
 
