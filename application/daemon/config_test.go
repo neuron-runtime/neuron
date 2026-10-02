@@ -19,6 +19,7 @@ func noreArgs(t *testing.T, args []string) []string {
 	_ = fs.String("socket", "", "")
 	_ = fs.Int("workers", 8, "")
 	_ = fs.String("data-dir", "", "")
+	_ = fs.String("detached-drain-timeout", "30s", "")
 
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("nore flag set rejected daemon args %q: %v", args, err)
@@ -62,4 +63,35 @@ func TestConfigFromEffectiveDefaults(t *testing.T) {
 	if pos := noreArgs(t, c.Args); len(pos) > 0 {
 		t.Fatalf("default daemon args contain positional arguments: %v", c.Args)
 	}
+}
+
+func TestConfigFromEffectiveCarriesDetachedDrainTimeout(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Runtime.DetachedDrainTimeout = "45s"
+
+	c := ConfigFromEffective(cfg)
+
+	if pos := noreArgs(t, c.Args); len(pos) > 0 {
+		t.Fatalf("daemon args contain positional arguments: %v", pos)
+	}
+	if !hasArgPair(c.Args, "--detached-drain-timeout", "45s") {
+		t.Fatalf("daemon args %v must carry the configured detached drain timeout", c.Args)
+	}
+}
+
+func TestConfigFromEffectiveOmitsEmptyDetachedDrainTimeout(t *testing.T) {
+	// An empty value means the author declared nothing; the daemon's own
+	// default must apply, not an empty flag argument.
+	if hasArgPair(ConfigFromEffective(config.Config{}).Args, "--detached-drain-timeout", "") {
+		t.Fatal("an empty detached drain timeout must not be forwarded")
+	}
+}
+
+func hasArgPair(args []string, flagName, value string) bool {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == flagName && args[index+1] == value {
+			return true
+		}
+	}
+	return false
 }

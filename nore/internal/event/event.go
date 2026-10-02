@@ -46,3 +46,26 @@ type CapabilityReadyPayload struct{ Params map[string]any }
 type CapabilityStartedPayload struct{}
 type CapabilityCompletedPayload struct{ Result map[string]any }
 type CapabilityFailedPayload struct{ Message string }
+
+// CapabilityDetachedPayload records a lifecycle boundary, so it carries no data
+// of its own. The capability ID on the event identifies the boundary, and the
+// task that now owns the work is reachable from the parent execution through the
+// execution store.
+type CapabilityDetachedPayload struct{}
+
+// CapabilityRetryPayload reports a scheduled re-attempt of a capability
+// invocation so an observer can see that a capability is still being worked on
+// rather than stalled.
+type CapabilityRetryPayload struct {
+	// Attempt is the attempt that just failed.
+	Attempt int
+
+	// NextAttempt is the attempt about to be made.
+	NextAttempt int
+
+	// Delay is how long N.O.R.E. waited before NextAttempt.
+	Delay string
+
+	// Message is the failure that caused the retry.
+	Message string
+}

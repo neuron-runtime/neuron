@@ -13,6 +13,11 @@ type ExecutionItem struct {
 	StartedAt     *int64  `json:"started_at,omitempty"`
 	CompletedAt   *int64  `json:"completed_at,omitempty"`
 	Error         string  `json:"error,omitempty"`
+
+	// ParentExecutionID is set when this execution took over detached work from
+	// another execution in the same instance. It lets a caller walk from a
+	// detached task back to the execution whose caller handed the work off.
+	ParentExecutionID core.ID `json:"parent_execution_id,omitempty"`
 }
 
 type EventItem struct {

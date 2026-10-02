@@ -31,7 +31,7 @@ func newTestHandler(t *testing.T) *Handler {
 	t.Cleanup(func() { _ = store.Close() })
 
 	assembliesRepo := assembly.NewRepository(store)
-	m := instance.NewManager(context.Background(), 2, store, assembliesRepo)
+	m := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
 
 	cel, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
@@ -182,7 +182,7 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 
 	// A fresh manager reconciles the record as metadata-only; the runtime is
 	// intentionally absent.
-	m := instance.NewManager(context.Background(), 2, store, assembliesRepo)
+	m := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
 	stale, ok := m.GetByID("inst_stale")
 	if !ok {
 		t.Fatal("stale instance was not restored")

@@ -112,14 +112,9 @@ func (s *ExecutionStore) ListByInstance(instanceID shared.ID) []*Execution {
 	keys, err := s.store.List(context.Background(), "executions/")
 	s.mu.RUnlock()
 
-	result := make([]*Execution, 0)
-	seen := make(map[shared.ID]bool)
-
-	for _, exec := range s.mem.List() {
-		if exec.InstanceID != instanceID {
-			continue
-		}
-		result = append(result, exec)
+	result := s.mem.ListByInstance(instanceID)
+	seen := make(map[shared.ID]bool, len(result))
+	for _, exec := range result {
 		seen[exec.ID] = true
 	}
 

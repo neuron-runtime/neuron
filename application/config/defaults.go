@@ -19,6 +19,7 @@ func Defaults() Config {
 				Min: 1,
 				Max: 8,
 			},
+			DetachedDrainTimeout: "30s",
 		},
 
 		Daemon: DaemonConfig{

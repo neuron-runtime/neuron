@@ -16,6 +16,10 @@ type CapabilityState int
 const (
 	CapabilityWaiting CapabilityState = iota
 	CapabilityRunning
+	// CapabilityDetached marks a capability whose work was handed to a separate
+	// execution. It is not an error, but it is also not a result: the work
+	// continues under a task this view does not track.
+	CapabilityDetached
 	CapabilityCompleted
 	CapabilityFailed
 )
@@ -28,6 +32,9 @@ type CapabilityView struct {
 	Output map[string]any
 	// Message is the failure message for failed capabilities.
 	Message string
+	// Retries counts the re-attempts reported for a running capability, so a
+	// capability that is being retried does not look stalled.
+	Retries int
 }
 
 // Status is the execution-level state.
@@ -82,6 +89,15 @@ func (v *ExecutionView) Fold(evt protocol.StreamEvent) error {
 	case "capability.ready", "capability.started":
 		if sv != nil {
 			sv.State = CapabilityRunning
+		}
+	case "capability.detached":
+		if sv != nil {
+			sv.State = CapabilityDetached
+		}
+	case "capability.retry":
+		if sv != nil {
+			sv.State = CapabilityRunning
+			sv.Retries++
 		}
 	case "capability.completed":
 		if sv != nil {

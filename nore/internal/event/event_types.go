@@ -1,5 +1,10 @@
 package event
 
+// Type identifies an execution lifecycle event.
+//
+// The numeric values are part of the persisted event format: the event store
+// writes them as-is, so a type may only ever be appended. Reordering or removing
+// one would silently reinterpret events already on disk.
 type Type uint16
 
 const (
@@ -13,6 +18,15 @@ const (
 	CapabilityCompleted
 	CapabilityFailed
 	CapabilityLog
+	// CapabilityDetached records that a capability's work was handed off to a
+	// separate execution. It ends this capability's participation in the
+	// execution but is not an execution-terminal event: the work itself
+	// continues under the task created for it.
+	CapabilityDetached
+	// CapabilityRetry records a scheduled re-attempt of one capability
+	// invocation. Retries are internal to a single capability execution, so
+	// this is progress rather than a new execution.
+	CapabilityRetry
 )
 
 const All Type = 0xffff
@@ -49,6 +63,10 @@ func (t Type) String() string {
 		return "capability.failed"
 	case CapabilityLog:
 		return "capability.log"
+	case CapabilityDetached:
+		return "capability.detached"
+	case CapabilityRetry:
+		return "capability.retry"
 	default:
 		return "unknown"
 	}

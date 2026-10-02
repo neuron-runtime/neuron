@@ -63,6 +63,10 @@ func ConfigFromEffective(cfg config.Config) Config {
 		c.Args = append(c.Args, "--workers", strconv.Itoa(cfg.Runtime.Workers.Max))
 	}
 
+	if cfg.Runtime.DetachedDrainTimeout != "" {
+		c.Args = append(c.Args, "--detached-drain-timeout", cfg.Runtime.DetachedDrainTimeout)
+	}
+
 	if cfg.Daemon.PIDFile != "" {
 		c.PIDFile = cfg.Daemon.PIDFile
 	}

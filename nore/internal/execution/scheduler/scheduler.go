@@ -6,6 +6,7 @@ import (
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
+	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -15,6 +16,7 @@ type Scheduler struct {
 	executionStarted    event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
+	capabilityDetached  event.Subscription
 }
 
 func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Scheduler, error) {
@@ -36,7 +38,14 @@ func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Sch
 		_ = completed.Close()
 		return nil, err
 	}
-	return &Scheduler{bus: bus, executions: executions, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed}, nil
+	detached, err := bus.Subscribe(event.CapabilityDetached, 64)
+	if err != nil {
+		_ = started.Close()
+		_ = completed.Close()
+		_ = failed.Close()
+		return nil, err
+	}
+	return &Scheduler{bus: bus, executions: executions, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed, capabilityDetached: detached}, nil
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
@@ -68,8 +77,71 @@ func (s *Scheduler) Run(ctx context.Context) error {
 				payload.Message = "capability execution failed"
 			}
 			s.failExecution(ctx, received.Metadata.ExecutionID, fmt.Errorf("%s", payload.Message))
+		case received, open := <-s.capabilityDetached.Events():
+			if !open {
+				return nil
+			}
+			if err := s.onCapabilityDetached(ctx, received); err != nil {
+				s.failExecution(ctx, received.Metadata.ExecutionID, err)
+			}
 		}
 	}
+}
+
+// onCapabilityDetached hands a detached capability's work to a separate
+// execution.
+//
+// The handoff is ordered so that the task exists durably before the caller can
+// observe the handoff as accepted: the task is added to the execution repository
+// first, then the parent releases the capability and its in-flight slot, and only
+// then is the task started. A reader that finds the parent's capability marked
+// detached can therefore always find the task that took the work over, even if
+// the process stopped immediately afterwards.
+//
+// The task's input is the detached capability's params, not the root execution's,
+// because the task's entry is that one capability rather than the assembly.
+func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Event) error {
+	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
+	if !exists {
+		return fmt.Errorf("execution %s was not found", received.Metadata.ExecutionID)
+	}
+	if execution.IsTerminal() {
+		return nil
+	}
+	capabilityID := received.Metadata.CapabilityID
+
+	scope, exists := execution.Blueprint.Detached[capabilityID]
+	if !exists {
+		return fmt.Errorf("capability %s is detached but no execution scope was compiled for it", capabilityID)
+	}
+
+	task, err := executionmodel.NewDetachedTask(scope, execution.CorrelationID, execution.InstanceID, execution.ID)
+	if err != nil {
+		return err
+	}
+	if err := s.executions.Add(task); err != nil {
+		return fmt.Errorf("persist detached task for capability %s: %w", capabilityID, err)
+	}
+
+	input := execution.Params(capabilityID)
+	if err := execution.MarkCapabilityDetached(capabilityID); err != nil {
+		// The task was never started, so leaving it behind would strand work no
+		// one will run.
+		s.executions.Delete(task.ID)
+		return err
+	}
+	remaining, err := execution.CompleteCurrentAndSchedule(0)
+	if err != nil {
+		// The parent is corrupt, but the task has not started. Remove it rather
+		// than leave an execution no one will ever run.
+		s.executions.Delete(task.ID)
+		return err
+	}
+
+	if err := s.bus.Publish(ctx, event.New(event.ExecutionStarted, task.ID, task.CorrelationID, "", event.ExecutionStartedPayload{Params: input})); err != nil {
+		return err
+	}
+	return s.completeIfDrained(ctx, execution, remaining)
 }
 
 func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event) error {
@@ -152,6 +224,15 @@ func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Ev
 			return err
 		}
 	}
+	return s.completeIfDrained(ctx, execution, remaining)
+}
+
+// completeIfDrained finishes an execution whose own work is done. A remaining
+// count above zero means capabilities are still scheduled here, so there is
+// nothing to do. Detached capabilities are deliberately absent from that count:
+// once their work is handed off, the scope that owns it is the task, not this
+// execution.
+func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionmodel.Execution, remaining int) error {
 	if remaining != 0 || !execution.MarkCompleted() {
 		return nil
 	}
@@ -172,4 +253,5 @@ func (s *Scheduler) closeSubscriptions() {
 	_ = s.executionStarted.Close()
 	_ = s.capabilityCompleted.Close()
 	_ = s.capabilityFailed.Close()
+	_ = s.capabilityDetached.Close()
 }

@@ -32,6 +32,8 @@ func (e *Execution) StartedAt() time.Time {
 	return e.startedAt.UTC()
 }
 
+// Error returns the execution-level failure reason, empty when the execution
+// has not failed.
 func (e *Execution) Error() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

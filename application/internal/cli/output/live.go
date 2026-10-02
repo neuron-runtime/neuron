@@ -91,7 +91,13 @@ func (r *liveRenderer) render() string {
 			}
 		case CapabilityFailed:
 			fmt.Fprintf(&b, "\n  %s %s  %s\n", glyphCross, sv.ID, sv.Message)
+		case CapabilityDetached:
+			fmt.Fprintf(&b, "\n  %s %s  detached\n", glyphDetached, sv.ID)
 		case CapabilityRunning:
+			if sv.Retries > 0 {
+				fmt.Fprintf(&b, "\n  %s %s  retrying (#%d)\n", r.spinner(), sv.ID, sv.Retries+1)
+				continue
+			}
 			fmt.Fprintf(&b, "\n  %s %s\n", r.spinner(), sv.ID)
 		default:
 			fmt.Fprintf(&b, "\n  %s %s\n", glyphCircle, sv.ID)

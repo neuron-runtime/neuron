@@ -61,11 +61,25 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 		if evt.CapabilityID != "" {
 			fmt.Fprintf(&line, " [%s]", evt.CapabilityID)
 		}
+		if evt.Type == "capability.retry" {
+			var p struct {
+				Attempt     int    `json:"Attempt"`
+				NextAttempt int    `json:"NextAttempt"`
+				Delay       string `json:"Delay"`
+			}
+			if err := decodePayload(evt.Payload, &p); err == nil {
+				fmt.Fprintf(&line, "  attempt %d failed, retrying (#%d) in %s", p.Attempt, p.NextAttempt, p.Delay)
+			}
+		}
 	case KindStatic, KindTerminal:
 		switch evt.Type {
 		case "capability.completed":
 			line.WriteString(" " + glyphCheck + " ")
 			line.WriteString(string(evt.CapabilityID))
+		case "capability.detached":
+			line.WriteString(" " + glyphDetached + " ")
+			line.WriteString(string(evt.CapabilityID))
+			line.WriteString("  detached")
 		case "capability.failed":
 			line.WriteString(" " + glyphCross + " ")
 			line.WriteString(string(evt.CapabilityID))

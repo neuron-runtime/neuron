@@ -96,12 +96,12 @@ Every field is optional and every group is optional. Anything left unset is supp
 
 | Group | Field | Meaning |
 | --- | --- | --- |
-| `execution` | `mode` | `"wait"` (default) or `"detach"`. `detach` is accepted and carried, but currently behaves as `wait`. |
-| `execution` | `timeout` | Per-invocation duration, e.g. `"5s"`. Empty means no capability-level deadline; the runtime backend applies its own bound. |
+| `execution` | `mode` | `"wait"` (default) or `"detach"`. `detach` hands the capability and everything downstream of it to a separately tracked child execution that may outlive the caller; the parent continues without waiting. |
+| `execution` | `timeout` | Per-invocation duration, e.g. `"5s"`. Bounds the whole invocation, including retries and backoff. Empty means no capability-level deadline; the runtime backend applies its own bound. |
 | `retry` | `policy` | `"none"` (default), `"fixed"`, or `"exponential"`. |
 | `retry` | `maxAttempts` | Total attempts, including the first. Defaults to `1` (never retried). |
 | `retry` | `initialBackoff` / `maxBackoff` | Durations between attempts. |
-| `resources` | — | Reserved for per-runtime resource constraints. |
+| `resources` | — | Reserved for per-runtime resource constraints. No backend enforces these yet, so any key here is rejected rather than silently ignored. |
 
 A `runtimeConfig` is **per capability**, not per capability runtime: two capabilities may share one runtime artifact while driving it differently.
 

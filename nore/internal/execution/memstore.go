@@ -66,3 +66,19 @@ func (s *MemoryStore) List() []*Execution {
 	}
 	return list
 }
+
+// ListByInstance returns every execution that belongs to instanceID. It is the
+// single implementation of the ownership filter, shared with the persistent
+// store so the two can never disagree about which executions an instance owns.
+func (s *MemoryStore) ListByInstance(instanceID core.ID) []*Execution {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	list := make([]*Execution, 0)
+	for _, exec := range s.executions {
+		if exec.InstanceID == instanceID {
+			list = append(list, exec)
+		}
+	}
+	return list
+}

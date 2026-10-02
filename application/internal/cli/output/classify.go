@@ -25,6 +25,14 @@ func Classify(evt protocol.StreamEvent) Kind {
 		return KindLive
 	case "capability.ready", "capability.started", "capability.log":
 		return KindLive
+	case "capability.detached":
+		// A handoff is a permanent milestone: the capability is done here, but
+		// the execution itself is not.
+		return KindStatic
+	case "capability.retry":
+		// A retry is progress on a still-running capability, so it belongs in
+		// the live region rather than as a permanent line.
+		return KindLive
 	case "capability.completed", "capability.failed":
 		return KindStatic
 	case "execution.completed", "execution.failed", "execution.cancelled":
