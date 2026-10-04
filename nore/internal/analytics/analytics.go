@@ -112,14 +112,9 @@ func (a *Analytics) Serve(ctx context.Context) error {
 				return nil
 			}
 			var msg string
-			switch p := evt.Payload.(type) {
-			case event.CapabilityFailedPayload:
-				msg = p.Message
-			case string:
-				msg = p
-			case fmt.Stringer:
-				msg = p.String()
-			default:
+			if message, ok := event.CapabilityFailedMessage(evt.Payload); ok {
+				msg = message
+			} else {
 				msg = fmt.Sprintf("%v", evt.Payload)
 			}
 			a.logger.Error("Capability failed",

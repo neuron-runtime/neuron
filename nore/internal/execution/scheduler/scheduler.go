@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
@@ -83,11 +84,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if !open {
 				return nil
 			}
-			payload, ok := received.Payload.(event.CapabilityFailedPayload)
+			message, ok := event.CapabilityFailedMessage(received.Payload)
 			if !ok {
-				payload.Message = "capability execution failed"
+				message = "capability execution failed"
 			}
-			s.failExecution(ctx, received.Metadata.ExecutionID, fmt.Errorf("%s", payload.Message))
+			s.failExecution(ctx, received.Metadata.ExecutionID, errors.New(message))
 		case received, open := <-s.capabilityDetached.Events():
 			if !open {
 				return nil

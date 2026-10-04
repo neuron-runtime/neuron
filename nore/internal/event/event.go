@@ -1,6 +1,7 @@
 package event
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -52,6 +53,37 @@ type CapabilityReadyPayload struct{ Params map[string]any }
 type CapabilityStartedPayload struct{}
 type CapabilityCompletedPayload struct{ Result map[string]any }
 type CapabilityFailedPayload struct{ Message string }
+
+// CapabilityFailedMessage extracts the failure message carried by a
+// capability-failed payload, reporting whether one was present.
+//
+// Both the value and the pointer form are accepted. A payload travels through an
+// `any` field, so either form is a legitimate thing for a producer to publish,
+// and a caller that asserts only one of them silently discards the other's
+// message and reports a generic failure instead. That hides the actual cause
+// from whoever has to diagnose the run, which is the opposite of what a failure
+// message is for.
+//
+// Callers keep their own fallback policy for the not-present case: the scheduler
+// substitutes its generic text, while analytics reports whatever it received.
+// The extraction lives here so the two cannot disagree about what a payload means.
+func CapabilityFailedMessage(payload any) (string, bool) {
+	switch p := payload.(type) {
+	case CapabilityFailedPayload:
+		return p.Message, true
+	case *CapabilityFailedPayload:
+		if p == nil {
+			return "", false
+		}
+		return p.Message, true
+	case string:
+		return p, true
+	case fmt.Stringer:
+		return p.String(), true
+	default:
+		return "", false
+	}
+}
 
 // CapabilityDetachedPayload records a lifecycle boundary, so it carries no data
 // of its own. The capability ID on the event identifies the boundary, and the
