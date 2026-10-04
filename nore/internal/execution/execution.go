@@ -34,6 +34,13 @@ const (
 	// capability within this execution but not an error: the work continues,
 	// tracked under the task created for it.
 	CapabilityDetached CapabilityStatus = "detached"
+
+	// CapabilityCancelled marks a capability that was abandoned because its
+	// execution was cancelled before the capability reported an outcome. It is
+	// terminal for the capability and distinct from CapabilityFailed: nothing
+	// about the capability itself went wrong, so reporting it as a failure would
+	// attribute a decision to the implementation.
+	CapabilityCancelled CapabilityStatus = "cancelled"
 )
 
 type CapabilityExecutionState struct {
@@ -173,12 +180,25 @@ func (e *Execution) MarkCapabilityCompleted(capabilityID shared.ID, output map[s
 	return nil
 }
 
-func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) {
+// MarkCapabilityFailed records a capability's failure.
+//
+// A capability that already reported an outcome keeps it. The engine observes an
+// aborted invocation *after* a cancellation has already been recorded, and that
+// late error is a consequence of the stop somebody else requested -- reporting it
+// as a capability failure would blame the implementation for a decision it did
+// not make, and would overwrite a success the runtime had legitimately reported.
+//
+// It reports whether the state changed so the caller can skip announcing an
+// outcome the execution no longer holds.
+func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, exists := e.states[capabilityID]
 	if !exists {
-		return
+		return false
+	}
+	if isTerminalCapability(state.Status) {
+		return false
 	}
 	now := time.Now().UTC()
 	state.Status = CapabilityFailed
@@ -187,6 +207,18 @@ func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) {
 		state.Error = err.Error()
 	}
 	e.states[capabilityID] = state
+	return true
+}
+
+// isTerminalCapability reports whether a capability state is final. Pending, ready,
+// and running are not: work may still be scheduled or is still in flight.
+func isTerminalCapability(status CapabilityStatus) bool {
+	switch status {
+	case CapabilityCompleted, CapabilityFailed, CapabilityCancelled, CapabilityDetached:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, error) {
@@ -218,7 +250,7 @@ func (e *Execution) MarkCompleted() bool {
 func (e *Execution) MarkFailed(err error) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.status == StatusCompleted || e.status == StatusFailed || e.status == StatusCancelled {
+	if e.isTerminalLocked() {
 		return false
 	}
 	now := time.Now().UTC()
@@ -235,10 +267,55 @@ func (e *Execution) MarkFailed(err error) bool {
 	return true
 }
 
+// MarkCancelled ends an execution that was cancelled before it completed,
+// abandoning every capability that had not yet reported an outcome.
+//
+// Cancellation is not failure and is reported separately. A cancelled capability
+// may have been perfectly healthy; it simply was not allowed to finish, and
+// whoever reads the execution needs to be able to tell that apart from a
+// capability that broke. Keeping the two apart is also what lets a deadline stay
+// a failure: an exceeded timeout is something the author must fix, while a
+// cancellation is a decision somebody took.
+func (e *Execution) MarkCancelled(reason error) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.isTerminalLocked() {
+		return false
+	}
+	now := time.Now().UTC()
+	e.status = StatusCancelled
+	e.completedAt = &now
+	e.inFlight = 0
+	for capabilityID, state := range e.states {
+		// Anything already terminal -- completed, failed, or handed off to a
+		// detached task -- reported its own outcome and keeps it. Cancelling must
+		// not rewrite history, and a detached task is cancelled through its own
+		// scope, not by cancelling the execution that handed it off.
+		if isTerminalCapability(state.Status) {
+			continue
+		}
+		state.Status = CapabilityCancelled
+		state.CompletedAt = &now
+		if reason != nil {
+			state.Error = reason.Error()
+		}
+		e.states[capabilityID] = state
+	}
+	if reason != nil {
+		e.executionError = reason.Error()
+	}
+	e.signalTerminal()
+	return true
+}
+
+func (e *Execution) isTerminalLocked() bool {
+	return e.status == StatusCompleted || e.status == StatusFailed || e.status == StatusCancelled
+}
+
 func (e *Execution) IsTerminal() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.status == StatusCompleted || e.status == StatusFailed || e.status == StatusCancelled
+	return e.isTerminalLocked()
 }
 
 func (e *Execution) Params(capabilityID shared.ID) map[string]any {

@@ -269,6 +269,37 @@ func (c *Client) ListExecutions(ctx context.Context, instanceID string) ([]proto
 	return response.Data, nil
 }
 
+// CancelExecution asks N.O.R.E. to stop a running execution and returns the
+// execution's state once it is terminal.
+//
+// The returned status is "cancelled" only if this call is what stopped it. A
+// caller that races the runtime's own completion gets an error instead of a
+// status, because "I asked to stop something" and "I stopped it" are different
+// facts and a client must not conflate them.
+func (c *Client) CancelExecution(ctx context.Context, instanceID, executionID, reason string) (protocol.ExecutionItem, error) {
+	if instanceID == "" {
+		return protocol.ExecutionItem{}, fmt.Errorf("instance ID is required")
+	}
+	if executionID == "" {
+		return protocol.ExecutionItem{}, fmt.Errorf("execution ID is required")
+	}
+
+	var response struct {
+		Data protocol.ExecutionItem `json:"data"`
+	}
+
+	endpoint := fmt.Sprintf(protocol.CancelExecutionPath, url.PathEscape(instanceID), url.PathEscape(executionID))
+	body := struct {
+		Reason string `json:"reason,omitempty"`
+	}{Reason: reason}
+
+	if err := c.conn.Do(ctx, http.MethodPost, endpoint, body, &response); err != nil {
+		return protocol.ExecutionItem{}, err
+	}
+
+	return response.Data, nil
+}
+
 func (c *Client) GetInstanceById(ctx context.Context, instanceID string) (protocol.InstanceResponse, error) {
 	if instanceID == "" {
 		return protocol.InstanceResponse{}, fmt.Errorf("instance ID is required")

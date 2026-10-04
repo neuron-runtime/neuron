@@ -25,6 +25,7 @@ type CapabilityRuntimeEngine struct {
 	bus        contracts.EventBus
 	registry   contracts.CapabilityRuntimeRegistry
 	executions contracts.ExecutionRepository
+	scopes     *exec.ScopeRegistry
 	ready      event.Subscription
 	semaphore  chan struct{}
 
@@ -33,18 +34,21 @@ type CapabilityRuntimeEngine struct {
 	detachedDrainTimeout time.Duration
 }
 
-func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.CapabilityRuntimeRegistry, executions contracts.ExecutionRepository, maxConcurrency int, detachedDrainTimeout time.Duration) (*CapabilityRuntimeEngine, error) {
+func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.CapabilityRuntimeRegistry, executions contracts.ExecutionRepository, scopes *exec.ScopeRegistry, maxConcurrency int, detachedDrainTimeout time.Duration) (*CapabilityRuntimeEngine, error) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
 	if detachedDrainTimeout <= 0 {
 		detachedDrainTimeout = DefaultDetachedDrainTimeout
 	}
+	if scopes == nil {
+		return nil, fmt.Errorf("execution scope registry is required")
+	}
 	ready, err := bus.Subscribe(event.CapabilityReady, maxConcurrency*4)
 	if err != nil {
 		return nil, err
 	}
-	return &CapabilityRuntimeEngine{bus: bus, registry: registry, executions: executions, ready: ready, semaphore: make(chan struct{}, maxConcurrency), detachedDrainTimeout: detachedDrainTimeout}, nil
+	return &CapabilityRuntimeEngine{bus: bus, registry: registry, executions: executions, scopes: scopes, ready: ready, semaphore: make(chan struct{}, maxConcurrency), detachedDrainTimeout: detachedDrainTimeout}, nil
 }
 
 func (e *CapabilityRuntimeEngine) Run(ctx context.Context) error {
@@ -87,6 +91,12 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		e.publishFailure(ctx, execution, capabilityID, fmt.Errorf("capability %s does not exist in the blueprint", capabilityID))
 		return
 	}
+
+	// The invocation runs under its execution's own scope rather than the
+	// instance context, so cancelling one execution aborts exactly its
+	// capabilities and leaves every other execution running.
+	invocationCtx, release := e.invocationContext(ctx, execution)
+	defer release()
 
 	input := execution.Params(capabilityID)
 	policy, err := newInvocation(node.Capability.RuntimeConfig)
@@ -133,7 +143,7 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		return
 	}
 
-	output, err := e.invoke(ctx, execution, capabilityID, policy,
+	output, err := policy.run(invocationCtx, capabilityID,
 		func(attemptCtx context.Context) (map[string]any, error) {
 			return cr.Execute(attemptCtx, contracts.ExecutionContext{
 				ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
@@ -181,24 +191,61 @@ func (e *CapabilityRuntimeEngine) detachCapability(ctx context.Context, executio
 	_ = e.bus.Publish(ctx, event.New(event.CapabilityDetached, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityDetachedPayload{}))
 }
 
-// invoke runs a capability invocation under its resolved policy, giving detached
-// work its own shutdown budget.
+// invocationContext returns the context a capability must run under, together
+// with the function that releases whatever that context had to allocate.
 //
-// A detached task deliberately outlives its caller, so it is allowed to keep
-// running while the instance drains — but only for a bounded time, because an
-// unbounded drain would mean shutdown never finishes. Every other invocation
-// inherits the instance context, so a shutdown cancels it promptly rather than
-// waiting on capabilities that were never meant to outlive it.
-func (e *CapabilityRuntimeEngine) invoke(ctx context.Context, execution *exec.Execution, capabilityID core.ID, policy invocation, execute func(context.Context) (map[string]any, error), onRetry func(retryNotice)) (map[string]any, error) {
+// An ordinary execution runs under its own scope, which the scheduler derived
+// from the instance context. Cancelling that execution aborts exactly its own
+// capabilities and leaves every other execution alone; stopping the instance
+// still aborts everything.
+//
+// A detached task is the exception, because detach exists so work can outlive
+// the execution that started it -- including outliving the instance shutting
+// down. Its context is therefore detached from the instance and bounded by the
+// drain timeout instead. What it must still honour is its own execution's
+// cancellation, or a detached task would be work nobody is able to stop; so the
+// drain context is wired to the task's scope rather than to the instance.
+func (e *CapabilityRuntimeEngine) invocationContext(ctx context.Context, execution *exec.Execution) (context.Context, func()) {
+	scope, scoped := e.scopes.Context(execution.ID)
+
 	if execution.ParentExecutionID == "" {
-		return policy.run(ctx, capabilityID, execute, onRetry)
+		if scoped {
+			return scope, func() {}
+		}
+		// The execution has no live scope, so there is nothing to cancel it
+		// against. Running under the instance context keeps the invocation
+		// bounded and stops it on shutdown rather than leaking.
+		return ctx, func() {}
 	}
+
 	drained, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.detachedDrainTimeout)
-	defer cancel()
-	return policy.run(drained, capabilityID, execute, onRetry)
+	if !scoped {
+		return drained, cancel
+	}
+	stopOnScopeCancel := context.AfterFunc(scope, cancel)
+	return drained, func() {
+		stopOnScopeCancel()
+		cancel()
+	}
 }
 
+// publishFailure records a capability's failure and announces it.
+//
+// An aborted invocation reaches this path too: cancelling an execution stops the
+// work, the runtime returns the context error, and that error is not a capability
+// fault. When the execution has already recorded an outcome for the capability
+// -- cancelled, or completed before the stop arrived -- the failure is neither
+// recorded nor announced, because announcing it would overwrite a state the
+// execution genuinely holds.
+//
+// The event is published on the engine's context rather than the execution's
+// scope, because an event about a cancelled execution still has to reach the
+// subscribers that are watching for the cancellation to end. Publishing it on
+// the cancelled scope would race the cancellation against delivery and could
+// drop the terminal event.
 func (e *CapabilityRuntimeEngine) publishFailure(ctx context.Context, execution *exec.Execution, capabilityID core.ID, err error) {
-	execution.MarkCapabilityFailed(capabilityID, err)
+	if !execution.MarkCapabilityFailed(capabilityID, err) {
+		return
+	}
 	_ = e.bus.Publish(ctx, event.New(event.CapabilityFailed, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityFailedPayload{Message: err.Error()}))
 }

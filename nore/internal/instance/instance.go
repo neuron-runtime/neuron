@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -83,6 +84,7 @@ type Instance struct {
 
 	store      contracts.ExecutionRepository
 	eventStore *event.Store
+	scopes     *execution.ScopeRegistry
 
 	scheduler *scheduler.Scheduler
 	engine    *engine.CapabilityRuntimeEngine
@@ -123,6 +125,11 @@ func New(
 	store := execution.NewExecutionStore(persistentStore)
 	evtStore := event.NewStore(persistentStore)
 
+	// One registry per instance: every execution under this instance derives its
+	// cancellable scope from the instance context, so stopping the instance stops
+	// them all, and an individual cancellation stops only its own execution.
+	scopes := execution.NewScopeRegistry(ctx)
+
 	reg := registry.New()
 	reg.RegisterCoreRuntimes()
 
@@ -132,7 +139,7 @@ func New(
 		return nil, fmt.Errorf("register resolved capability runtimes: %w", err)
 	}
 
-	sched, err := scheduler.New(bus, store)
+	sched, err := scheduler.New(bus, store, scopes)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -160,7 +167,7 @@ func New(
 		return nil, fmt.Errorf("compile assemblies: %w", err)
 	}
 
-	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, workers, optsApplied.detachedDrainTimeout)
+	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -192,6 +199,7 @@ func New(
 		createdAt:     time.Now().UTC(),
 		store:         store,
 		eventStore:    evtStore,
+		scopes:        scopes,
 		scheduler:     sched,
 		engine:        execEngine,
 		registry:      reg,
@@ -346,6 +354,48 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	}
 
 	return exec, nil
+}
+
+// ErrExecutionNotFound reports that no execution carries the requested ID on
+// this instance.
+var ErrExecutionNotFound = errors.New("execution was not found")
+
+// ErrExecutionNotCancellable reports that an execution cannot be cancelled
+// because it has already reached a terminal state. It is deliberately distinct
+// from ErrExecutionNotFound: the execution exists and a client can read its
+// outcome, it simply cannot be stopped any more.
+var ErrExecutionNotCancellable = errors.New("execution already reached a terminal state")
+
+// CancelExecution stops an execution at the caller's request.
+//
+// Cancellation goes through the scheduler when one exists, because the scheduler
+// owns execution scopes: it is the component that bound the scope when the
+// execution started, so it is the one that can cancel it and record the
+// decision. A restored instance has no scheduler -- and therefore no work to
+// stop -- so there the execution's record is simply corrected and persisted.
+func (i *Instance) CancelExecution(ctx context.Context, executionID shared.ID, reason error) error {
+	exec, exists := i.store.Get(executionID)
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrExecutionNotFound, executionID)
+	}
+	if exec.IsTerminal() {
+		return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
+	}
+
+	if i.scheduler == nil {
+		if !exec.MarkCancelled(reason) {
+			return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
+		}
+		if err := i.store.Save(context.Background(), exec); err != nil {
+			return fmt.Errorf("persist cancelled execution %s: %w", executionID, err)
+		}
+		return nil
+	}
+
+	if !i.scheduler.CancelExecution(ctx, executionID, reason) {
+		return fmt.Errorf("%w: %s", ErrExecutionNotCancellable, executionID)
+	}
+	return nil
 }
 
 func (i *Instance) ListExecutions() []*execution.Execution {

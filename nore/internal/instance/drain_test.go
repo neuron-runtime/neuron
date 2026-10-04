@@ -24,13 +24,10 @@ func newTestStore(t *testing.T) *sqlite.Store {
 	return store
 }
 
-// startDelayInstance brings up an instance whose single capability blocks on the
-// in-process delay runtime. A capability that blocks until its context dies is
-// what makes an execution genuinely in flight, so stopping the instance
-// exercises the window in which the scheduler can no longer report its outcome.
-func startDelayInstance(t *testing.T, store *sqlite.Store) *Instance {
-	t.Helper()
-	assembly := shared.Assembly{
+// delayAssembly is the assembly behind startDelayInstance: one capability whose
+// implementation blocks until its context dies.
+func delayAssembly() shared.Assembly {
+	return shared.Assembly{
 		Metadata: shared.Metadata{ID: "sys_delay", Name: "sys_delay", Version: "1.0.0"},
 		Specification: shared.AssemblySpec{
 			Capabilities: []shared.Capability{{
@@ -41,6 +38,15 @@ func startDelayInstance(t *testing.T, store *sqlite.Store) *Instance {
 			}},
 		},
 	}
+}
+
+// startDelayInstance brings up an instance whose single capability blocks on the
+// in-process delay runtime. A capability that blocks until its context dies is
+// what makes an execution genuinely in flight, so stopping the instance
+// exercises the window in which the scheduler can no longer report its outcome.
+func startDelayInstance(t *testing.T, store *sqlite.Store) *Instance {
+	t.Helper()
+	assembly := delayAssembly()
 	i, err := New(context.Background(), "inst_delay", protocol.InstanceKey{
 		AssemblyID: "sys_delay", Version: "1.0.0",
 	}, &assembly, 2, store)

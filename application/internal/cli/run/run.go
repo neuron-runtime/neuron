@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/neuron-runtime/neuron/application/client"
 	"github.com/neuron-runtime/neuron/application/config"
@@ -122,6 +125,13 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		// Ctrl-C asks N.O.R.E. to stop the execution instead of abandoning it.
+		// The event stream keeps running afterwards so the cancellation is
+		// reported as a normal terminal outcome rather than the CLI exiting
+		// silently while the work continues.
+		stopWatching := cancelOnInterrupt(ctx, cmd, c, execResult.InstanceID, execResult.ExecutionID)
+		defer stopWatching()
+
 		terminal, err := streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID, renderer)
 		if err != nil {
 			_ = renderer.Close()
@@ -138,6 +148,76 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  instance_id:  %s\n", execResult.InstanceID)
 	fmt.Printf("  status:       %s\n", execResult.Status)
 	return nil
+}
+
+// cancelRequestTimeout bounds the cancellation request. It is short because the
+// operator is waiting: if N.O.R.E. cannot acknowledge the stop promptly, the CLI
+// says so and leaves the execution running rather than appearing to hang.
+const cancelRequestTimeout = 10 * time.Second
+
+// cancelOnInterrupt arranges for Ctrl-C to cancel the execution being watched,
+// and returns a function that stops watching.
+//
+// The interrupt is a request to stop work, not to abandon the CLI: the execution
+// lives in N.O.R.E., so killing this process would leave it running with nobody
+// watching. Instead the CLI asks the runtime to stop it and keeps streaming until
+// the cancellation is reported.
+//
+// The request deliberately rides on a context detached from the interrupted one.
+// It is the thing that *implements* the interrupt, so it cannot itself be
+// cancelled by it.
+//
+// A second Ctrl-C falls through to the default disposition and terminates the
+// process. One signal must be able to rescue an unresponsive runtime, and a
+// cancellation that cannot complete must never be able to trap the operator.
+func cancelOnInterrupt(ctx context.Context, cmd *cobra.Command, c *client.Client, instanceID string, executionID core.ID) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case <-signals:
+		case <-done:
+			return
+		}
+
+		fmt.Fprintln(cmd.ErrOrStderr(), "\nneuron: cancelling execution (press Ctrl-C again to force quit)")
+
+		requestCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelRequestTimeout)
+		defer cancel()
+		item, err := c.CancelExecution(requestCtx, instanceID, string(executionID), "cancelled from the neuron CLI")
+		reportCancellation(cmd, executionID, item, err)
+
+		// Restore the default disposition now that the request has been made, so
+		// the next Ctrl-C terminates the CLI instead of being swallowed here.
+		signal.Stop(signals)
+	}()
+
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
+}
+
+// reportCancellation explains the outcome of the cancellation request.
+//
+// The three outcomes are reported differently because they mean different things
+// to an operator: the work stopped, it had already finished on its own, or N.O.R.E.
+// could not be reached. Collapsing them into one message would leave an operator
+// unsure whether anything is still running.
+func reportCancellation(cmd *cobra.Command, executionID core.ID, item protocol.ExecutionItem, err error) {
+	stderr := cmd.ErrOrStderr()
+	switch {
+	case err == nil:
+		fmt.Fprintf(stderr, "neuron: execution %s is %s\n", executionID, item.Status)
+	case connection.StatusCode(err) == http.StatusConflict:
+		fmt.Fprintf(stderr, "neuron: execution %s had already finished\n", executionID)
+	case connection.StatusCode(err) == http.StatusNotFound:
+		fmt.Fprintf(stderr, "neuron: execution %s was not found; nothing to cancel\n", executionID)
+	default:
+		fmt.Fprintf(stderr, "neuron: could not cancel execution %s: %v\n", executionID, err)
+	}
 }
 
 // terminalOutcome turns the execution's final event into a command result.
