@@ -245,6 +245,10 @@ neuron run --detach
 
 The command always asks N.O.R.E. to accept the execution asynchronously (HTTP `202`, returning execution ID, instance ID, and status), and then decides how to present it: by default it streams live events until the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`), while `--detach` prints the returned handles and returns immediately so you can follow progress with `neuron instance list`. `capability.log` events render their level and message inline; other event payloads are shown only with `-v`, which also attaches the daemon's output.
 
+Pressing Ctrl-C cancels the execution rather than abandoning it. The CLI asks N.O.R.E. to stop the work and keeps streaming until the cancellation is reported, then exits non-zero — an execution that was cancelled on request did not complete. A second Ctrl-C force-quits, so an unresponsive runtime can never trap you. If the execution had already finished, the CLI says so instead of claiming it stopped something that was already done.
+
+Cancellation is also available directly against the API: `POST /v1/instances/{id}/executions/{execID}/cancel`, which answers `404` if there is no such instance or execution, `409` if it already reached a terminal state, and `200` if this call stopped it.
+
 ### `neuron add`
 
 Resolve and install an external module (capability runtime) into the local store.
