@@ -58,7 +58,10 @@ func main() {
 		log.Fatalf("resolve api token: %v", err)
 	}
 	if port != "" && token == "" {
-		log.Fatal("refusing to listen on TCP " + port + " without an API token; pass --token, set NEURON_API_TOKEN, or configure a token file")
+		// Name only the sources resolveAPIToken actually reads. NEURON_API_TOKEN
+		// authenticates clients and is never consulted by the daemon, so telling
+		// an operator to set it here would send them down a path that cannot work.
+		log.Fatal("refusing to listen on TCP " + port + " without an API token; pass --token, or point NEURON_API_TOKEN_FILE at a file holding one")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
