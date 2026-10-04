@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +15,9 @@ import (
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // workerPool manages a pool of long-lived gRPC worker processes for one
@@ -146,9 +149,9 @@ func (p *workerPool) shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Execute leases an available worker, sends the request, and returns the
-// worker to the pool. If no worker is available and the pool is not at
-// capacity, a new worker is started.
+// Execute leases an available worker, sends the request, and returns the worker
+// to the pool. If no worker is available and the pool is not at capacity, a new
+// worker is started.
 func (p *workerPool) Execute(ctx context.Context, req *capabilityrt.Request) (*capabilityrt.Response, error) {
 	if req == nil {
 		req = &capabilityrt.Request{}
@@ -169,8 +172,47 @@ func (p *workerPool) Execute(ctx context.Context, req *capabilityrt.Request) (*c
 	}
 
 	resp, err := worker.execute(ctx, req)
+	if ctx.Err() != nil || isAbortedCall(err) {
+		// The invocation was aborted rather than answered. Cancelling the gRPC
+		// call only tears down the client side; the capability inside the process
+		// may well still be running, so this worker is busy with work nobody is
+		// waiting for. Handing it to the next request would run two capabilities
+		// on one worker and report whichever finished first as the other's
+		// result, so the worker is terminated and the pool starts a replacement.
+		p.discardWorker(worker)
+		return resp, err
+	}
 	p.returnWorker(worker)
 	return resp, err
+}
+
+// isAbortedCall reports whether an invocation failed because the call was
+// cancelled or ran out of time, rather than because the capability answered.
+//
+// The caller's context is not a sufficient signal by itself. gRPC tears the
+// stream down and returns its status as soon as its own deadline timer fires,
+// which can happen a moment before ctx.Err() becomes observable on this
+// goroutine, so a worker whose call was aborted can look like one whose call
+// merely failed. Reusing that worker is the failure this whole path exists to
+// prevent, so the transport's own report of a cancellation is trusted as well.
+//
+// A capability that returns DeadlineExceeded as its own answer is
+// indistinguishable from an aborted call at this layer. Discarding its worker
+// costs a replacement and errs in the safe direction: a busy worker is never
+// handed to the next request.
+func isAbortedCall(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
 }
 
 // Health reports whether the pool has at least one healthy worker available.

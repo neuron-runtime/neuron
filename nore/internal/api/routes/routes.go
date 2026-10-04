@@ -47,6 +47,7 @@ func BuildRoutes(
 	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}", instHandler.GetExecutionState)
 	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}/events", instHandler.GetExecutionEvents)
 	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}/events/stream", instHandler.StreamExecutionEvents)
+	mux.HandleFunc("POST /v1/instances/{id}/executions/{execID}/cancel", instHandler.CancelExecution)
 
 	// WebSocket
 	ws := websocket.NewWebSocketHandler()

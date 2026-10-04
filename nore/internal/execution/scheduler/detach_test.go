@@ -119,13 +119,14 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 
 	bus := event.NewBus()
 	store := executionmodel.NewMemoryStore()
+	scopes := executionmodel.NewScopeRegistry(ctx)
 	runtime := &recordingRuntime{}
 
-	scheduler, err := New(bus, store)
+	scheduler, err := New(bus, store, scopes)
 	if err != nil {
 		t.Fatalf("New scheduler: %v", err)
 	}
-	engineInstance, err := engine.NewCapabilityRuntimeEngine(bus, stubRegistry{runtime: runtime}, store, 4, time.Second)
+	engineInstance, err := engine.NewCapabilityRuntimeEngine(bus, stubRegistry{runtime: runtime}, store, scopes, 4, time.Second)
 	if err != nil {
 		t.Fatalf("New engine: %v", err)
 	}

@@ -8,10 +8,11 @@
 - [ ]  **Test event-bus backpressure under concurrent executions**
     - **File:** `nore/internal/event/bus.go`
     - `Publish()` blocks when a subscriber's buffer is full. This is intentional backpressure, but scheduler and engine interaction should be stress-tested with many executions/events so a slow subscriber cannot effectively stall execution indefinitely.
-- [ ]  **Handle execution cancellation explicitly**
+- [x]  **Handle execution cancellation explicitly**
     - **Files:** `nore/internal/execution/execution.go`, `nore/internal/execution/wait.go`, `nore/internal/instance/instance.go`
     - `StatusCancelled` exists, but there is no `MarkCancelled`/execution cancellation path.
     - Define how cancellation propagates to running capability runtimes and how the execution becomes terminal.
+    - **Implemented.** Cancellation runs from the API to the running capability. `nore/internal/execution/scope.go` owns one cancellable context per live execution; the scheduler binds it on start, releases it on a terminal state, and cancels it on request, making the execution terminal so the plan stops advancing. The engine invokes each capability under its execution's scope, and detached work keeps its own scope so it outlives its caller. `POST /v1/instances/{id}/executions/{execID}/cancel` returns 404 (unknown), 409 (already finished), or 200 (stopped by this call). `neuron run` cancels on Ctrl-C and keeps streaming until the cancellation is reported; a second Ctrl-C force-quits. Capability deadlines deliberately remain `StatusFailed` — `StatusCancelled` means only that a cancellation was explicitly requested.
 
 ## Runtime Configuration
 

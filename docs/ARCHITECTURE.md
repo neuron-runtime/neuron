@@ -667,6 +667,26 @@ stateDiagram-v2
 
 Executions honor deadlines, support cancellation, and always finish in a terminal state.
 
+## Cancellation
+
+A capability deadline is a **failure** — the work did not finish in time and nobody chose to stop it. An explicit cancellation is a **different thing**: somebody decided the work should stop, so it ends in `StatusCancelled` and the capability that was interrupted is recorded as `cancelled` rather than `failed`. Reporting an aborted capability as broken would blame an implementation for a decision it did not make.
+
+Cancellation has three owners, and keeping them separate is what makes it work:
+
+| Component         | Responsibility                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| `execution.ScopeRegistry` | Owns one cancellable context per live execution. Binds on start, releases on a terminal state. |
+| `Scheduler`       | Decides that an execution is cancelled and records it. Making the execution terminal is what stops the plan from advancing. |
+| Capability runtime engine | Invokes each capability under its execution's scope, so a cancellation reaches the work. |
+
+The scope lives beside the execution model rather than inside it. An `Execution` is a persisted value — marshalled, written, rebuilt after a restart — and a `context.Context` is a runtime lifetime; holding one on the model would put a live handle inside a value that outlives the process.
+
+A client cancels an execution with `POST /v1/instances/{id}/executions/{execID}/cancel`. The response distinguishes three outcomes, because a caller must be able to tell them apart: `404` (no such instance or execution), `409` (it already reached a terminal state, so nothing was stopped), and `200` (stopped by this call). Reporting success for an execution that had already finished would tell an operator their stop took effect when it did nothing.
+
+Detached work is cancelled through its own execution. A detached task outlives the execution that handed off to it, so cancelling that execution leaves the task running under its own scope — and cancelling the task's execution stops it.
+
+`neuron run` cancels on Ctrl-C and keeps streaming until the cancellation is reported, so the outcome is presented like any other terminal state rather than the CLI exiting silently while the work continues. A second Ctrl-C force-quits.
+
 ## Event streaming
 
 Live events are streamed over the WebSocket endpoint (`WS /v1/ws`); the SSE stream (`GET .../events/stream`) remains available for transports without WebSocket support.

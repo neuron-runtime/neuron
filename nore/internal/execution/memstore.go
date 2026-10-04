@@ -37,15 +37,20 @@ func (s *MemoryStore) Get(executionID core.ID) (*Execution, bool) {
 	return execution, exists
 }
 
+// Save records the current state of an execution, inserting it when it is not
+// already held.
+//
+// Save is an upsert rather than an update because it is also how a caller
+// persists an execution it read back from durable storage. An execution loaded
+// by Get is not in memory, so an update-only Save would reject exactly the
+// executions a recovering process most needs to write back. Add remains the
+// insert-only operation that rejects a duplicate ID.
 func (s *MemoryStore) Save(_ context.Context, execution *Execution) error {
 	if execution == nil {
 		return fmt.Errorf("execution is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.executions[execution.ID]; !exists {
-		return fmt.Errorf("execution %s not found", execution.ID)
-	}
 	s.executions[execution.ID] = execution
 	return nil
 }

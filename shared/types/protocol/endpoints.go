@@ -7,6 +7,7 @@ const (
 	ExecutePath               = "/v1/instances/%s/executions"
 	ExecutionEventsPath       = "/v1/instances/%s/executions/%s/events"
 	ExecutionEventsStreamPath = "/v1/instances/%s/executions/%s/events/stream"
+	CancelExecutionPath       = "/v1/instances/%s/executions/%s/cancel"
 
 	WebSocketPath = "/v1/ws"
 

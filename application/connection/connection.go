@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,7 +132,7 @@ func (t *HTTPTransport) Do(ctx context.Context, method, path string, body any, o
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return fmt.Errorf("nore returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return statusErrorFrom(resp.StatusCode, data)
 	}
 
 	if out == nil {
@@ -143,6 +144,38 @@ func (t *HTTPTransport) Do(ctx context.Context, method, path string, body any, o
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
+}
+
+// StatusError reports an HTTP response N.O.R.E. refused.
+//
+// It exists so a caller can tell *why* a request was rejected without parsing the
+// message text. That distinction is load-bearing for cancellation: "there is no
+// such execution" and "it already finished" call for completely different
+// messages to an operator, and a client that cannot separate them either reports
+// a false failure or hides a real one.
+type StatusError struct {
+	Code    int
+	Message string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("nore returned HTTP %d: %s", e.Code, e.Message)
+}
+
+// statusErrorFrom builds the error for a rejected response, preserving the
+// message format callers already surface.
+func statusErrorFrom(code int, body []byte) error {
+	return &StatusError{Code: code, Message: strings.TrimSpace(string(body))}
+}
+
+// StatusCode reports the HTTP status N.O.R.E. returned, or 0 when err did not
+// come from an HTTP status.
+func StatusCode(err error) int {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code
+	}
+	return 0
 }
 
 func (t *HTTPTransport) Stream(ctx context.Context, method, path string, body any, emit func([]byte) error) error {
@@ -174,7 +207,7 @@ func (t *HTTPTransport) Stream(ctx context.Context, method, path string, body an
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return fmt.Errorf("nore returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return statusErrorFrom(resp.StatusCode, data)
 	}
 
 	// SSE line scanner: each event is "data: <json>\n\n"

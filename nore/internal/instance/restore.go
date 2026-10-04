@@ -7,6 +7,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
@@ -31,7 +32,9 @@ func recordFor(i *Instance, status Status) metadata {
 //
 // Instances that were interrupted mid-run are coerced to failed: their
 // in-memory state is not trustworthy, and they must not be reported as
-// running when they have no runtime.
+// running when they have no runtime. Their unfinished executions are drained for
+// the same reason — nothing in this process can advance them, so reporting them
+// as running would be a permanent lie rather than a temporary inaccuracy.
 func restoreInstance(
 	parent context.Context,
 	rec metadata,
@@ -42,6 +45,8 @@ func restoreInstance(
 	if status == StatusStarting || status == StatusRunning {
 		status = StatusFailed
 	}
+
+	failUnfinishedExecutions(store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID))
 
 	ctx, cancel := context.WithCancel(parent)
 	return &Instance{

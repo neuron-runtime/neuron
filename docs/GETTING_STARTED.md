@@ -78,6 +78,8 @@ execution.completed     status: completed
 
 The command returns when execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`).
 
+Press Ctrl-C while it runs and it cancels the execution: the CLI asks N.O.R.E. to stop the work, keeps streaming until the cancellation is reported, and exits non-zero. A second Ctrl-C force-quits.
+
 Look at what you just ran:
 
 ```text

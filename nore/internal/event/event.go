@@ -42,6 +42,12 @@ type ExecutionCompletedPayload struct {
 	Results map[string]map[string]any
 }
 type ExecutionFailedPayload struct{ Message string }
+
+// ExecutionCancelledPayload carries why an execution was cancelled. The message
+// is empty when the cancellation needs no explanation, so a client must treat it
+// as optional rather than as a missing value.
+type ExecutionCancelledPayload struct{ Message string }
+
 type CapabilityReadyPayload struct{ Params map[string]any }
 type CapabilityStartedPayload struct{}
 type CapabilityCompletedPayload struct{ Result map[string]any }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
@@ -182,6 +183,66 @@ func (h *Handler) GetExecutionState(w http.ResponseWriter, r *http.Request) {
 
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
 		Message: "execution",
+		Status:  http.StatusOK,
+		Data:    item,
+	})
+}
+
+// CancelExecution stops a running execution at the caller's request.
+//
+// The status codes distinguish the three outcomes a client has to tell apart.
+// 404 means the instance or execution does not exist and never can be cancelled.
+// 409 means it exists but has already finished, so the cancellation is refused
+// rather than silently ignored -- a client that asked to stop something and is
+// told "ok" must be able to trust that it was still running. 200 confirms the
+// execution was stopped and is now terminal.
+func (h *Handler) CancelExecution(w http.ResponseWriter, r *http.Request) {
+	instID := utils.PathID(r.PathValue("id"))
+	execID := utils.PathID(r.PathValue("execID"))
+
+	i, ok := h.instances.GetByID(instID)
+	if !ok {
+		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", instID))
+		return
+	}
+
+	var body struct {
+		Reason string `json:"reason,omitempty"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	reason := errors.New(body.Reason)
+	if body.Reason == "" {
+		// A cancellation with no stated reason is still legitimate; the message
+		// just has to say something honest rather than nothing at all.
+		reason = fmt.Errorf("execution %s was cancelled", execID)
+	}
+
+	if err := i.CancelExecution(r.Context(), core.ID(execID), reason); err != nil {
+		switch {
+		case errors.Is(err, instance.ErrExecutionNotFound):
+			utils.ErrorJSON(w, http.StatusNotFound, err)
+		case errors.Is(err, instance.ErrExecutionNotCancellable):
+			utils.ErrorJSON(w, http.StatusConflict, err)
+		default:
+			utils.ErrorJSON(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	exec, _ := i.GetExecution(core.ID(execID))
+	item := protocol.ExecutionItem{ID: core.ID(execID)}
+	if exec != nil {
+		item.Status = string(exec.Status())
+		item.CorrelationID = exec.CorrelationID
+		if completed := exec.CompletedAt(); !completed.IsZero() {
+			ns := completed.UnixNano()
+			item.CompletedAt = &ns
+		}
+	}
+	utils.WriteJSON(w, http.StatusOK, protocol.Response{
+		Message: "execution cancelled",
 		Status:  http.StatusOK,
 		Data:    item,
 	})

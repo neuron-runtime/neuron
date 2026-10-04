@@ -13,15 +13,24 @@ import (
 type Scheduler struct {
 	bus                 contracts.EventBus
 	executions          contracts.ExecutionRepository
+	scopes              *executionmodel.ScopeRegistry
 	executionStarted    event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
 	capabilityDetached  event.Subscription
 }
 
-func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Scheduler, error) {
+// New builds a scheduler that advances executions and owns their cancellable
+// scopes. Ownership lives here because advancing an execution and ending it are
+// the same responsibility: the scheduler binds a scope when an execution starts,
+// releases it when the execution reaches a terminal state, and is what a
+// cancellation request goes through.
+func New(bus contracts.EventBus, executions contracts.ExecutionRepository, scopes *executionmodel.ScopeRegistry) (*Scheduler, error) {
 	if bus == nil || executions == nil {
 		return nil, fmt.Errorf("event bus and execution repository are required")
+	}
+	if scopes == nil {
+		return nil, fmt.Errorf("execution scope registry is required")
 	}
 	started, err := bus.Subscribe(event.ExecutionStarted, 64)
 	if err != nil {
@@ -45,11 +54,12 @@ func New(bus contracts.EventBus, executions contracts.ExecutionRepository) (*Sch
 		_ = failed.Close()
 		return nil, err
 	}
-	return &Scheduler{bus: bus, executions: executions, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed, capabilityDetached: detached}, nil
+	return &Scheduler{bus: bus, executions: executions, scopes: scopes, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed, capabilityDetached: detached}, nil
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
 	defer s.closeSubscriptions()
+	defer s.scopes.ReleaseAll()
 	for {
 		select {
 		case <-ctx.Done():
@@ -144,6 +154,46 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 	return s.completeIfDrained(ctx, execution, remaining)
 }
 
+// CancelExecution stops an execution at the operator's request.
+//
+// The scope is cancelled before the state is recorded, so a capability already
+// running is aborted as early as possible rather than after the bookkeeping. The
+// execution is then made terminal, which is what actually stops the scheduler
+// advancing it: onCapabilityCompleted and onCapabilityDetached both return
+// early once an execution is terminal, so no further capability is scheduled and
+// no new binding is evaluated.
+//
+// It reports whether this call cancelled the execution. A false return means the
+// execution was already terminal or unknown, and the caller must not claim it
+// cancelled something that had already finished.
+func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, reason error) bool {
+	execution, exists := s.executions.Get(executionID)
+	if !exists {
+		return false
+	}
+	// Stop the work even when the state transition loses the race below: a
+	// capability must not keep running just because the execution completed in
+	// the same instant the cancellation arrived.
+	s.scopes.Cancel(executionID)
+	if !execution.MarkCancelled(reason) {
+		return false
+	}
+	s.scopes.Release(executionID)
+	_ = s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
+		Message: reasonMessage(reason),
+	}))
+	return true
+}
+
+// reasonMessage renders a cancellation reason for the event payload, which is
+// read by clients that have no access to the Go error.
+func reasonMessage(reason error) string {
+	if reason == nil {
+		return ""
+	}
+	return reason.Error()
+}
+
 func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event) error {
 	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
 	if !exists {
@@ -153,6 +203,9 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	if !ok {
 		return fmt.Errorf("invalid ExecutionStarted payload")
 	}
+	// Bind before starting, so a capability is never invoked against a context
+	// that could not yet be cancelled.
+	s.scopes.Bind(execution.ID)
 	entryIDs := execution.Blueprint.EntryCapabilityIDs
 	if err := execution.Start(payload.Params, len(entryIDs)); err != nil {
 		return err
@@ -236,6 +289,7 @@ func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionm
 	if remaining != 0 || !execution.MarkCompleted() {
 		return nil
 	}
+	s.scopes.Release(execution.ID)
 	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{
 		Results: execution.StringKeyedResults(),
 	}))
@@ -246,6 +300,7 @@ func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err 
 	if !exists || !execution.MarkFailed(err) {
 		return
 	}
+	s.scopes.Release(execution.ID)
 	_ = s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{Message: err.Error()}))
 }
 
