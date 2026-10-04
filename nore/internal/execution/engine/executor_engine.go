@@ -11,6 +11,7 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/core"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 )
@@ -113,7 +114,11 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		Params: input,
 		Execution: map[string]any{
 			"id": string(execution.ID), "correlation_id": string(execution.CorrelationID),
-			"input": execution.InitialParams(),
+			// `params` is the one name the Assembly's initial parameters have in
+			// every expression dialect. A Capability configuration template and a
+			// Binding expression that both want them must agree on how to spell
+			// it, or an author has to learn two vocabularies for one value.
+			"params": data.SnakeMap(execution.InitialParams()),
 			"blueprint": map[string]any{
 				"id": string(execution.Blueprint.Metadata.ID), "name": execution.Blueprint.Metadata.Name,
 				"version": execution.Blueprint.Metadata.Version,

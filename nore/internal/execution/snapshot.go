@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -38,7 +39,7 @@ func (e *Execution) Snapshot() *ExecutionSnapshot {
 		InstanceID:        e.InstanceID,
 		ParentExecutionID: e.ParentExecutionID,
 		Status:            e.status,
-		InitialParams:     cloneMap(e.initialParams),
+		InitialParams:     data.CanonicalMap(e.initialParams),
 		Params:            cloneParamsMap(e.params),
 		Results:           cloneParamsMap(e.results),
 		States:            states,
@@ -54,7 +55,7 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 	defer e.mu.Unlock()
 
 	e.status = snapshot.Status
-	e.initialParams = cloneMap(snapshot.InitialParams)
+	e.initialParams = data.CanonicalMap(snapshot.InitialParams)
 	e.params = cloneParamsMap(snapshot.Params)
 	e.results = cloneParamsMap(snapshot.Results)
 	e.inFlight = snapshot.InFlight
@@ -106,7 +107,7 @@ func cloneParamsMap(source map[core.ID]map[string]any) map[core.ID]map[string]an
 	}
 	result := make(map[core.ID]map[string]any, len(source))
 	for id, m := range source {
-		result[id] = cloneMap(m)
+		result[id] = data.CanonicalMap(m)
 	}
 	return result
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -122,7 +123,7 @@ func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount i
 	e.status = StatusRunning
 	e.startedAt = &now
 	e.inFlight = initialCapabilityCount
-	e.initialParams = cloneMap(initialParams)
+	e.initialParams = data.CanonicalMap(initialParams)
 	return nil
 }
 
@@ -141,7 +142,7 @@ func (e *Execution) MarkCapabilityReady(capabilityID shared.ID, input map[string
 	}
 	state.Status = CapabilityReady
 	e.states[capabilityID] = state
-	e.params[capabilityID] = cloneMap(input)
+	e.params[capabilityID] = data.CanonicalMap(input)
 	return nil
 }
 
@@ -176,7 +177,7 @@ func (e *Execution) MarkCapabilityCompleted(capabilityID shared.ID, output map[s
 	state.Status = CapabilityCompleted
 	state.CompletedAt = &now
 	e.states[capabilityID] = state
-	e.results[capabilityID] = cloneMap(output)
+	e.results[capabilityID] = data.CanonicalMap(output)
 	return nil
 }
 
@@ -321,43 +322,17 @@ func (e *Execution) IsTerminal() bool {
 func (e *Execution) Params(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.params[capabilityID])
+	return data.CanonicalMap(e.params[capabilityID])
 }
 
 func (e *Execution) Result(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.results[capabilityID])
+	return data.CanonicalMap(e.results[capabilityID])
 }
 
 func (e *Execution) InitialParams() map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.initialParams)
-}
-
-func cloneMap(source map[string]any) map[string]any {
-	if source == nil {
-		return map[string]any{}
-	}
-	result := make(map[string]any, len(source))
-	for key, value := range source {
-		result[key] = cloneValue(value)
-	}
-	return result
-}
-
-func cloneValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for index, item := range typed {
-			result[index] = cloneValue(item)
-		}
-		return result
-	default:
-		return typed
-	}
+	return data.CanonicalMap(e.initialParams)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -212,7 +213,7 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	}
 	for _, capabilityID := range entryIDs {
 		node := execution.Blueprint.Nodes[capabilityID]
-		input := cloneMap(payload.Params)
+		input := data.CanonicalMap(payload.Params)
 		if err := validateInput(node.Capability, input); err != nil {
 			return fmt.Errorf("invalid entry input for capability %s: %w", capabilityID, err)
 		}

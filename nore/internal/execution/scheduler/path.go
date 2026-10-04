@@ -60,29 +60,3 @@ func setPath(object map[string]any, path string, value any) error {
 	}
 	return nil
 }
-
-func cloneMap(source map[string]any) map[string]any {
-	if source == nil {
-		return map[string]any{}
-	}
-	result := make(map[string]any, len(source))
-	for key, value := range source {
-		result[key] = cloneValue(value)
-	}
-	return result
-}
-
-func cloneValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for index, item := range typed {
-			result[index] = cloneValue(item)
-		}
-		return result
-	default:
-		return typed
-	}
-}
