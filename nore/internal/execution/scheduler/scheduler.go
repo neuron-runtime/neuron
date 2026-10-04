@@ -206,7 +206,16 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	}
 	// Bind before starting, so a capability is never invoked against a context
 	// that could not yet be cancelled.
-	s.scopes.Bind(execution.ID)
+	//
+	// A detached task's scope must survive the instance shutting down, because
+	// the drain budget in the engine is what bounds its work. Binding it as an
+	// ordinary scope would let ReleaseAll cancel the task at the instant
+	// shutdown began, which is the outcome detach exists to prevent.
+	if execution.ParentExecutionID != "" {
+		s.scopes.BindDetached(execution.ID)
+	} else {
+		s.scopes.Bind(execution.ID)
+	}
 	entryIDs := execution.Blueprint.EntryCapabilityIDs
 	if err := execution.Start(payload.Params, len(entryIDs)); err != nil {
 		return err
