@@ -102,7 +102,7 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 	input := execution.Params(capabilityID)
 	policy, err := newInvocation(node.Capability.RuntimeConfig)
 	if err != nil {
-		e.publishFailure(ctx, execution, capabilityID, fmt.Errorf("capability %s: %w", capabilityID, err))
+		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
 	if policy.Detached() {
@@ -167,7 +167,11 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 			}))
 		})
 	if err != nil {
-		e.publishFailure(ctx, execution, capabilityID, err)
+		// This is the one place a capability can stop without an outcome of its
+		// own, because the execution's scope may be cancelled underneath it.
+		// publishStopped decides whether that is a failure or a consequence of
+		// someone else's decision; a timeout N.O.R.E. imposed is still a failure.
+		e.publishStopped(ctx, invocationCtx, execution, capabilityID, err)
 		return
 	}
 	if output == nil {
@@ -236,12 +240,13 @@ func (e *CapabilityRuntimeEngine) invocationContext(ctx context.Context, executi
 
 // publishFailure records a capability's failure and announces it.
 //
-// An aborted invocation reaches this path too: cancelling an execution stops the
-// work, the runtime returns the context error, and that error is not a capability
-// fault. When the execution has already recorded an outcome for the capability
-// -- cancelled, or completed before the stop arrived -- the failure is neither
-// recorded nor announced, because announcing it would overwrite a state the
-// execution genuinely holds.
+// When the execution has already recorded an outcome for the capability -- it
+// completed before a stop arrived, or the execution was cancelled and recorded
+// the capability as cancelled -- the failure is neither recorded nor announced,
+// because announcing it would overwrite a state the execution genuinely holds.
+//
+// A capability stopped by a cancellation or by a sibling's failure does not come
+// through here; it goes through publishStopped, which tells the two apart.
 //
 // The event is published on the engine's context rather than the execution's
 // scope, because an event about a cancelled execution still has to reach the
@@ -253,4 +258,36 @@ func (e *CapabilityRuntimeEngine) publishFailure(ctx context.Context, execution 
 		return
 	}
 	_ = e.bus.Publish(ctx, event.New(event.CapabilityFailed, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityFailedPayload{Message: err.Error()}))
+}
+
+// publishStopped records a capability that did not reach an outcome, and decides
+// whether that outcome was a failure or a cancellation.
+//
+// This distinction is the difference between reporting a fault and reporting a
+// consequence. When an operator cancels an execution, or a sibling capability
+// fails, the scheduler releases the execution's scope and every capability still
+// running is stopped. Those capabilities did not break -- they were stopped by a
+// decision made elsewhere in the execution. Recording them as failures blamed
+// working implementations for someone else's stop, and because the event carried
+// no distinguishing type, a client could only recover the truth by matching the
+// message text.
+//
+// A capability was stopped exactly when the context it was invoked under was
+// cancelled. A deadline that N.O.R.E. imposed stays a failure: nobody chose to
+// stop that work, it ran out of time, and that is the author's to fix. The
+// decision is made here, in one place, rather than at each call site, so every
+// path that can end an invocation early is classified the same way.
+//
+// Both outcomes are published on the engine's context rather than the cancelled
+// scope, for the reason given on publishFailure: publishing on a context that is
+// already cancelled would race the cancellation against delivery.
+func (e *CapabilityRuntimeEngine) publishStopped(ctx, scopeCtx context.Context, execution *exec.Execution, capabilityID core.ID, err error) {
+	if scopeCtx.Err() == nil {
+		e.publishFailure(ctx, execution, capabilityID, err)
+		return
+	}
+	if !execution.MarkCapabilityCancelled(capabilityID, err) {
+		return
+	}
+	_ = e.bus.Publish(ctx, event.New(event.CapabilityCancelled, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityCancelledPayload{Message: err.Error()}))
 }

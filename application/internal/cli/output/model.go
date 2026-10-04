@@ -22,6 +22,12 @@ const (
 	CapabilityDetached
 	CapabilityCompleted
 	CapabilityFailed
+	// CapabilityCancelled marks a capability that was stopped without reaching an
+	// outcome of its own, because the execution was cancelled or a sibling
+	// failed. It is deliberately not CapabilityFailed: the capability did not
+	// break, and rendering it with the failure glyph would point an operator at
+	// working code as though it were the cause.
+	CapabilityCancelled
 )
 
 // CapabilityView is the presentation state of a single capability execution.
@@ -112,6 +118,15 @@ func (v *ExecutionView) Fold(evt protocol.StreamEvent) error {
 	case "capability.failed":
 		if sv != nil {
 			sv.State = CapabilityFailed
+			var p struct {
+				Message string `json:"Message"`
+			}
+			_ = json.Unmarshal(evt.Payload, &p)
+			sv.Message = p.Message
+		}
+	case "capability.cancelled":
+		if sv != nil {
+			sv.State = CapabilityCancelled
 			var p struct {
 				Message string `json:"Message"`
 			}

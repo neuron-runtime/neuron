@@ -84,7 +84,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if !open {
 				return nil
 			}
-			message, ok := event.CapabilityFailedMessage(received.Payload)
+			message, ok := event.Message(received.Payload)
 			if !ok {
 				message = "capability execution failed"
 			}

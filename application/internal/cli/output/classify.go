@@ -33,7 +33,7 @@ func Classify(evt protocol.StreamEvent) Kind {
 		// A retry is progress on a still-running capability, so it belongs in
 		// the live region rather than as a permanent line.
 		return KindLive
-	case "capability.completed", "capability.failed":
+	case "capability.completed", "capability.failed", "capability.cancelled":
 		return KindStatic
 	case "execution.completed", "execution.failed", "execution.cancelled":
 		return KindTerminal

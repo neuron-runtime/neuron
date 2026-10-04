@@ -211,6 +211,39 @@ func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) bool
 	return true
 }
 
+// MarkCapabilityCancelled records that a capability stopped without reaching an
+// outcome of its own, because something outside it ended first.
+//
+// This is deliberately not the same record as MarkCapabilityFailed. A capability
+// stopped because the execution was cancelled, or because a sibling failed, did
+// not break, and recording it as a fault blames an implementation for a decision
+// it did not make — and, because the failure carries no distinguishing type,
+// leaves a consumer with no way to tell the two apart except by reading the
+// message text.
+//
+// It reports whether the state changed, for the same reason as
+// MarkCapabilityFailed: the engine can observe a stop after the execution has
+// already recorded an outcome for this capability, and must not overwrite it.
+func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists := e.states[capabilityID]
+	if !exists {
+		return false
+	}
+	if isTerminalCapability(state.Status) {
+		return false
+	}
+	now := time.Now().UTC()
+	state.Status = CapabilityCancelled
+	state.CompletedAt = &now
+	if reason != nil {
+		state.Error = reason.Error()
+	}
+	e.states[capabilityID] = state
+	return true
+}
+
 // isTerminalCapability reports whether a capability state is final. Pending, ready,
 // and running are not: work may still be scheduled or is still in flight.
 func isTerminalCapability(status CapabilityStatus) bool {

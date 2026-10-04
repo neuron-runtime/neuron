@@ -14,12 +14,17 @@ import (
 // they carry no execution state and are already persisted by the event store.
 // Retries are excluded for the same reason: a re-attempt does not change which
 // capability is running.
+//
+// A cancellation counts as state-changing. A capability stopped by a sibling's
+// failure reaches a terminal capability status through this path, and without a
+// flush that status would only ever exist in memory and be lost on restart.
 var stateChangingEventTypes = []event.Type{
 	event.ExecutionStarted,
 	event.CapabilityReady,
 	event.CapabilityStarted,
 	event.CapabilityCompleted,
 	event.CapabilityFailed,
+	event.CapabilityCancelled,
 	event.CapabilityDetached,
 	event.ExecutionCompleted,
 	event.ExecutionFailed,

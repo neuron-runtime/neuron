@@ -91,6 +91,8 @@ func (r *liveRenderer) render() string {
 			}
 		case CapabilityFailed:
 			fmt.Fprintf(&b, "\n  %s %s  %s\n", glyphCross, sv.ID, sv.Message)
+		case CapabilityCancelled:
+			fmt.Fprintf(&b, "\n  %s %s  %s\n", glyphCancelled, sv.ID, sv.Message)
 		case CapabilityDetached:
 			fmt.Fprintf(&b, "\n  %s %s  detached\n", glyphDetached, sv.ID)
 		case CapabilityRunning:

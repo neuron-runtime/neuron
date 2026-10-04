@@ -2,6 +2,7 @@ package event
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -52,34 +53,65 @@ type ExecutionCancelledPayload struct{ Message string }
 type CapabilityReadyPayload struct{ Params map[string]any }
 type CapabilityStartedPayload struct{}
 type CapabilityCompletedPayload struct{ Result map[string]any }
+
+// CapabilityFailedPayload carries the reason a capability failed on its own
+// account. It is distinct from CapabilityCancelledPayload because the two mean
+// opposite things to whoever reacts to them: one is a fault to investigate, the
+// other is work that was stopped for a reason already accounted for.
 type CapabilityFailedPayload struct{ Message string }
 
-// CapabilityFailedMessage extracts the failure message carried by a
-// capability-failed payload, reporting whether one was present.
+// CapabilityCancelledPayload explains why a capability stopped without reaching
+// an outcome of its own. The message names the cause that ended it, not a fault
+// in the capability.
+type CapabilityCancelledPayload struct{ Message string }
+
+// reasoner is implemented by every payload that carries a human-readable reason.
 //
-// Both the value and the pointer form are accepted. A payload travels through an
-// `any` field, so either form is a legitimate thing for a producer to publish,
-// and a caller that asserts only one of them silently discards the other's
-// message and reports a generic failure instead. That hides the actual cause
-// from whoever has to diagnose the run, which is the opposite of what a failure
-// message is for.
+// The accessors use value receivers deliberately. That makes both a payload and
+// a pointer to one satisfy this interface, so a payload travelling through an
+// `any` field is read identically whichever form a producer published it in --
+// which is the whole reason Message exists.
+type reasoner interface{ Reason() string }
+
+func (p CapabilityFailedPayload) Reason() string    { return p.Message }
+func (p CapabilityCancelledPayload) Reason() string { return p.Message }
+func (p ExecutionFailedPayload) Reason() string     { return p.Message }
+func (p ExecutionCancelledPayload) Reason() string  { return p.Message }
+
+// Message extracts the human-readable reason from an event payload, reporting
+// whether one was present.
 //
-// Callers keep their own fallback policy for the not-present case: the scheduler
-// substitutes its generic text, while analytics reports whatever it received.
-// The extraction lives here so the two cannot disagree about what a payload means.
-func CapabilityFailedMessage(payload any) (string, bool) {
+// Payloads travel through an `any` field, so a caller that asserted one concrete
+// type silently discarded the reason of every other form it might legally arrive
+// in -- a pointer, or a sibling payload type -- and substituted a generic
+// message. That hides the actual cause from whoever has to diagnose the run,
+// which is the opposite of what a reason is for. Keeping the extraction here
+// also keeps the several consumers from disagreeing about what a payload means.
+//
+// A reason that is present but empty is still present, and is returned as an
+// empty string: a caller must be able to distinguish "carries no reason" from
+// "no reason was given", because only the first warrants substituting text.
+//
+// Callers keep their own fallback for the absent case, since the scheduler and
+// the structured log deliberately report it differently.
+func Message(payload any) (string, bool) {
+	if payload == nil {
+		return "", false
+	}
+	// A typed nil pointer held in an interface is not == nil, so it reaches the
+	// accessors below and would panic when dereferenced. Reject it first, so
+	// that stays true for every payload type added later without enumerating
+	// pointer cases here.
+	if v := reflect.ValueOf(payload); v.Kind() == reflect.Pointer && v.IsNil() {
+		return "", false
+	}
 	switch p := payload.(type) {
-	case CapabilityFailedPayload:
-		return p.Message, true
-	case *CapabilityFailedPayload:
-		if p == nil {
-			return "", false
-		}
-		return p.Message, true
 	case string:
 		return p, true
 	case fmt.Stringer:
 		return p.String(), true
+	case reasoner:
+		return p.Reason(), true
 	default:
 		return "", false
 	}

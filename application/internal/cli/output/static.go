@@ -89,6 +89,17 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 			if err := decodePayload(evt.Payload, &p); err == nil && p.Message != "" {
 				fmt.Fprintf(&line, "  %s", p.Message)
 			}
+		case "capability.cancelled":
+			// The capability did not fail; something else ended it. The message
+			// says what, so the line is never a bare unexplained stop.
+			line.WriteString(" " + glyphCancelled + " ")
+			line.WriteString(string(evt.CapabilityID))
+			var p struct {
+				Message string `json:"Message"`
+			}
+			if err := decodePayload(evt.Payload, &p); err == nil && p.Message != "" {
+				fmt.Fprintf(&line, "  %s", p.Message)
+			}
 		case "execution.completed":
 			line.WriteString(" " + glyphCheck + " execution completed")
 		case "execution.failed":
