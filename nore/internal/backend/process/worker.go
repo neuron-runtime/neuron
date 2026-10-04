@@ -146,9 +146,9 @@ func (p *workerPool) shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Execute leases an available worker, sends the request, and returns the
-// worker to the pool. If no worker is available and the pool is not at
-// capacity, a new worker is started.
+// Execute leases an available worker, sends the request, and returns the worker
+// to the pool. If no worker is available and the pool is not at capacity, a new
+// worker is started.
 func (p *workerPool) Execute(ctx context.Context, req *capabilityrt.Request) (*capabilityrt.Response, error) {
 	if req == nil {
 		req = &capabilityrt.Request{}
@@ -169,6 +169,16 @@ func (p *workerPool) Execute(ctx context.Context, req *capabilityrt.Request) (*c
 	}
 
 	resp, err := worker.execute(ctx, req)
+	if ctx.Err() != nil {
+		// The invocation was aborted rather than answered. Cancelling the gRPC
+		// call only tears down the client side; the capability inside the process
+		// may well still be running, so this worker is busy with work nobody is
+		// waiting for. Handing it to the next request would run two capabilities
+		// on one worker and report whichever finished first as the other's
+		// result, so the worker is terminated and the pool starts a replacement.
+		p.discardWorker(worker)
+		return resp, err
+	}
 	p.returnWorker(worker)
 	return resp, err
 }

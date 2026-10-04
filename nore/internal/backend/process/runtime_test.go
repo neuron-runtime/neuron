@@ -178,6 +178,51 @@ func TestGRPCWorkerPoolReusesWorker(t *testing.T) {
 	}
 }
 
+// A worker whose invocation was abandoned is still busy inside the capability
+// runtime process: cancelling the gRPC call tears down the client side only. It
+// must not go back into the pool, or the next request would run two capabilities
+// on one worker and report whichever finished first as the other's result.
+func TestGRPCWorkerPoolDiscardsWorkerAfterAbortedInvocation(t *testing.T) {
+	rt := New(nil)
+	defer rt.Close(context.Background())
+
+	inst, err := rt.Start(context.Background(), newSpec("example:grpc-echo", fixtures.grpcEcho, capabilityrt.ProtocolV1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Close(context.Background())
+
+	pool, ok := inst.(*workerPool)
+	if !ok {
+		t.Fatalf("expected *workerPool, got %T", inst)
+	}
+
+	aborted, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := inst.Execute(aborted, &capabilityrt.Request{
+		Params: map[string]any{"sleep_ms": float64(30000)},
+	}); err == nil {
+		t.Fatal("Execute with a deadline shorter than the capability = nil error, want a cancellation failure")
+	}
+
+	if got := pool.workerCount(); got != 0 {
+		t.Fatalf("pool has %d workers after an aborted invocation, want 0 (the busy worker must not be reused)", got)
+	}
+
+	// The pool must still be usable: the discarded worker's slot is reclaimed so
+	// the next request starts a replacement.
+	resp, err := inst.Execute(context.Background(), &capabilityrt.Request{Params: map[string]any{"value": "after"}})
+	if err != nil {
+		t.Fatalf("Execute after an aborted invocation: %v", err)
+	}
+	if resp.Result["value"] != "after" {
+		t.Errorf("value = %v, want after", resp.Result["value"])
+	}
+	if got := pool.workerCount(); got != 1 {
+		t.Errorf("pool has %d workers, want 1 (a replacement for the discarded worker)", got)
+	}
+}
+
 func TestGRPCWorkerPoolConcurrent(t *testing.T) {
 	rt := New(nil)
 	defer rt.Close(context.Background())

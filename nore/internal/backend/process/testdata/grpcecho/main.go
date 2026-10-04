@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -32,6 +33,18 @@ func (s *server) Initialize(ctx context.Context, req *v1.InitializeRequest) (*v1
 }
 
 func (s *server) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.ExecuteResponse, error) {
+	// sleep_ms makes the capability block, so tests can exercise the paths that
+	// only occur when an invocation is abandoned rather than answered. It
+	// honours its own context, exactly as a real capability must.
+	if raw, ok := req.Params["sleep_ms"]; ok {
+		if ms, ok := raw.GetKind().(*v1.Value_NumberValue); ok {
+			select {
+			case <-time.After(time.Duration(ms.NumberValue) * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
 	out := make(map[string]*v1.Value, len(req.Params)+3)
 	for k, v := range req.Params {
 		out[k] = v
