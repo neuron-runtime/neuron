@@ -224,6 +224,10 @@ func (e *Execution) MarkFailed(err error) bool {
 	now := time.Now().UTC()
 	e.status = StatusFailed
 	e.completedAt = &now
+	// The execution is terminal, so nothing is in flight any more. Capabilities
+	// that never ran keep whatever status they had, but the counter must not
+	// leave a snapshot claiming work is outstanding on a finished execution.
+	e.inFlight = 0
 	if err != nil {
 		e.executionError = err.Error()
 	}

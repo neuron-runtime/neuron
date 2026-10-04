@@ -272,6 +272,10 @@ func (i *Instance) Stop() error {
 	i.mu.Unlock()
 
 	i.cancel()
+	// Drain before awaiting the runtime goroutines: once the context is
+	// cancelled the scheduler has already exited, so it can no longer report
+	// the outcome of an execution it was advancing.
+	failUnfinishedExecutions(i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
 	if i.bus != nil {
 		i.wg.Wait()
 	}

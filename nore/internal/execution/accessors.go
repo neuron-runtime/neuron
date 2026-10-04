@@ -32,6 +32,15 @@ func (e *Execution) StartedAt() time.Time {
 	return e.startedAt.UTC()
 }
 
+// InFlight reports how many capabilities of this execution are still scheduled
+// to run. A terminal execution must report zero: anything else means work was
+// abandoned without being accounted for.
+func (e *Execution) InFlight() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.inFlight
+}
+
 // Error returns the execution-level failure reason, empty when the execution
 // has not failed.
 func (e *Execution) Error() string {
