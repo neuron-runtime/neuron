@@ -16,6 +16,8 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -614,5 +616,51 @@ func TestRestartAfterFullReleaseGetsFreshPool(t *testing.T) {
 	}
 	if err := second.Close(context.Background()); err != nil {
 		t.Fatalf("closing restarted instance: %v", err)
+	}
+}
+
+// TestIsAbortedCall pins how the pool tells an aborted invocation apart from a
+// capability that answered with an error.
+//
+// The distinction decides whether a worker may be reused, and it cannot rely on
+// the caller's context alone: gRPC returns its own cancellation status as soon
+// as its deadline timer fires, which can precede ctx.Err() becoming observable.
+// Reproducing that interleaving needs process timing and is covered separately by
+// TestGRPCWorkerPoolDiscardsWorkerAfterAbortedInvocation; this test fixes the
+// classification itself so a regression is caught without that timing.
+func TestIsAbortedCall(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "no error", err: nil, want: false},
+		{name: "capability answered with an error", err: errors.New("capability returned an error"), want: false},
+		{name: "invalid argument", err: status.Error(codes.InvalidArgument, "missing params"), want: false},
+		{name: "internal transport failure", err: status.Error(codes.Internal, "connection reset"), want: false},
+		{name: "cancelled status", err: status.Error(codes.Canceled, "context canceled"), want: true},
+		{name: "deadline status", err: status.Error(codes.DeadlineExceeded, "context deadline exceeded"), want: true},
+		{name: "context cancellation", err: context.Canceled, want: true},
+		{name: "context deadline", err: context.DeadlineExceeded, want: true},
+		{
+			name: "deadline status wrapped by the worker",
+			// The exact shape worker.execute produces, and the shape that let a
+			// busy worker be returned to the pool while ctx.Err() was still nil.
+			err:  fmt.Errorf("execute via gRPC: %w", status.Error(codes.DeadlineExceeded, "stream terminated by RST_STREAM with error code: CANCEL")),
+			want: true,
+		},
+		{
+			name: "cancellation wrapped by the worker",
+			err:  fmt.Errorf("execute via gRPC: %w", status.Error(codes.Canceled, "context canceled")),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAbortedCall(tt.err); got != tt.want {
+				t.Errorf("isAbortedCall(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
