@@ -132,28 +132,6 @@ func TestReleaseLeavesOtherScopesRunning(t *testing.T) {
 	}
 }
 
-// CancelAll is the shutdown path: every scope must be stopped, including those
-// bound after the walk began is not required, but none may survive.
-func TestCancelAllStopsEveryBoundScope(t *testing.T) {
-	scopes := NewScopeRegistry(context.Background())
-	scopes.Bind("exec_1")
-	scopes.Bind("exec_2")
-	ctx2, _ := scopes.Context("exec_2")
-
-	scopes.CancelAll()
-
-	ctx1, ok := scopes.Context("exec_1")
-	if !ok {
-		t.Fatal("Context() = false after CancelAll, want the binding to remain observable")
-	}
-	if !errors.Is(ctx1.Err(), context.Canceled) {
-		t.Errorf("exec_1 scope error = %v, want context.Canceled", ctx1.Err())
-	}
-	if !errors.Is(ctx2.Err(), context.Canceled) {
-		t.Errorf("exec_2 scope error = %v, want context.Canceled", ctx2.Err())
-	}
-}
-
 // ReleaseAll is the end of the process's interest: bindings go away so a long
 // lived daemon does not accumulate a scope per execution it has finished.
 func TestReleaseAllForgetsEveryBinding(t *testing.T) {
@@ -219,16 +197,6 @@ func TestDetachedScopeRemainsCancellable(t *testing.T) {
 		}
 	})
 
-	t.Run("CancelAll", func(t *testing.T) {
-		scopes := NewScopeRegistry(context.Background())
-		detached := scopes.BindDetached("task_1")
-
-		scopes.CancelAll()
-
-		if !errors.Is(detached.Err(), context.Canceled) {
-			t.Errorf("detached scope error = %v, want context.Canceled", detached.Err())
-		}
-	})
 }
 
 // BindDetached must not hand out a second context for an execution that was

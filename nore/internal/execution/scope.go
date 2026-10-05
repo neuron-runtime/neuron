@@ -168,17 +168,3 @@ func (r *ScopeRegistry) ReleaseAll() {
 		scope.cancel()
 	}
 }
-
-// CancelAll ends every bound scope without releasing it, so each execution can
-// still be recorded as cancelled by whoever owns it.
-func (r *ScopeRegistry) CancelAll() {
-	r.mu.Lock()
-	scopes := make([]*executionScope, 0, len(r.scopes))
-	for _, scope := range r.scopes {
-		scopes = append(scopes, scope)
-	}
-	r.mu.Unlock()
-	for _, scope := range scopes {
-		scope.cancel()
-	}
-}
