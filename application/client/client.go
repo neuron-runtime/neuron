@@ -289,9 +289,7 @@ func (c *Client) CancelExecution(ctx context.Context, instanceID, executionID, r
 	}
 
 	endpoint := fmt.Sprintf(protocol.CancelExecutionPath, url.PathEscape(instanceID), url.PathEscape(executionID))
-	body := struct {
-		Reason string `json:"reason,omitempty"`
-	}{Reason: reason}
+	body := protocol.CancelExecutionRequest{Reason: reason}
 
 	if err := c.conn.Do(ctx, http.MethodPost, endpoint, body, &response); err != nil {
 		return protocol.ExecutionItem{}, err

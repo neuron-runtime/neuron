@@ -83,10 +83,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Params map[string]any `json:"params,omitempty"`
-		Mode   string         `json:"mode,omitempty"`
-	}
+	var body protocol.ExecuteRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
@@ -206,9 +203,7 @@ func (h *Handler) CancelExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Reason string `json:"reason,omitempty"`
-	}
+	var body protocol.CancelExecutionRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
