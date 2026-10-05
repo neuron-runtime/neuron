@@ -208,7 +208,7 @@ const manifest = Assembly({
       .bind(
         authorizePayment.withParams({
           order: validateOrder.result.order,
-          amount: input.order.total,
+          amount: data.order.total,
         })
       )
   )
@@ -325,12 +325,12 @@ withParams((data) =>
     .bind(
       authorizePayment.withParams({
         order: validateOrder.result.order,
-        amount: input.order.total,
+        amount: data.order.total,
       })
     )
     .bind(
       echo.withParams({
-        message: input.order.customerEmail,
+        message: data.order.customerEmail,
       })
     )
 )

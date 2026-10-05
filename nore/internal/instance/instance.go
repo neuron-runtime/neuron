@@ -164,7 +164,7 @@ func New(
 	if err != nil {
 		cancel()
 		bus.Close()
-		return nil, fmt.Errorf("compile assemblies: %w", err)
+		return nil, fmt.Errorf("compile assembly: %w", err)
 	}
 
 	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout)
@@ -280,13 +280,20 @@ func (i *Instance) Stop() error {
 	i.mu.Unlock()
 
 	i.cancel()
-	// Drain before awaiting the runtime goroutines: once the context is
-	// cancelled the scheduler has already exited, so it can no longer report
-	// the outcome of an execution it was advancing.
-	failUnfinishedExecutions(i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
+	// Await the runtime goroutines before sweeping. Cancelling the instance
+	// context stops the scheduler, which can no longer report an outcome for an
+	// execution it was advancing -- but the engine is still draining detached work
+	// and can still record a real completion for it. Sweeping first marked that
+	// work failed while it was finishing successfully, and because the scheduler
+	// had already exited nothing could ever correct the record.
+	//
+	// The wait is bounded: the engine gives each detached task at most
+	// detachedDrainTimeout, so this cannot hang shutdown.
 	if i.bus != nil {
 		i.wg.Wait()
 	}
+
+	sweepAbandonedExecutions(i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
 
 	// Release capability runtime-backed resources (wasm runtimes) now that no execution
 	// can be in flight.

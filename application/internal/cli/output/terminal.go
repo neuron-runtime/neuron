@@ -21,13 +21,14 @@ import (
 
 // glyphs used by the renderers. They match the visual language used
 // everywhere in the CLI: · in-flight, ✓ completed, ✗ failed, ○ waiting,
-// ↳ handed off to a separate execution.
+// ↳ handed off to a separate execution, ⊘ stopped without an outcome.
 const (
-	glyphBullet   = "\u00b7"
-	glyphCheck    = "\u2713"
-	glyphCross    = "\u2717"
-	glyphCircle   = "\u25cb"
-	glyphDetached = "\u21b3"
+	glyphBullet    = "\u00b7"
+	glyphCheck     = "\u2713"
+	glyphCross     = "\u2717"
+	glyphCircle    = "\u25cb"
+	glyphDetached  = "\u21b3"
+	glyphCancelled = "\u2298"
 )
 
 // spinnerFrames is the braille animation shown next to running capabilities on a

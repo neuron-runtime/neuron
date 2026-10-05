@@ -3,6 +3,7 @@ package execution
 import (
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -64,7 +65,7 @@ func (e *Execution) Results() map[core.ID]map[string]any {
 	defer e.mu.RUnlock()
 	result := make(map[core.ID]map[string]any, len(e.results))
 	for id, output := range e.results {
-		result[id] = cloneMap(output)
+		result[id] = data.CanonicalMap(output)
 	}
 	return result
 }

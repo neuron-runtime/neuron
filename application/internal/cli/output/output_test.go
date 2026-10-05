@@ -29,6 +29,7 @@ func TestClassify(t *testing.T) {
 		"capability.log":       KindLive,
 		"capability.completed": KindStatic,
 		"capability.failed":    KindStatic,
+		"capability.cancelled": KindStatic,
 		"execution.completed":  KindTerminal,
 		"execution.failed":     KindTerminal,
 		"execution.cancelled":  KindTerminal,
@@ -72,6 +73,62 @@ func TestModelFoldFailure(t *testing.T) {
 	}
 	if v.Capabilities[0].Message != "boom" {
 		t.Fatalf("capability failure message not folded: %+v", v.Capabilities[0])
+	}
+}
+
+// TestStoppedCapabilityIsNotRenderedAsAFailure covers the point of the separate
+// capability.cancelled event from the operator's side. A capability stopped
+// because a sibling failed did not break, so it must not be shown with the
+// failure glyph: that would send whoever reads the output to working code.
+func TestStoppedCapabilityIsNotRenderedAsAFailure(t *testing.T) {
+	v := NewExecutionView("hello")
+	_ = v.Fold(evt("capability.ready", "hello.broken", ""))
+	_ = v.Fold(evt("capability.failed", "hello.broken", `{"Message":"boom"}`))
+	_ = v.Fold(evt("capability.ready", "hello.victim", ""))
+	_ = v.Fold(evt("capability.cancelled", "hello.victim", `{"Message":"stopped because hello.broken failed"}`))
+
+	states := map[string]CapabilityState{}
+	for _, sv := range v.Capabilities {
+		states[sv.ID] = sv.State
+	}
+	if states["hello.broken"] != CapabilityFailed {
+		t.Errorf("the capability that actually failed is %v, want %v", states["hello.broken"], CapabilityFailed)
+	}
+	if states["hello.victim"] != CapabilityCancelled {
+		t.Errorf("the stopped capability is %v, want %v", states["hello.victim"], CapabilityCancelled)
+	}
+	if got := v.Capabilities[1].Message; got != "stopped because hello.broken failed" {
+		t.Errorf("cancellation message = %q, want the reason the work was stopped", got)
+	}
+
+	var buf bytes.Buffer
+	r, err := New(Options{Out: &buf, Assembly: "hello", Mode: ModeStatic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_ = r.Handle(ctx, evt("execution.started", "", ""))
+	_ = r.Handle(ctx, evt("capability.cancelled", "hello.victim", `{"Message":"stopped because hello.broken failed"}`))
+	_ = r.Handle(ctx, evt("execution.failed", "", `{"Message":"boom"}`))
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "stopped because hello.broken failed") {
+		t.Errorf("static output does not explain why the capability stopped:\n%s", out)
+	}
+	victimLine := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "hello.victim") {
+			victimLine = line
+		}
+	}
+	if strings.Contains(victimLine, glyphCross) {
+		t.Errorf("the stopped capability was rendered with the failure glyph %q:\n%s", glyphCross, victimLine)
+	}
+	if !strings.Contains(victimLine, glyphCancelled) {
+		t.Errorf("the stopped capability was not rendered with the cancellation glyph %q:\n%s", glyphCancelled, victimLine)
 	}
 }
 

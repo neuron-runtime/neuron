@@ -142,6 +142,23 @@ func NewAdapter(resolved capabilityrt.ResolvedCapabilityRuntime) (contracts.Capa
 	return &instanceAdapter{instance: inst, typ: resolved.Type}, nil
 }
 
+// CloseSharedRuntimes releases the resources the capability runtime backends hold
+// for the whole process, and is the last step of a graceful N.O.R.E. shutdown.
+//
+// Instances stop first, because that is where each of them gives up its own
+// reference on the backend instance it used. What remains is the state a backend
+// keeps with no per-instance handle: the process backend's worker pools, and the
+// WASM backend's compiled-module cache and sandbox runtime, which is created once
+// and cannot be recreated after being closed. Leaving that state behind would keep
+// worker processes alive after the daemon that owned them is gone.
+func CloseSharedRuntimes(ctx context.Context) error {
+	reg, err := sharedRuntimes()
+	if err != nil {
+		return err
+	}
+	return reg.CloseBackends(ctx)
+}
+
 // instanceAdapter bridges a capabilityrt.BackendInstance (backend contract)
 // onto the contracts.CapabilityRuntime interface consumed by N.O.R.E.'s
 // execution engine. It maps the engine's ExecutionContext to a Request and

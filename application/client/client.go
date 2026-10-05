@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/neuron-runtime/neuron/application/connection"
 	wsmessage "github.com/neuron-runtime/neuron/shared/protocol/websocket"
@@ -110,7 +109,7 @@ func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, 
 		Mode:   mode,
 	}
 
-	endpoint := fmt.Sprintf(protocol.ExecutePath, instance.ID)
+	endpoint := protocol.InstanceExecutions(instance.ID)
 
 	if mode == "detach" {
 		var response struct {
@@ -154,7 +153,7 @@ func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.Instance
 		k = key.ColonString()
 	}
 
-	endpoint := fmt.Sprintf(protocol.ExecutePath, url.PathEscape(k))
+	endpoint := protocol.InstanceExecutions(k)
 
 	if mode == "detach" {
 		var response struct {
@@ -183,7 +182,7 @@ func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.Instance
 // the emit callback for each StreamEvent received. It blocks until the stream
 // ends or the context is cancelled.
 func (c *Client) StreamExecutionEvents(ctx context.Context, instanceID string, executionID core.ID, emit func(protocol.StreamEvent) error) error {
-	endpoint := fmt.Sprintf(protocol.ExecutionEventsStreamPath, instanceID, executionID)
+	endpoint := protocol.ExecutionEventsStream(instanceID, string(executionID))
 
 	return c.conn.Stream(ctx, http.MethodGet, endpoint, nil, func(data []byte) error {
 		var evt protocol.StreamEvent
@@ -260,7 +259,7 @@ func (c *Client) ListExecutions(ctx context.Context, instanceID string) ([]proto
 		Data []protocol.ExecutionItem `json:"data"`
 	}
 
-	endpoint := fmt.Sprintf(protocol.ExecutePath, instanceID)
+	endpoint := protocol.InstanceExecutions(instanceID)
 
 	if err := c.conn.Do(ctx, http.MethodGet, endpoint, nil, &response); err != nil {
 		return nil, err
@@ -288,10 +287,8 @@ func (c *Client) CancelExecution(ctx context.Context, instanceID, executionID, r
 		Data protocol.ExecutionItem `json:"data"`
 	}
 
-	endpoint := fmt.Sprintf(protocol.CancelExecutionPath, url.PathEscape(instanceID), url.PathEscape(executionID))
-	body := struct {
-		Reason string `json:"reason,omitempty"`
-	}{Reason: reason}
+	endpoint := protocol.CancelExecution(instanceID, executionID)
+	body := protocol.CancelExecutionRequest{Reason: reason}
 
 	if err := c.conn.Do(ctx, http.MethodPost, endpoint, body, &response); err != nil {
 		return protocol.ExecutionItem{}, err
@@ -309,7 +306,7 @@ func (c *Client) GetInstanceById(ctx context.Context, instanceID string) (protoc
 		Data protocol.InstanceResponse `json:"data"`
 	}
 
-	endpoint := fmt.Sprintf(protocol.InstanceByIDPath, instanceID)
+	endpoint := protocol.InstanceByID(instanceID)
 
 	if err := c.conn.Do(ctx, http.MethodGet, endpoint, nil, &response); err != nil {
 		return protocol.InstanceResponse{}, err
@@ -324,7 +321,7 @@ func (c *Client) RemoveInstance(ctx context.Context, target string) error {
 	if target == "" {
 		return fmt.Errorf("instance target is required")
 	}
-	endpoint := fmt.Sprintf(protocol.InstanceByIDPath, url.PathEscape(target))
+	endpoint := protocol.InstanceByID(target)
 	return c.conn.Do(ctx, http.MethodDelete, endpoint, nil, nil)
 }
 

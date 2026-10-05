@@ -210,3 +210,222 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	}
 	t.Fatalf("timed out waiting for %s", what)
 }
+
+// outcome records how one invocation ended: whether the runtime was allowed to
+// finish its work or had its context cancelled underneath it.
+type outcome string
+
+const (
+	outcomeCompleted outcome = "completed"
+	outcomeCancelled outcome = "cancelled"
+)
+
+// releasableRuntime stays inside an invocation of the capability named by
+// blockFor until the test releases it or the invocation's context dies, and
+// records which of the two happened. Every other capability returns immediately,
+// so a test can let an execution reach its detached capability before shutdown
+// lands. It stands in for a capability doing real work that must survive the
+// caller going away.
+type releasableRuntime struct {
+	blockFor core.ID
+	release  chan struct{}
+	started  chan core.ID
+	mu       sync.Mutex
+	outcomes map[core.ID]outcome
+}
+
+func newReleasableRuntime(blockFor core.ID) *releasableRuntime {
+	return &releasableRuntime{
+		blockFor: blockFor,
+		release:  make(chan struct{}),
+		started:  make(chan core.ID, 8),
+		outcomes: map[core.ID]outcome{},
+	}
+}
+
+func (r *releasableRuntime) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+	id := execution.ExecutionID
+	capability := execution.Capability.Metadata.ID
+	if capability != r.blockFor {
+		return map[string]any{"ok": true}, nil
+	}
+	select {
+	case r.started <- id:
+	default:
+	}
+	select {
+	case <-r.release:
+		r.record(id, outcomeCompleted)
+		return map[string]any{"ok": true}, nil
+	case <-ctx.Done():
+		r.record(id, outcomeCancelled)
+		return nil, ctx.Err()
+	}
+}
+
+func (r *releasableRuntime) record(id core.ID, result outcome) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outcomes[id] = result
+}
+
+func (r *releasableRuntime) outcomeOf(id core.ID) (outcome, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result, ok := r.outcomes[id]
+	return result, ok
+}
+
+// Detaching exists so a capability's work can outlive the execution that started
+// it, including outliving the instance shutting down. Releasing every scope at
+// shutdown used to cancel detached work at the very instant shutdown began, so the
+// engine's drain budget could never apply and a detached capability was aborted
+// rather than finished.
+func TestDetachedWorkSurvivesInstanceShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := event.NewBus()
+	store := executionmodel.NewMemoryStore()
+	scopes := executionmodel.NewScopeRegistry(ctx)
+	runtime := newReleasableRuntime("b")
+
+	scheduler, err := New(bus, store, scopes)
+	if err != nil {
+		t.Fatalf("New scheduler: %v", err)
+	}
+	// A drain budget long enough that only an early cancellation could cut it
+	// short, so a passing result cannot come from the timeout expiring.
+	engineInstance, err := engine.NewCapabilityRuntimeEngine(bus, stubRegistry{runtime: runtime}, store, scopes, 4, 30*time.Second)
+	if err != nil {
+		t.Fatalf("New engine: %v", err)
+	}
+
+	schedulerDone := make(chan error, 1)
+	go func() { schedulerDone <- scheduler.Run(ctx) }()
+	engineDone := make(chan error, 1)
+	go func() { engineDone <- engineInstance.Run(ctx) }()
+
+	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1")
+	if err != nil {
+		t.Fatalf("NewExecution: %v", err)
+	}
+	if err := store.Add(parent); err != nil {
+		t.Fatalf("store.Add(parent): %v", err)
+	}
+	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, parent.ID, parent.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
+		t.Fatalf("publish ExecutionStarted: %v", err)
+	}
+
+	task := waitForChild(t, store, parent.ID)
+
+	// Wait until the detached capability is genuinely inside the runtime, so
+	// shutdown lands while its work is in flight.
+	waitFor(t, "the detached capability to start", func() bool {
+		select {
+		case id := <-runtime.started:
+			return id == task.ID
+		default:
+			return false
+		}
+	})
+
+	// Shutdown. Cancelling the instance context stops the scheduler, which
+	// releases every scope it owns.
+	cancel()
+	if err := <-schedulerDone; err != nil {
+		t.Fatalf("scheduler.Run: %v", err)
+	}
+
+	// The detached invocation must still be alive after every scope was released.
+	// Releasing it here is what the drain budget would otherwise have to wait for.
+	select {
+	case id := <-runtime.started:
+		t.Fatalf("capability %s started unexpectedly while the detached task was in flight", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(runtime.release)
+
+	// The engine waits for in-flight work, so it can only finish once the
+	// detached capability returned.
+	select {
+	case <-engineDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("engine.Run did not return; the detached invocation was never released")
+	}
+
+	result, recorded := runtime.outcomeOf(task.ID)
+	if !recorded {
+		t.Fatalf("the detached capability recorded no outcome")
+	}
+	if result != outcomeCompleted {
+		t.Fatalf("detached work outcome = %q, want %q; shutdown cancelled the work that detach exists to preserve", result, outcomeCompleted)
+	}
+}
+
+// An ordinary execution must not gain the same immunity. Otherwise a fix for
+// detached work would leak work nobody asked to keep running.
+func TestOrdinaryWorkIsStillCancelledAtShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := event.NewBus()
+	store := executionmodel.NewMemoryStore()
+	scopes := executionmodel.NewScopeRegistry(ctx)
+	runtime := newReleasableRuntime("slow")
+
+	scheduler, err := New(bus, store, scopes)
+	if err != nil {
+		t.Fatalf("New scheduler: %v", err)
+	}
+	engineInstance, err := engine.NewCapabilityRuntimeEngine(bus, stubRegistry{runtime: runtime}, store, scopes, 4, 30*time.Second)
+	if err != nil {
+		t.Fatalf("New engine: %v", err)
+	}
+
+	schedulerDone := make(chan error, 1)
+	go func() { schedulerDone <- scheduler.Run(ctx) }()
+	engineDone := make(chan error, 1)
+	go func() { engineDone <- engineInstance.Run(ctx) }()
+
+	// One capability and no detached scopes, so the only work that exists is
+	// ordinary work the instance owns.
+	blueprint := singleCapabilityBlueprint("slow")
+	root, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1")
+	if err != nil {
+		t.Fatalf("NewExecution: %v", err)
+	}
+	if err := store.Add(root); err != nil {
+		t.Fatalf("store.Add(root): %v", err)
+	}
+	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, root.ID, root.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
+		t.Fatalf("publish ExecutionStarted: %v", err)
+	}
+
+	waitFor(t, "the root capability to start", func() bool {
+		select {
+		case id := <-runtime.started:
+			return id == root.ID
+		default:
+			return false
+		}
+	})
+
+	cancel()
+	if err := <-schedulerDone; err != nil {
+		t.Fatalf("scheduler.Run: %v", err)
+	}
+	select {
+	case <-engineDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("engine.Run did not return; ordinary work was never cancelled")
+	}
+
+	result, recorded := runtime.outcomeOf(root.ID)
+	if !recorded {
+		t.Fatal("the root capability recorded no outcome")
+	}
+	if result != outcomeCancelled {
+		t.Fatalf("root work outcome = %q, want %q; shutdown must still abort ordinary work", result, outcomeCancelled)
+	}
+}

@@ -29,8 +29,9 @@ type ScopeRegistry struct {
 // sync.Once through the registry, so calling Cancel twice is safe and cancels
 // exactly once.
 type executionScope struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	detached bool
 }
 
 // NewScopeRegistry returns a registry whose scopes derive from parent, so
@@ -47,6 +48,21 @@ func NewScopeRegistry(parent context.Context) *ScopeRegistry {
 // already in force, so a scheduler that observes the same ExecutionStarted event
 // twice cannot hand a capability a context that escapes its own cancellation.
 func (r *ScopeRegistry) Bind(executionID shared.ID) context.Context {
+	return r.bind(executionID, false)
+}
+
+// BindDetached binds the scope of a task whose purpose is to outlive the
+// execution that created it, including outliving the instance shutting down.
+//
+// A detached scope is the one scope that ReleaseAll must not cancel, because the
+// drain budget in the engine's invocation context is what bounds the work
+// instead. Cancelling it here would end detached work at the instant shutdown
+// began, which is precisely what detach exists to prevent.
+func (r *ScopeRegistry) BindDetached(executionID shared.ID) context.Context {
+	return r.bind(executionID, true)
+}
+
+func (r *ScopeRegistry) bind(executionID shared.ID, detached bool) context.Context {
 	if executionID == "" {
 		// An execution without an identity cannot be addressed to cancel. Handing
 		// back the parent keeps the caller running rather than panicking on a
@@ -59,8 +75,17 @@ func (r *ScopeRegistry) Bind(executionID shared.ID) context.Context {
 	if scope, exists := r.scopes[executionID]; exists {
 		return scope.ctx
 	}
-	ctx, cancel := context.WithCancel(r.parent)
-	r.scopes[executionID] = &executionScope{ctx: ctx, cancel: cancel}
+	// A detached scope must not inherit the instance's cancellation: the whole
+	// point of detaching is that the work outlives the instance, so deriving from
+	// the instance context would end it the moment shutdown began even though the
+	// scope itself was never cancelled. Its bound comes from the engine's drain
+	// budget, or from Cancel or Release when the task stops for another reason.
+	parent := r.parent
+	if detached {
+		parent = context.WithoutCancel(parent)
+	}
+	ctx, cancel := context.WithCancel(parent)
+	r.scopes[executionID] = &executionScope{ctx: ctx, cancel: cancel, detached: detached}
 	return ctx
 }
 
@@ -100,6 +125,10 @@ func (r *ScopeRegistry) Cancel(executionID shared.ID) bool {
 // finished execution holds no live work, so leaving its context registered would
 // retain every value derived from it for the lifetime of the instance.
 //
+// Release applies to a detached scope as well: a detached task that reached a
+// terminal state has finished its work, so the drain budget no longer applies to
+// it.
+//
 // Release is idempotent and safe to call for an execution that was never bound.
 func (r *ScopeRegistry) Release(executionID shared.ID) {
 	r.mu.Lock()
@@ -111,29 +140,31 @@ func (r *ScopeRegistry) Release(executionID shared.ID) {
 	}
 }
 
-// ReleaseAll discards every scope. An instance calls it once its scheduler and
-// engine have stopped, so no capability can be mid-invocation and every
-// remaining context can be dropped at once.
+// ReleaseAll discards and cancels every bound scope except those bound for
+// detached work.
+//
+// An ordinary execution holds no live work once the scheduler has stopped, so its
+// scope can be dropped at once. A detached scope is the exception: the work it
+// bounds is meant to outlive the instance, and the engine is already draining it
+// under its own timeout. Cancelling here would end that work immediately and make
+// the drain budget unreachable.
+//
+// A detached scope is still bounded, by exactly one of two things: the drain
+// timeout expiring, or Release being called when the task reaches a terminal
+// state. Neither requires this registry, which is what lets it stop tracking
+// detached scopes at shutdown.
 func (r *ScopeRegistry) ReleaseAll() {
 	r.mu.Lock()
-	scopes := r.scopes
-	r.scopes = make(map[shared.ID]*executionScope)
-	r.mu.Unlock()
-	for _, scope := range scopes {
-		scope.cancel()
-	}
-}
-
-// CancelAll ends every bound scope without releasing it, so each execution can
-// still be recorded as cancelled by whoever owns it.
-func (r *ScopeRegistry) CancelAll() {
-	r.mu.Lock()
-	scopes := make([]*executionScope, 0, len(r.scopes))
-	for _, scope := range r.scopes {
-		scopes = append(scopes, scope)
+	ordinary := make([]*executionScope, 0, len(r.scopes))
+	for executionID, scope := range r.scopes {
+		if scope.detached {
+			continue
+		}
+		ordinary = append(ordinary, scope)
+		delete(r.scopes, executionID)
 	}
 	r.mu.Unlock()
-	for _, scope := range scopes {
+	for _, scope := range ordinary {
 		scope.cancel()
 	}
 }

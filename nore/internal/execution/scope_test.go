@@ -132,28 +132,6 @@ func TestReleaseLeavesOtherScopesRunning(t *testing.T) {
 	}
 }
 
-// CancelAll is the shutdown path: every scope must be stopped, including those
-// bound after the walk began is not required, but none may survive.
-func TestCancelAllStopsEveryBoundScope(t *testing.T) {
-	scopes := NewScopeRegistry(context.Background())
-	scopes.Bind("exec_1")
-	scopes.Bind("exec_2")
-	ctx2, _ := scopes.Context("exec_2")
-
-	scopes.CancelAll()
-
-	ctx1, ok := scopes.Context("exec_1")
-	if !ok {
-		t.Fatal("Context() = false after CancelAll, want the binding to remain observable")
-	}
-	if !errors.Is(ctx1.Err(), context.Canceled) {
-		t.Errorf("exec_1 scope error = %v, want context.Canceled", ctx1.Err())
-	}
-	if !errors.Is(ctx2.Err(), context.Canceled) {
-		t.Errorf("exec_2 scope error = %v, want context.Canceled", ctx2.Err())
-	}
-}
-
 // ReleaseAll is the end of the process's interest: bindings go away so a long
 // lived daemon does not accumulate a scope per execution it has finished.
 func TestReleaseAllForgetsEveryBinding(t *testing.T) {
@@ -168,6 +146,118 @@ func TestReleaseAllForgetsEveryBinding(t *testing.T) {
 	}
 	if _, ok := scopes.Context("exec_2"); ok {
 		t.Error("Context() = true after ReleaseAll(), want false")
+	}
+}
+
+// ReleaseAll is what an instance calls the moment it starts shutting down. If it
+// cancelled a detached scope, detached work would abort at the instant shutdown
+// began and the engine's drain budget could never apply, which defeats the
+// purpose of detaching in the first place.
+func TestReleaseAllLeavesDetachedWorkAlone(t *testing.T) {
+	scopes := NewScopeRegistry(context.Background())
+	ordinary := scopes.Bind("exec_1")
+	detached := scopes.BindDetached("task_1")
+
+	scopes.ReleaseAll()
+
+	if !errors.Is(ordinary.Err(), context.Canceled) {
+		t.Errorf("ordinary scope error = %v, want context.Canceled", ordinary.Err())
+	}
+	if err := detached.Err(); err != nil {
+		t.Errorf("detached scope error = %v, want it still live so the drain budget can bound it", err)
+	}
+}
+
+// A detached task must still be stoppable. Its bound comes from the drain
+// timeout or from Release when it goes terminal, so both paths have to work.
+func TestDetachedScopeRemainsCancellable(t *testing.T) {
+	t.Run("Cancel", func(t *testing.T) {
+		scopes := NewScopeRegistry(context.Background())
+		detached := scopes.BindDetached("task_1")
+
+		if !scopes.Cancel("task_1") {
+			t.Fatal("Cancel() = false for a bound detached execution, want true")
+		}
+		if !errors.Is(detached.Err(), context.Canceled) {
+			t.Errorf("detached scope error = %v, want context.Canceled", detached.Err())
+		}
+	})
+
+	t.Run("Release on terminal", func(t *testing.T) {
+		scopes := NewScopeRegistry(context.Background())
+		detached := scopes.BindDetached("task_1")
+
+		scopes.Release("task_1")
+
+		if !errors.Is(detached.Err(), context.Canceled) {
+			t.Errorf("detached scope error = %v, want context.Canceled", detached.Err())
+		}
+		if _, ok := scopes.Context("task_1"); ok {
+			t.Error("Context() = true after Release(), want false")
+		}
+	})
+
+}
+
+// BindDetached must not hand out a second context for an execution that was
+// already bound, exactly like Bind. A redelivered ExecutionStarted event would
+// otherwise give detached work a scope that no drain budget reaches.
+func TestBindDetachedIsIdempotent(t *testing.T) {
+	scopes := NewScopeRegistry(context.Background())
+	first := scopes.BindDetached("task_1")
+	second := scopes.BindDetached("task_1")
+
+	if first != second {
+		t.Fatal("BindDetached() returned a different context on rebind, want the same scope")
+	}
+}
+
+// An execution's detachment does not change once it is bound, so a rebind that
+// arrives after the first Bind must keep the original scope's disposition.
+func TestRebindKeepsTheFirstDisposition(t *testing.T) {
+	t.Run("detached stays detached", func(t *testing.T) {
+		scopes := NewScopeRegistry(context.Background())
+		detached := scopes.BindDetached("task_1")
+		_ = scopes.Bind("task_1")
+
+		scopes.ReleaseAll()
+
+		if err := detached.Err(); err != nil {
+			t.Errorf("detached scope error = %v, want it to survive ReleaseAll", err)
+		}
+	})
+
+	t.Run("ordinary stays ordinary", func(t *testing.T) {
+		scopes := NewScopeRegistry(context.Background())
+		ordinary := scopes.Bind("exec_1")
+		_ = scopes.BindDetached("exec_1")
+
+		scopes.ReleaseAll()
+
+		if !errors.Is(ordinary.Err(), context.Canceled) {
+			t.Errorf("ordinary scope error = %v, want context.Canceled", ordinary.Err())
+		}
+	})
+}
+
+// A detached scope survives ReleaseAll only until the work it bounds settles, so
+// Release must still be able to discard it afterwards.
+func TestDetachedScopeIsReleasedAfterDraining(t *testing.T) {
+	scopes := NewScopeRegistry(context.Background())
+	scopes.BindDetached("task_1")
+
+	scopes.ReleaseAll()
+
+	// Still tracked, because the work may still be draining.
+	if _, ok := scopes.Context("task_1"); !ok {
+		t.Fatal("detached scope was forgotten during ReleaseAll; the drain has nothing left to bound it")
+	}
+
+	// The drain finished, so the task went terminal and released its scope.
+	scopes.Release("task_1")
+
+	if _, ok := scopes.Context("task_1"); ok {
+		t.Error("Context() = true after Release(), want false")
 	}
 }
 

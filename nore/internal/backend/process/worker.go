@@ -253,6 +253,12 @@ func (p *workerPool) workerCount() int {
 // concurrent leasers cannot collectively exceed maxWorkers. Without the
 // reservation, two goroutines could both observe len(workers) < maxWorkers and
 // both start a process, silently oversubscribing the pool.
+//
+// The invariant every mutation below maintains is
+// len(workers)+reserved <= maxWorkers: `workers` counts processes that exist and
+// `reserved` counts slots claimed by workers that are still starting. A worker
+// moves from the second count to the first exactly once, inside startWorker, so
+// nothing else may touch either count for it.
 func (p *workerPool) reserveSlot() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -276,8 +282,14 @@ func (p *workerPool) releaseSlot() {
 	}
 }
 
-// discardWorker terminates a worker and removes it from the pool, returning its
-// reserved slot so the pool can start a replacement.
+// discardWorker terminates a worker and removes it from the pool.
+//
+// It deliberately leaves the reserved-slot count alone. A reservation belongs to
+// a worker that is still starting; a live worker already converted its own
+// reservation into itself when startWorker added it to the pool. Freeing a slot
+// here while another goroutine holds a live reservation lets that reservation's
+// owner and a further leaser both start a worker, and the pool ends up with more
+// processes than maxWorkers.
 func (p *workerPool) discardWorker(w *worker) {
 	if w == nil {
 		return
@@ -286,14 +298,16 @@ func (p *workerPool) discardWorker(w *worker) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.removeWorkerLocked(w)
+}
+
+// removeWorkerLocked drops a worker from the pool's set. The caller holds mu.
+func (p *workerPool) removeWorkerLocked(w *worker) {
 	for i, pw := range p.workers {
 		if pw == w {
 			p.workers = append(p.workers[:i], p.workers[i+1:]...)
-			break
+			return
 		}
-	}
-	if p.reserved > 0 {
-		p.reserved--
 	}
 }
 
@@ -361,18 +375,7 @@ func (p *workerPool) returnWorker(w *worker) {
 	default:
 		// The channel is sized to the pool capacity, so reaching the default
 		// branch means the pool shrank under us. The worker is surplus.
-		_ = w.close(context.Background())
-		p.mu.Lock()
-		for i, pw := range p.workers {
-			if pw == w {
-				p.workers = append(p.workers[:i], p.workers[i+1:]...)
-				break
-			}
-		}
-		if p.reserved > 0 {
-			p.reserved--
-		}
-		p.mu.Unlock()
+		p.discardWorker(w)
 	}
 }
 

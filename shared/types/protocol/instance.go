@@ -142,6 +142,18 @@ type ExecuteRequest struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+// CancelExecutionRequest is the body of a request to cancel a running execution.
+//
+// It is declared here because the client and the handler were each declaring the
+// same body anonymously, which left the wire shape with no single owner: a field
+// could be renamed on one side and the mismatch would surface as a silently
+// ignored cancel reason rather than a compile error.
+type CancelExecutionRequest struct {
+	// Reason is recorded on the cancellation. An empty reason is still a
+	// legitimate cancellation; the handler substitutes its own wording.
+	Reason string `json:"reason,omitempty"`
+}
+
 type ExecuteResponse struct {
 	ExecutionID core.ID   `json:"execution_id"`
 	InstanceID  string    `json:"instance_id"`

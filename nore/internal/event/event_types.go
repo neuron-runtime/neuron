@@ -27,6 +27,17 @@ const (
 	// invocation. Retries are internal to a single capability execution, so
 	// this is progress rather than a new execution.
 	CapabilityRetry
+	// CapabilityCancelled records that a capability stopped without reaching an
+	// outcome of its own, because something outside it ended first: the
+	// execution was cancelled, or a sibling capability failed.
+	//
+	// It exists so that distinction survives to consumers. Without it a
+	// capability stopped as a consequence of another failure was published as a
+	// failure of its own, so a correct implementation was reported as broken and
+	// a client could not tell the two apart without reading the message text.
+	// This is not an execution-terminal event; the execution's own terminal event
+	// already records why everything stopped.
+	CapabilityCancelled
 )
 
 const All Type = 0xffff
@@ -67,6 +78,8 @@ func (t Type) String() string {
 		return "capability.detached"
 	case CapabilityRetry:
 		return "capability.retry"
+	case CapabilityCancelled:
+		return "capability.cancelled"
 	default:
 		return "unknown"
 	}

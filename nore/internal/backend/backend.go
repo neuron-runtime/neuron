@@ -1,41 +1,63 @@
 // Package backend provides the capability runtime backend registry and
-// lifecycle management. Each runtime backend (process, wasm, container,
-// remote) registers itself with the registry, and the registry dispatches
-// Start calls to the correct backend based on the capability runtime
-// manifest's runtime.type field.
+// lifecycle management. A runtime backend registers itself with the registry,
+// and the registry dispatches Start calls to the backend named by the frozen
+// capability runtime's runtime.kind.
 //
-// The registry owns the lifecycle of all backend instances. When an instance
-// is started, the registry tracks it and ensures proper cleanup on shutdown.
+// Two backends are registered by this build: process, which hosts a capability
+// runtime as a worker process, and wasm, which hosts one as a module. The
+// container and remote kinds exist in the shared contract but have no backend
+// here, so an assembly frozen against them is rejected at resolution rather than
+// failing later at execution.
+//
+// The registry deliberately does not track the instances it launches. It cannot
+// own them, because sharing them is the backend's decision and each backend
+// shares differently: the process backend keeps one worker pool per capability
+// runtime and refcounts it by holder, the WASM backend keeps its compiled modules
+// and its sandbox runtime on the backend itself, and the legacy JSON transport
+// holds nothing at all between executions. A registry that tracked instances by
+// type@version would only be able to record the last handle it handed out, which
+// is exactly the kind of ownership claim it cannot honour. See Register and
+// CloseBackends.
 package backend
 
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
-// Registry manages runtime backends and their instances. It is the central
-// dispatch point for capability runtime lifecycle management.
+// closer is implemented by backends that hold resources for the whole process
+// and must be released at shutdown rather than per instance.
+//
+// Both shipped backends implement it. The process backend tears down any worker
+// pool left behind by an instance that failed to release its share, and the WASM
+// backend releases the process-global wazero runtime and compiled-module cache,
+// which is irreversible and therefore only correct once nothing will execute
+// again.
+type closer interface {
+	Close(ctx context.Context) error
+}
+
+// Registry routes capability runtime launches to the backend registered for a
+// runtime kind. It owns the backends, not the instances they launch.
 type Registry struct {
-	mu        sync.RWMutex
-	backends  map[string]capabilityrt.Backend
-	instances map[string]capabilityrt.BackendInstance // keyed by "type@version"
+	mu       sync.RWMutex
+	backends map[string]capabilityrt.Backend
 }
 
 // New returns a Registry with no backends registered. Call Register to add
 // runtime backends before starting any instances.
 func New() *Registry {
-	return &Registry{
-		backends:  make(map[string]capabilityrt.Backend),
-		instances: make(map[string]capabilityrt.BackendInstance),
-	}
+	return &Registry{backends: make(map[string]capabilityrt.Backend)}
 }
 
 // Register adds a runtime backend for the given kind. Registering an existing
-// kind replaces the backend. This must be called before any Start calls for
-// that kind.
+// kind replaces the backend, which must not happen once anything has been started
+// through it: the replacement would not own the instances already running, and
+// they would be released by neither backend.
 func (r *Registry) Register(kind string, backend capabilityrt.Backend) error {
 	if kind == "" {
 		return fmt.Errorf("runtime kind is required")
@@ -49,96 +71,85 @@ func (r *Registry) Register(kind string, backend capabilityrt.Backend) error {
 	return nil
 }
 
-// Start launches a capability runtime instance using the backend registered
-// for the given kind. The instance is tracked by the registry and must be
-// closed via Close or CloseAll.
+// Start launches a capability runtime instance through the backend registered for
+// the given kind.
+//
+// The returned instance is owned by its backend, not by the caller and not by this
+// registry. Callers that share one must each close their own instance when they are
+// done: for the process backend that releases a single holder of a shared worker
+// pool, so the runtime survives as long as anything is still using it.
 func (r *Registry) Start(ctx context.Context, kind string, spec capabilityrt.BackendSpec) (capabilityrt.BackendInstance, error) {
 	r.mu.RLock()
-	backend, ok := r.backends[kind]
+	selected, ok := r.backends[kind]
 	r.mu.RUnlock()
 
 	if !ok {
 		return nil, fmt.Errorf(
 			"no runtime backend registered for kind %q (supported: %v)",
 			kind,
-			r.registeredKinds(),
+			r.RegisteredKinds(),
 		)
 	}
 
-	instance, err := backend.Start(ctx, spec)
+	instance, err := selected.Start(ctx, spec)
 	if err != nil {
 		return nil, fmt.Errorf("start capability runtime %s@%s: %w", spec.Type, spec.Version, err)
 	}
-
-	key := instanceKey(spec.Type, spec.Version)
-	r.mu.Lock()
-	r.instances[key] = instance
-	r.mu.Unlock()
-
 	return instance, nil
 }
 
-// Get returns a running instance by capability runtime type and version.
-// Returns nil if no instance is running for the given key.
-func (r *Registry) Get(typ, version string) capabilityrt.BackendInstance {
-	key := instanceKey(typ, version)
+// CloseBackends releases the process-global resources held by the registered
+// backends and collects the failures.
+//
+// It runs once at shutdown, after the instances have stopped. Instances are
+// stopped first because that is where they give up their own references; this is
+// then the backstop for anything an instance failed to release, and for the state
+// a backend keeps with no per-instance handle at all.
+func (r *Registry) CloseBackends(ctx context.Context) error {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.instances[key]
-}
-
-// Close shuts down a specific instance and removes it from the registry.
-func (r *Registry) Close(ctx context.Context, typ, version string) error {
-	key := instanceKey(typ, version)
-	r.mu.Lock()
-	instance, ok := r.instances[key]
-	if ok {
-		delete(r.instances, key)
+	backends := make([]capabilityrt.Backend, 0, len(r.backends))
+	for _, backend := range r.backends {
+		backends = append(backends, backend)
 	}
-	r.mu.Unlock()
+	r.mu.RUnlock()
 
-	if !ok {
-		return nil
-	}
-	return instance.Close(ctx)
-}
-
-// CloseAll shuts down all tracked instances. It attempts to close every
-// instance and collects all errors.
-func (r *Registry) CloseAll(ctx context.Context) error {
-	r.mu.Lock()
-	instances := make(map[string]capabilityrt.BackendInstance, len(r.instances))
-	for k, v := range r.instances {
-		instances[k] = v
-	}
-	r.instances = make(map[string]capabilityrt.BackendInstance)
-	r.mu.Unlock()
-
-	var errs []error
-	for key, instance := range instances {
-		if err := instance.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("close %s: %w", key, err))
+	var failures []string
+	for _, backend := range backends {
+		shuttable, ok := backend.(closer)
+		if !ok {
+			continue
+		}
+		if err := shuttable.Close(ctx); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", backend.BackendName(), err))
 		}
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("close all instances: %v", errs)
+	if len(failures) > 0 {
+		return fmt.Errorf("close capability runtime backends: %s", joinSorted(failures))
 	}
 	return nil
 }
 
-// registeredKinds returns the list of registered backend kinds for error
-// messages.
-func (r *Registry) registeredKinds() []string {
+// RegisteredKinds returns the registered backend kinds, sorted. It is used to
+// tell a caller which runtime kinds this build can host.
+func (r *Registry) RegisteredKinds() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	kinds := make([]string, 0, len(r.backends))
 	for kind := range r.backends {
 		kinds = append(kinds, kind)
 	}
+	sort.Strings(kinds)
 	return kinds
 }
 
-func instanceKey(typ, version string) string {
-	return typ + "@" + version
+func joinSorted(values []string) string {
+	out := ""
+	for i, value := range values {
+		if i > 0 {
+			out += "; "
+		}
+		out += value
+	}
+	return out
 }

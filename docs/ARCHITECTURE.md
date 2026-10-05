@@ -667,6 +667,18 @@ stateDiagram-v2
 
 Executions honor deadlines, support cancellation, and always finish in a terminal state.
 
+### One failure fails the execution
+
+A capability that fails fails the **whole execution**. There is no continue-on-error, no per-capability retry budget that spans siblings, and no partial result: the execution ends in `Failed` with the failing capability's message as the reason.
+
+This is deliberate, and it is the single most consequential behavior in the engine, so it is worth stating plainly rather than leaving it to be inferred from the state diagram:
+
+- **Downstream capabilities never start.** The plan stops advancing at the failure.
+- **Capabilities already running are stopped.** The scheduler releases the execution's scope, so in-flight siblings see their context cancelled rather than being left to finish. This is recorded as `cancelled`, not `failed` — see [Cancellation](#cancellation) for why that distinction matters. A sibling stopped because another capability failed did not itself break, and reporting it as broken would send whoever is debugging the run to the wrong capability.
+- **Detached work is the exception.** A detached task owns its own execution, so it survives the failure of the execution that handed it off, bounded by its own deadline and its own drain budget.
+
+What the operator sees is therefore unambiguous: `execution.failed` names the capability that actually broke and carries its message. Any other capability in that execution was stopped as a consequence, and should not be read as an independent fault.
+
 ## Cancellation
 
 A capability deadline is a **failure** — the work did not finish in time and nobody chose to stop it. An explicit cancellation is a **different thing**: somebody decided the work should stop, so it ends in `StatusCancelled` and the capability that was interrupted is recorded as `cancelled` rather than `failed`. Reporting an aborted capability as broken would blame an implementation for a decision it did not make.

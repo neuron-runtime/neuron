@@ -46,7 +46,7 @@ func restoreInstance(
 		status = StatusFailed
 	}
 
-	failUnfinishedExecutions(store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID))
+	sweepUnresumableExecutions(store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID))
 
 	ctx, cancel := context.WithCancel(parent)
 	return &Instance{

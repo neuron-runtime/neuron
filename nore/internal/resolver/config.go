@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 )
 
 type configurationProgram struct {
@@ -181,7 +183,7 @@ func (c *celCompiler) compileTemplate(raw string, path string) (configurationNod
 }
 
 func (n literalNode) resolve(_ context.Context, _ CapabilityEnvironment) (any, error) {
-	return cloneJSONLike(n.value), nil
+	return data.CanonicalValue(n.value), nil
 }
 
 func (n objectNode) resolve(ctx context.Context, environment CapabilityEnvironment) (any, error) {
@@ -224,7 +226,7 @@ func (n templateNode) resolve(ctx context.Context, environment CapabilityEnviron
 		if value == nil {
 			return nil, fmt.Errorf("expression %q resolved to null", segment.source)
 		}
-		return cloneJSONLike(value), nil
+		return data.CanonicalValue(value), nil
 	}
 
 	var builder strings.Builder
@@ -278,24 +280,5 @@ func stringifyTemplateValue(value any) (string, error) {
 		return string(encoded), nil
 	default:
 		return fmt.Sprint(typed), nil
-	}
-}
-
-func cloneJSONLike(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		result := make(map[string]any, len(typed))
-		for key, item := range typed {
-			result[key] = cloneJSONLike(item)
-		}
-		return result
-	case []any:
-		result := make([]any, len(typed))
-		for index, item := range typed {
-			result[index] = cloneJSONLike(item)
-		}
-		return result
-	default:
-		return typed
 	}
 }

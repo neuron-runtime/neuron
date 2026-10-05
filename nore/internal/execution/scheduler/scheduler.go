@@ -2,9 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -82,11 +84,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if !open {
 				return nil
 			}
-			payload, ok := received.Payload.(event.CapabilityFailedPayload)
+			message, ok := event.Message(received.Payload)
 			if !ok {
-				payload.Message = "capability execution failed"
+				message = "capability execution failed"
 			}
-			s.failExecution(ctx, received.Metadata.ExecutionID, fmt.Errorf("%s", payload.Message))
+			s.failExecution(ctx, received.Metadata.ExecutionID, errors.New(message))
 		case received, open := <-s.capabilityDetached.Events():
 			if !open {
 				return nil
@@ -205,14 +207,23 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	}
 	// Bind before starting, so a capability is never invoked against a context
 	// that could not yet be cancelled.
-	s.scopes.Bind(execution.ID)
+	//
+	// A detached task's scope must survive the instance shutting down, because
+	// the drain budget in the engine is what bounds its work. Binding it as an
+	// ordinary scope would let ReleaseAll cancel the task at the instant
+	// shutdown began, which is the outcome detach exists to prevent.
+	if execution.ParentExecutionID != "" {
+		s.scopes.BindDetached(execution.ID)
+	} else {
+		s.scopes.Bind(execution.ID)
+	}
 	entryIDs := execution.Blueprint.EntryCapabilityIDs
 	if err := execution.Start(payload.Params, len(entryIDs)); err != nil {
 		return err
 	}
 	for _, capabilityID := range entryIDs {
 		node := execution.Blueprint.Nodes[capabilityID]
-		input := cloneMap(payload.Params)
+		input := data.CanonicalMap(payload.Params)
 		if err := validateInput(node.Capability, input); err != nil {
 			return fmt.Errorf("invalid entry input for capability %s: %w", capabilityID, err)
 		}

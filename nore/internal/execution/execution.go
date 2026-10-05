@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -122,7 +123,7 @@ func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount i
 	e.status = StatusRunning
 	e.startedAt = &now
 	e.inFlight = initialCapabilityCount
-	e.initialParams = cloneMap(initialParams)
+	e.initialParams = data.CanonicalMap(initialParams)
 	return nil
 }
 
@@ -141,7 +142,7 @@ func (e *Execution) MarkCapabilityReady(capabilityID shared.ID, input map[string
 	}
 	state.Status = CapabilityReady
 	e.states[capabilityID] = state
-	e.params[capabilityID] = cloneMap(input)
+	e.params[capabilityID] = data.CanonicalMap(input)
 	return nil
 }
 
@@ -176,7 +177,7 @@ func (e *Execution) MarkCapabilityCompleted(capabilityID shared.ID, output map[s
 	state.Status = CapabilityCompleted
 	state.CompletedAt = &now
 	e.states[capabilityID] = state
-	e.results[capabilityID] = cloneMap(output)
+	e.results[capabilityID] = data.CanonicalMap(output)
 	return nil
 }
 
@@ -205,6 +206,39 @@ func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) bool
 	state.CompletedAt = &now
 	if err != nil {
 		state.Error = err.Error()
+	}
+	e.states[capabilityID] = state
+	return true
+}
+
+// MarkCapabilityCancelled records that a capability stopped without reaching an
+// outcome of its own, because something outside it ended first.
+//
+// This is deliberately not the same record as MarkCapabilityFailed. A capability
+// stopped because the execution was cancelled, or because a sibling failed, did
+// not break, and recording it as a fault blames an implementation for a decision
+// it did not make — and, because the failure carries no distinguishing type,
+// leaves a consumer with no way to tell the two apart except by reading the
+// message text.
+//
+// It reports whether the state changed, for the same reason as
+// MarkCapabilityFailed: the engine can observe a stop after the execution has
+// already recorded an outcome for this capability, and must not overwrite it.
+func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists := e.states[capabilityID]
+	if !exists {
+		return false
+	}
+	if isTerminalCapability(state.Status) {
+		return false
+	}
+	now := time.Now().UTC()
+	state.Status = CapabilityCancelled
+	state.CompletedAt = &now
+	if reason != nil {
+		state.Error = reason.Error()
 	}
 	e.states[capabilityID] = state
 	return true
@@ -321,43 +355,17 @@ func (e *Execution) IsTerminal() bool {
 func (e *Execution) Params(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.params[capabilityID])
+	return data.CanonicalMap(e.params[capabilityID])
 }
 
 func (e *Execution) Result(capabilityID shared.ID) map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.results[capabilityID])
+	return data.CanonicalMap(e.results[capabilityID])
 }
 
 func (e *Execution) InitialParams() map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.initialParams)
-}
-
-func cloneMap(source map[string]any) map[string]any {
-	if source == nil {
-		return map[string]any{}
-	}
-	result := make(map[string]any, len(source))
-	for key, value := range source {
-		result[key] = cloneValue(value)
-	}
-	return result
-}
-
-func cloneValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for index, item := range typed {
-			result[index] = cloneValue(item)
-		}
-		return result
-	default:
-		return typed
-	}
+	return data.CanonicalMap(e.initialParams)
 }

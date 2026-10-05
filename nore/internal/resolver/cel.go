@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 )
 
 type CELConfig struct {
@@ -65,8 +68,12 @@ func NewCELCompiler(config CELConfig) (Compiler, error) {
 		return nil, fmt.Errorf("create transition CEL environment: %w", err)
 	}
 
+	// The declared variable names must match the activation bindings in
+	// templateNode.resolve. Capability configuration templates address the
+	// invocation payload as `params`, matching the canonical parameter name
+	// used by Binding transition expressions and the execution engine.
 	capabilityEnv, err := cel.NewEnv(append(commonOptions,
-		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("params", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("execution", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("capability", cel.MapType(cel.StringType, cel.DynType)),
 	)...)
@@ -144,7 +151,20 @@ func (p *celExpression) evaluate(ctx context.Context, variables map[string]any) 
 	if output == nil {
 		return nil, nil
 	}
-	return output.Value(), nil
+	// CEL models JSON null as types.NullValue, whose Value() is a
+	// structpb.NullValue rather than a Go nil. Letting that through silently
+	// turns a null field into the number 0 on its way to a capability runtime,
+	// so translate it to a real nil here, where every expression passes.
+	if output == types.NullValue {
+		return nil, nil
+	}
+	// CEL returns int64 for a computed number but the original native Go value
+	// for one copied wholesale out of an activation map, so the same JSON number
+	// would reach a capability as either int64 or int depending only on how the
+	// expression was written. Every value leaves the resolver in the canonical
+	// representation, which is also what an execution observes after a snapshot
+	// restore.
+	return data.CanonicalValue(output.Value()), nil
 }
 
 func normalizeConfig(config CELConfig) CELConfig {

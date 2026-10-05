@@ -68,8 +68,11 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
+	// The backends keep process-global state -- the process backend's worker pools
+	// and the WASM backend's sandbox runtime -- that outlives any single test, so
+	// the whole set is released once when the process is done with them.
 	if reg, regerr := sharedRuntimes(); regerr == nil {
-		_ = reg.CloseAll(context.Background())
+		_ = reg.CloseBackends(context.Background())
 	}
 	os.Exit(code)
 }

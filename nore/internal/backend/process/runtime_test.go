@@ -446,6 +446,66 @@ func TestPoolNeverExceedsMaxWorkers(t *testing.T) {
 // do not inherit the daemon's full environment. External capability runtimes
 // are untrusted code, so handing them os.Environ() would leak whatever ambient
 // secrets the daemon happens to hold.
+// TestDiscardingAWorkerKeepsAnotherWorkersReservation is a regression test for
+// a slot-accounting defect in discardWorker. Discarding a live worker used to
+// decrement the reserved count as well, which freed the slot belonging to a
+// worker that was still starting. Two further leasers could then each claim the
+// same capacity, and the pool ran more processes than maxWorkers allowed.
+func TestDiscardingAWorkerKeepsAnotherWorkersReservation(t *testing.T) {
+	const maxWorkers = 2
+	logger := slog.New(slog.DiscardHandler)
+	p := newWorkerPool(capabilityrt.BackendSpec{}, "v1", maxWorkers, logger)
+
+	live := &worker{logger: logger}
+	p.mu.Lock()
+	p.workers = append(p.workers, live)
+	p.mu.Unlock()
+
+	// A second request claims the last slot and begins starting its worker.
+	if !p.reserveSlot() {
+		t.Fatal("reserveSlot() = false with one live worker and one free slot, want true")
+	}
+
+	// The live worker is discarded while that start is still in flight.
+	p.discardWorker(live)
+
+	if got := p.reserved; got != 1 {
+		t.Fatalf("reserved = %d after discarding a live worker, want 1: the reservation belongs to the worker still starting, not to the one removed", got)
+	}
+}
+
+// TestPoolRefusesMoreCapacityThanMaxWorkersWhileOthersStart is the observable
+// consequence of the accounting defect above: with the reservation wrongly
+// released, the pool handed out one slot more than it had.
+func TestPoolRefusesMoreCapacityThanMaxWorkersWhileOthersStart(t *testing.T) {
+	const maxWorkers = 2
+	logger := slog.New(slog.DiscardHandler)
+	p := newWorkerPool(capabilityrt.BackendSpec{}, "v1", maxWorkers, logger)
+
+	live := &worker{logger: logger}
+	p.mu.Lock()
+	p.workers = append(p.workers, live)
+	p.mu.Unlock()
+
+	if !p.reserveSlot() {
+		t.Fatal("first reserveSlot() = false, want true")
+	}
+	p.discardWorker(live)
+
+	first := p.reserveSlot()
+	second := p.reserveSlot()
+	if first && second {
+		t.Errorf("the pool claimed %d extra slots on top of one already reserved, exceeding maxWorkers=%d", 2, maxWorkers)
+	}
+
+	p.mu.Lock()
+	inUse := len(p.workers) + p.reserved
+	p.mu.Unlock()
+	if inUse > maxWorkers {
+		t.Errorf("len(workers)+reserved = %d, exceeds maxWorkers = %d", inUse, maxWorkers)
+	}
+}
+
 func TestWorkerEnvIsAllowlisted(t *testing.T) {
 	t.Setenv("NEURON_TEST_SECRET", "must-not-be-inherited")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "must-not-be-inherited")
