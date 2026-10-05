@@ -30,24 +30,29 @@ func BuildRoutes(
 	compiler *planner.Compiler,
 	token string,
 ) http.Handler {
+	// Every route is registered from the shared route table rather than from a
+	// literal spelled out here. The table is the same one the CLI builds its URLs
+	// from, so a route cannot be renamed on one side and left behind on the
+	// other: there is nothing left here to disagree with.
+
 	// Health
-	mux.HandleFunc("GET /health", health.Health)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.HealthPath), health.Health)
 
 	// Instances
 	instHandler := instances.New(mgr, assemblies, compiler)
-	mux.HandleFunc("GET /v1/instances", instHandler.ListInstances)
-	mux.HandleFunc("POST /v1/instances", instHandler.CreateInstance)
-	mux.HandleFunc("DELETE /v1/instances", instHandler.ClearInstances)
-	mux.HandleFunc("GET /v1/instances/{id}", instHandler.GetInstanceByID)
-	mux.HandleFunc("DELETE /v1/instances/{id}", instHandler.RemoveInstance)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.InstancesPath), instHandler.ListInstances)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.InstancesPath), instHandler.CreateInstance)
+	mux.HandleFunc(protocol.Method(http.MethodDelete, protocol.InstancesPath), instHandler.ClearInstances)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.InstanceByIDPath), instHandler.GetInstanceByID)
+	mux.HandleFunc(protocol.Method(http.MethodDelete, protocol.InstanceByIDPath), instHandler.RemoveInstance)
 
 	// Executions
-	mux.HandleFunc("POST /v1/instances/{id}/executions", instHandler.Execute)
-	mux.HandleFunc("GET /v1/instances/{id}/executions", instHandler.ListExecutions)
-	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}", instHandler.GetExecutionState)
-	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}/events", instHandler.GetExecutionEvents)
-	mux.HandleFunc("GET /v1/instances/{id}/executions/{execID}/events/stream", instHandler.StreamExecutionEvents)
-	mux.HandleFunc("POST /v1/instances/{id}/executions/{execID}/cancel", instHandler.CancelExecution)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.ExecutePath), instHandler.Execute)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutePath), instHandler.ListExecutions)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionByIDPath), instHandler.GetExecutionState)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionEventsPath), instHandler.GetExecutionEvents)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionEventsStreamPath), instHandler.StreamExecutionEvents)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.CancelExecutionPath), instHandler.CancelExecution)
 
 	// WebSocket
 	ws := websocket.NewWebSocketHandler()
@@ -56,7 +61,7 @@ func BuildRoutes(
 
 	// Register
 	reg := register.New(mgr, assemblies, compiler)
-	mux.HandleFunc("POST /v1/register", reg.Register)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.RegisterPath), reg.Register)
 
 	handler := middleware.Logging(mux)
 	handler = middleware.NewTokenAuth(token).Wrap(handler)
