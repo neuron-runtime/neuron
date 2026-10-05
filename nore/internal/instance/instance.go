@@ -164,7 +164,7 @@ func New(
 	if err != nil {
 		cancel()
 		bus.Close()
-		return nil, fmt.Errorf("compile assemblies: %w", err)
+		return nil, fmt.Errorf("compile assembly: %w", err)
 	}
 
 	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout)

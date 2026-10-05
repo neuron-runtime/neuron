@@ -1,11 +1,17 @@
 // Package backend provides the capability runtime backend registry and
-// lifecycle management. Each runtime backend (process, wasm, container,
-// remote) registers itself with the registry, and the registry dispatches
-// Start calls to the correct backend based on the capability runtime
-// manifest's runtime.type field.
+// lifecycle management. A runtime backend registers itself with the registry,
+// and the registry dispatches Start calls to the backend named by the frozen
+// capability runtime's runtime.kind.
 //
-// The registry owns the lifecycle of all backend instances. When an instance
-// is started, the registry tracks it and ensures proper cleanup on shutdown.
+// Two backends are registered by this build: process, which hosts a capability
+// runtime as a worker process, and wasm, which hosts one as a module. The
+// container and remote kinds exist in the shared contract but have no backend
+// here, so an assembly frozen against them is rejected at resolution rather than
+// failing later at execution.
+//
+// The registry owns the lifecycle of all backend instances. When an instance is
+// started, the registry tracks it so it can be closed again; see Start for how
+// instances are keyed.
 package backend
 
 import (
