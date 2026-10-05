@@ -199,3 +199,135 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 		t.Fatal("restored execution error is empty, want the reason no runtime could resume it")
 	}
 }
+
+// TestStopSweepsOnlyAfterRuntimeGoroutinesFinish pins the ordering the drain
+// depends on.
+//
+// Stop used to sweep before awaiting the runtime goroutines, because once the
+// instance context is cancelled the scheduler has exited and can no longer report
+// an outcome. That reasoning is sound for the scheduler and wrong for the engine,
+// which is still draining detached work and can still record a real completion
+// for it. The sweep therefore claimed a failure for work that was in fact
+// finishing successfully, and nothing could later correct the record.
+//
+// The instance's own wait group stands in for that drain, which makes the ordering
+// observable without reproducing the whole detach path. The stand-in goroutine
+// reports what the execution looked like *while it still held the wait group*: a
+// correct Stop has not swept yet, so the execution is still unfinished.
+func TestStopSweepsOnlyAfterRuntimeGoroutinesFinish(t *testing.T) {
+	store := newTestStore(t)
+	i := startDelayInstance(t, store)
+	exec := startBlockingExecution(t, i)
+
+	sweptDuringDrain := make(chan bool, 1)
+	drained := make(chan struct{})
+	i.wg.Add(1)
+	go func() {
+		defer i.wg.Done()
+		defer close(drained)
+		// Released by the cancel inside Stop, so from here on Stop is inside the
+		// window it is supposed to be draining.
+		<-i.ctx.Done()
+		time.Sleep(50 * time.Millisecond)
+		sweptDuringDrain <- exec.IsTerminal()
+		exec.MarkCompleted()
+	}()
+
+	if err := i.Stop(); err != nil {
+		t.Fatalf("stop instance: %v", err)
+	}
+
+	select {
+	case <-drained:
+	default:
+		t.Fatal("Stop returned before the drain finished")
+	}
+
+	if alreadyTerminal := <-sweptDuringDrain; alreadyTerminal {
+		t.Errorf("the execution was already %s while the drain was still running: the sweep ran before the runtime goroutines finished, so a drain that was about to succeed was recorded as failed", exec.Status())
+	}
+	if got := exec.Status(); got != execution.StatusCompleted {
+		t.Fatalf("execution status = %s, want %s: the drain's own outcome must be the one that survives", got, execution.StatusCompleted)
+	}
+}
+
+// TestSweepLeavesDetachedExecutionsForRestore covers the other half of the same
+// contract. A detached task owns its own execution and is the only thing that can
+// advance it, so the sweep must not report a failure on its behalf. If the drain
+// budget runs out, the accurate statement is that the process ended with no
+// runtime to resume the work -- which is what the restore path reports.
+func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
+	store := newTestStore(t)
+	executions := execution.NewExecutionStore(store)
+	instanceID := shared.ID("inst_detached")
+
+	blueprint := &types.ExecutionBlueprint{
+		Metadata: shared.Metadata{ID: "sys_detached"},
+		Nodes: map[shared.ID]types.ExecutionNode{
+			"cap_slow": {Capability: shared.Capability{Metadata: shared.Metadata{ID: "cap_slow"}}},
+		},
+		EntryCapabilityIDs: []shared.ID{"cap_slow"},
+	}
+
+	// A detached task is its own execution, linked back to the parent that handed
+	// the work off, and it is still running when the drain budget runs out.
+	detached, err := execution.NewDetachedTask(blueprint, shared.NewID("request_"), instanceID, shared.NewID("exec_parent"))
+	if err != nil {
+		t.Fatalf("NewDetachedTask: %v", err)
+	}
+	if err := detached.Start(map[string]any{}, 1); err != nil {
+		t.Fatalf("start detached task: %v", err)
+	}
+	if err := executions.Add(detached); err != nil {
+		t.Fatalf("add detached task: %v", err)
+	}
+
+	ordinary, err := execution.NewExecution(blueprint, shared.NewID("request_"), instanceID)
+	if err != nil {
+		t.Fatalf("new execution: %v", err)
+	}
+	if err := ordinary.Start(map[string]any{}, 1); err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	if err := executions.Add(ordinary); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	sweepAbandonedExecutions(executions, instanceID, stoppedBeforeFinished(string(instanceID)))
+
+	if !ordinary.IsTerminal() || ordinary.Status() != execution.StatusFailed {
+		t.Errorf("ordinary execution status = %s, want %s: work the instance owns must still be given a terminal state", ordinary.Status(), execution.StatusFailed)
+	}
+	if detached.IsTerminal() {
+		t.Errorf("the detached task was driven to %s; the sweep must leave it for the restore path, which can report accurately", detached.Status())
+	}
+
+	reloaded, ok := executions.Get(detached.ID)
+	if !ok {
+		t.Fatalf("detached task %s not found", detached.ID)
+	}
+	if reloaded.IsTerminal() {
+		t.Error("the detached task was persisted as terminal, so its truthful unfinished state would be lost on restart")
+	}
+
+	// A restart is what finally gives it a terminal state, and the reason it
+	// records is the accurate one rather than "the instance stopped".
+	restored := restoreInstance(
+		context.Background(),
+		metadata{ID: string(instanceID), Status: StatusRunning},
+		execution.NewExecutionStore(store),
+		event.NewStore(store),
+	)
+	t.Cleanup(func() { _ = restored.Stop() })
+
+	recovered, ok := execution.NewExecutionStore(store).Get(detached.ID)
+	if !ok {
+		t.Fatalf("detached task %s not found after restore", detached.ID)
+	}
+	if !recovered.IsTerminal() {
+		t.Fatalf("restored detached task status = %s, want a terminal state: nothing can resume it", recovered.Status())
+	}
+	if recovered.Error() == "" {
+		t.Fatal("restored detached task error is empty, want the reason no runtime could resume it")
+	}
+}

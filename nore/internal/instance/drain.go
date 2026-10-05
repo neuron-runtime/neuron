@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -31,20 +32,51 @@ import (
 // shutdown race. Exactly one transition can take effect, because MarkCompleted
 // and MarkFailed both refuse an execution that is already terminal.
 
-// failUnfinishedExecutions drives every execution of an instance that has not
-// reached a terminal state to failed, persisting each one.
+// sweepUnresumableExecutions drives every execution of an instance to failed,
+// persisting each one.
+//
+// It is used after a restart, where the instance has no scheduler, no engine and
+// no bus. Nothing in this process can advance any of its executions, so reporting
+// them as running would be a permanent lie rather than a temporary inaccuracy.
+// Detached executions are included here for exactly that reason: without the
+// runtime that owned them they cannot resume at all.
+func sweepUnresumableExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error) {
+	sweepExecutions(store, instanceID, reason, nil)
+}
+
+// sweepAbandonedExecutions drives the executions an instance owned to failed
+// after it stops, leaving detached executions alone.
+//
+// The distinction is the point. A detached task owns its own execution and is the
+// only component that can still advance it: the engine finishes it during the
+// drain if it can, and if the drain budget runs out nothing remains that could.
+// Failing it here would replace a truthful "still running" with a false "failed"
+// while the work it describes may well have completed moments later. It is left
+// instead for the restore path, which records the accurate reason -- that the
+// process ended with no runtime to resume it -- rather than a misleading one.
+func sweepAbandonedExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error) {
+	sweepExecutions(store, instanceID, reason, func(e *executionmodel.Execution) bool {
+		return e.ParentExecutionID != ""
+	})
+}
+
+// sweepExecutions persists a terminal failure for every unfinished execution of an
+// instance, skipping those that skip reports as not the instance's to abandon.
 //
 // The snapshot is written straight to the repository rather than published as an
 // event. Both call sites run after the instance's event bus has stopped serving:
 // the event persister has already returned, and it would save through the
-// cancelled instance context in any case. There is also nothing left streaming
-// to inform, so a publish would be discarded rather than observed.
-func failUnfinishedExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error) {
+// cancelled instance context in any case. There is also nothing left streaming to
+// inform, so a publish would be discarded rather than observed.
+func sweepExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error, skip func(*executionmodel.Execution) bool) {
 	if store == nil {
 		return
 	}
 	for _, exec := range store.ListByInstance(instanceID) {
 		if exec.IsTerminal() {
+			continue
+		}
+		if skip != nil && skip(exec) {
 			continue
 		}
 		if !exec.MarkFailed(reason) {
