@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -17,12 +18,18 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/planner"
+	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/version"
 )
+
+// capabilityRuntimeShutdownTimeout bounds the final close of the capability
+// runtime backends, so a backend that hangs on shutdown cannot keep the daemon
+// alive indefinitely.
+const capabilityRuntimeShutdownTimeout = 10 * time.Second
 
 func main() {
 	var (
@@ -149,10 +156,7 @@ func main() {
 		for _, entry := range listeners {
 			_ = entry.l.Close()
 		}
-		// Gracefully stop all live instances so capability runtime-backed resources
-		// (worker processes and WASM modules) receive a clean shutdown instead
-		// of being torn down by process exit.
-		srv.StopInstances()
+		shutdownRuntimes(srv)
 		// Close the local endpoints so the next daemon start finds no socket
 		// file and no credential left behind by a process that no longer exists.
 		if socket != "" {
@@ -165,7 +169,30 @@ func main() {
 		for _, entry := range listeners {
 			_ = entry.l.Close()
 		}
+		shutdownRuntimes(srv)
 		log.Fatal(err)
+	}
+}
+
+// shutdownRuntimes stops the live instances and then releases the capability
+// runtime backends this process was hosting.
+//
+// The order matters. Stopping an instance is where it gives up the backend
+// instance it used, so doing it first lets the backends release normally rather
+// than being torn down from under a running execution. Closing the backends
+// afterwards is what cleans up the state that has no per-instance handle at all:
+// worker pools an instance failed to release, and the WASM backend's
+// compiled-module cache and sandbox runtime.
+//
+// The context is already cancelled, so the close needs a deadline of its own to
+// finish rather than being abandoned at the first cancellation.
+func shutdownRuntimes(srv *api.Server) {
+	srv.StopInstances()
+
+	ctx, cancel := context.WithTimeout(context.Background(), capabilityRuntimeShutdownTimeout)
+	defer cancel()
+	if err := plugin.CloseSharedRuntimes(ctx); err != nil {
+		slog.Warn("close capability runtime backends", slog.String("error", err.Error()))
 	}
 }
 
