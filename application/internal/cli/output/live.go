@@ -84,9 +84,9 @@ func (r *liveRenderer) render() string {
 		switch sv.State {
 		case CapabilityCompleted:
 			fmt.Fprintf(&b, "\n  %s %s\n", glyphCheck, sv.ID)
-			if len(sv.Output) > 0 {
+			if len(sv.Result) > 0 {
 				var ob strings.Builder
-				dataWriter(&ob, "      ", "output", sv.Output)
+				dataWriter(&ob, "      ", "result", sv.Result)
 				b.WriteString(ob.String())
 			}
 		case CapabilityFailed:

@@ -225,7 +225,7 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 		node := execution.Blueprint.Nodes[capabilityID]
 		input := data.CanonicalMap(payload.Params)
 		if err := validateInput(node.Capability, input); err != nil {
-			return fmt.Errorf("invalid entry input for capability %s: %w", capabilityID, err)
+			return fmt.Errorf("invalid entry params for capability %s: %w", capabilityID, err)
 		}
 		if err := execution.MarkCapabilityReady(capabilityID, input); err != nil {
 			return err
@@ -271,7 +271,7 @@ func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Ev
 		}
 		// Required/type validation always runs. Binding validations are additional and optional.
 		if err := validateInput(target.Capability, input); err != nil {
-			return fmt.Errorf("binding %s produced invalid input for capability %s: %w", transition.BindingID, target.Capability.Metadata.ID, err)
+			return fmt.Errorf("binding %s produced invalid params for capability %s: %w", transition.BindingID, target.Capability.Metadata.ID, err)
 		}
 		scheduled = append(scheduled, scheduledCapability{id: target.Capability.Metadata.ID, input: input})
 	}

@@ -51,10 +51,10 @@ type Handler struct {
 	// capability runtime's capabilities.
 	Initialize func(ctx context.Context, protocol string, metadata map[string]string) (*InitializeResult, error)
 
-	// Execute runs one execution and returns the output. The input is the
-	// resolved execution input for the capability. Returning an error from
+	// Execute runs one execution and returns the result. The params are the
+	// resolved invocation data for the capability. Returning an error from
 	// Execute records a controlled failure.
-	Execute func(ctx context.Context, input map[string]any) (map[string]any, error)
+	Execute func(ctx context.Context, params map[string]any) (map[string]any, error)
 
 	// Health reports whether the capability runtime is ready to accept requests.
 	// It is called periodically by the runtime.
@@ -146,13 +146,13 @@ func serveStdio(h Handler) error {
 	}
 
 	ctx := context.Background()
-	out, err := h.Execute(ctx, req.Params)
+	result, err := h.Execute(ctx, req.Params)
 	if err != nil {
 		writeStdioError(err.Error())
 		return nil
 	}
 
-	return writeStdioOutput(out)
+	return writeStdioOutput(result)
 }
 
 // sdkServer is the internal gRPC server implementation that adapts the
@@ -191,12 +191,12 @@ func (s *sdkServer) Initialize(ctx context.Context, req *v1.InitializeRequest) (
 
 // Execute adapts a protobuf ExecuteRequest to the Handler.
 func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.ExecuteResponse, error) {
-	input := make(map[string]any)
+	params := make(map[string]any)
 	for k, v := range req.Params {
-		input[k] = fromProtoValue(v)
+		params[k] = fromProtoValue(v)
 	}
 
-	out, err := s.handler.Execute(ctx, input)
+	result, err := s.handler.Execute(ctx, params)
 	if err != nil {
 		return &v1.ExecuteResponse{
 			Error: err.Error(),
@@ -204,9 +204,9 @@ func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.Ex
 	}
 
 	resp := &v1.ExecuteResponse{
-		Result: make(map[string]*v1.Value, len(out)),
+		Result: make(map[string]*v1.Value, len(result)),
 	}
-	for k, v := range out {
+	for k, v := range result {
 		resp.Result[k] = toProtoValue(v)
 	}
 

@@ -28,7 +28,7 @@ import (
 
 var (
 	verbose  bool
-	input    string
+	params   string
 	detach   bool
 	rebuild  bool
 	jsonMode bool
@@ -44,7 +44,7 @@ func New() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output to display event payloads")
-	cmd.Flags().StringVar(&input, "input", "", "JSON input payload for execution (e.g., '{\"key\":\"value\"}')")
+	cmd.Flags().StringVar(&params, "params", "", "JSON params payload for execution (e.g., '{\"key\":\"value\"}')")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Return execution handles immediately without streaming live events")
 	cmd.Flags().BoolVar(&rebuild, "build", false, "Rebuild the project before running (project directory required)")
 	cmd.Flags().BoolVar(&jsonMode, "json", false, "Stream execution events as NDJSON (one JSON object per line)")
@@ -99,18 +99,18 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-	var execInput map[string]any
-	if input != "" {
-		if err := json.Unmarshal([]byte(input), &execInput); err != nil {
-			return fmt.Errorf("invalid --input JSON: %w", err)
+	var execParams map[string]any
+	if params != "" {
+		if err := json.Unmarshal([]byte(params), &execParams); err != nil {
+			return fmt.Errorf("invalid --params JSON: %w", err)
 		}
 	} else {
-		execInput = map[string]any{}
+		execParams = map[string]any{}
 	}
 
 	// The run is always requested in detach mode so the CLI owns event
 	// rendering; `--detach` simply skips streaming and prints the handles.
-	execResult, err := c.ExecuteByKeyOrTarget(ctx, key, target, execInput, core.ExecutionModeDetach)
+	execResult, err := c.ExecuteByKeyOrTarget(ctx, key, target, execParams, core.ExecutionModeDetach)
 	if err != nil {
 		return err
 	}

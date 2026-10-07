@@ -130,9 +130,9 @@ func (r *staticRenderer) Handle(ctx context.Context, evt protocol.StreamEvent) e
 		return err
 	}
 	if evt.Type == "capability.completed" {
-		if sv, ok := r.view.byID[string(evt.CapabilityID)]; ok && len(sv.Output) > 0 {
+		if sv, ok := r.view.byID[string(evt.CapabilityID)]; ok && len(sv.Result) > 0 {
 			var b strings.Builder
-			dataWriter(&b, "      ", r.assembly+" output", sv.Output)
+			dataWriter(&b, "      ", r.assembly+" result", sv.Result)
 			_, err := io.WriteString(r.out, b.String())
 			return err
 		}

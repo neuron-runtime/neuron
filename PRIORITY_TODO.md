@@ -138,7 +138,7 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Add `--port <port>` for explicitly targeting the local project runtime.
 - [ ] Add `--remote <url>` for explicitly targeting a remote Neuron runtime.
 - [ ] Define `--remote` as mutually exclusive with automatic local endpoint discovery unless an explicit override is intentionally supported.
-- [ ] Replace `--input` with `--params` everywhere in the public CLI, documentation, examples, tests, and client code.
+- [x] Replace `--input` with `--params` everywhere in the public CLI, documentation, examples, tests, and client code. **(Phase 1, §16 Go half)** — flag, help text, error string, `application/README.md`, `docs/INSTALLATION.md`, `docs/GETTING_STARTED.md`, runtime comments, and the client/internal parameter names updated. `--params` semantics (stdout result, params-file) remain part of the §3 redesign.
 - [ ] Add `--params-file <path>` for loading JSON params without shell quoting.
 - [ ] Make the normal execution path wait for completion and return the Assembly result.
 - [ ] Remove `--detach` from the normal `neuron run` interface.
@@ -356,8 +356,9 @@ Confirmed by direct experiment, not by reading alone.
 ### Findings during Phase 1 implementation
 
 - [x] **P1-3** **(Phase 1, §16 Go half)** — `application/sdk/` is dead code (referenced by nothing in any Go module) and documents a fictional dialect (`{{ input.* }}`, `source.output.*`). It violates AGENTS.md §21 and would otherwise survive the cleanup teaching stale terminology. Deleted with this phase.
-- [ ] **P1-4** **(Phase 1, §16 Go half)** — The CLI reads the terminal `capability.completed` payload under the JSON key `"Output"` (`application/internal/cli/output/model.go`), but the runtime serializes `CapabilityCompletedPayload{Result}` (`nore/internal/event/event.go`) — so capability result frames never render for the operator. This is the observable half of the `output → result` rename.
-- [ ] **P1-5** **(Phase 1, §16 Go half)** — `application/project/types.go` `ValidationConfig{Input, Output}` is unused YAML configuration. Deleted rather than renamed, per AGENTS.md §21.
+- [x] **P1-4** **(Phase 1, §16 Go half)** — The CLI reads the terminal `capability.completed` payload under the JSON key `"Output"` (`application/internal/cli/output/model.go`), but the runtime serializes `CapabilityCompletedPayload{Result}` (`nore/internal/event/event.go`) — so capability result frames never render for the operator. This is the observable half of the `output → result` rename. Fixed: the view field is `Result`, the payload key is `Result`, and the render labels read `result`. Verified live against the `ecommerce_order` example.
+- [x] **P1-5** **(Phase 1, §16 Go half)** — `application/project/types.go` `ValidationConfig{Input, Output}` is unused YAML configuration. Deleted rather than renamed, per AGENTS.md §21. Its unused `CapabilitySpec.Validation` field was removed with it.
+- [x] **P1-7** **(Phase 1, §16 Go half, found during P1-4)** — User-facing runtime error strings still used `input` terminology (`nore/internal/execution/scheduler/scheduler.go`, `validation.go`: "invalid entry input", "required input", "input %q is null/expected"). Renamed to `params`/`param`. The Go executor SDK `Handler.Execute` parameter and the application client `Execute`/`ExecuteByKeyOrTarget` parameter were also renamed from `input` to `params` for consistency; no public signature changed.
 - [ ] **P1-6** **(§17 migration)** — YAML authoring uses `direction: input|output` for port classification (`application/compiler/manifest/yaml.go`). §16's listed public surfaces are SDK/CLI/HTTP/docs; the YAML key is an authoring-language surface. Decide its treatment during migration rather than renaming mid-Phase-1 and breaking existing YAML projects.
 
 ## 17. Migration / Compatibility

@@ -25,7 +25,7 @@ sequenceDiagram
     D-->>C: assembly key
     C-->>U: built and registered with key
 
-    U->>C: neuron run --input '{...}'
+    U->>C: neuron run --params '{...}'
     C->>D: POST /v1/instances
     D-->>C: instance + execution events streamed (WebSocket / SSE)
     C-->>U: terminal state reached
@@ -206,7 +206,7 @@ Usage:
 
 Flags:
       --detach         Return execution handles immediately without streaming live events
-      --input string   JSON input payload for execution (e.g., '{"key":"value"}')
+      --params string  JSON params payload for execution (e.g., '{"key":"value"}')
   -v, --verbose        Enable verbose output to display event payloads
 ```
 
@@ -224,11 +224,11 @@ Without an argument, `neuron run` runs the registered assembly: it loads the reg
 Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as an assembly key and normalized to its colon-encoded wire form. When no argument is given and the project is not built, the command stops with a message pointing you at `neuron build`.
 
 ```bash
-# Run the registered assembly with no input, streaming events
+# Run the registered assembly with no params, streaming events
 neuron run
 
-# Provide input
-neuron run --input '{"order": {"id": "ord_123", "total": 4250, "currency": "USD"}}'
+# Provide params
+neuron run --params '{"order": {"id": "ord_123", "total": 4250, "currency": "USD"}}'
 
 # Re-run a specific instance
 neuron run inst_ab12cd

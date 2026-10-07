@@ -34,8 +34,8 @@ const (
 type CapabilityView struct {
 	ID    string
 	State CapabilityState
-	// Output holds the capability's result payload, shown once it completes.
-	Output map[string]any
+	// Result holds the capability's result payload, shown once it completes.
+	Result map[string]any
 	// Message is the failure message for failed capabilities.
 	Message string
 	// Retries counts the re-attempts reported for a running capability, so a
@@ -109,10 +109,10 @@ func (v *ExecutionView) Fold(evt protocol.StreamEvent) error {
 		if sv != nil {
 			sv.State = CapabilityCompleted
 			var p struct {
-				Output map[string]any `json:"Output"`
+				Result map[string]any `json:"Result"`
 			}
-			if err := json.Unmarshal(evt.Payload, &p); err == nil && p.Output != nil {
-				sv.Output = p.Output
+			if err := json.Unmarshal(evt.Payload, &p); err == nil && p.Result != nil {
+				sv.Result = p.Result
 			}
 		}
 	case "capability.failed":
