@@ -133,22 +133,24 @@ func (c *Compiler) compileTransition(binding shared.Binding) (types.ExecutionTra
 	targets := make(map[string]struct{}, len(binding.Mappings))
 	for index, mapping := range binding.Mappings {
 		targetPath := strings.TrimSpace(mapping.TargetPath)
-		expression := strings.TrimSpace(mapping.Expression)
 		if targetPath == "" {
 			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %d has no target path", binding.Metadata.ID, index)
-		}
-		if expression == "" {
-			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %q has no expression", binding.Metadata.ID, targetPath)
 		}
 		if _, exists := targets[targetPath]; exists {
 			return types.ExecutionTransition{}, fmt.Errorf("binding %s contains duplicate target path %q", binding.Metadata.ID, targetPath)
 		}
 		targets[targetPath] = struct{}{}
-		program, err := c.expressions.CompileTransitionExpression(expression)
+		// A mapping loaded from a pre-structure artifact still carries the
+		// legacy expression string; resolving it here freezes the reference into
+		// the plan so the scheduler never parses.
+		source, err := mapping.SourceRef(string(binding.From.CapabilityID))
 		if err != nil {
 			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %q: %w", binding.Metadata.ID, targetPath, err)
 		}
-		compiledMappings = append(compiledMappings, types.CompiledMapping{TargetPath: targetPath, Expression: expression, Program: program})
+		if err := source.Validate(); err != nil {
+			return types.ExecutionTransition{}, fmt.Errorf("binding %s mapping %q: %w", binding.Metadata.ID, targetPath, err)
+		}
+		compiledMappings = append(compiledMappings, types.CompiledMapping{TargetPath: targetPath, Source: source})
 	}
 
 	compiledValidations := make([]types.CompiledValidation, 0, len(binding.Validations))
@@ -289,7 +291,12 @@ func cloneBinding(binding shared.Binding) shared.Binding {
 	if binding.Metadata.ID == "" {
 		binding.Metadata.ID = shared.NewID("binding_")
 	}
-	binding.Mappings = append([]shared.MappingRule(nil), binding.Mappings...)
+	mappings := make([]shared.MappingRule, len(binding.Mappings))
+	for index, mapping := range binding.Mappings {
+		mapping.Source = mapping.Source.Clone()
+		mappings[index] = mapping
+	}
+	binding.Mappings = mappings
 	binding.Validations = append([]shared.ValidationRule(nil), binding.Validations...)
 	return binding
 }

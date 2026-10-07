@@ -88,6 +88,61 @@ func (r ValueRef) Validate() error {
 	return nil
 }
 
+// Clone returns an independent copy of the reference. A plan must never share
+// its path slice by pointer with a registered assembly.
+func (r *ValueRef) Clone() *ValueRef {
+	if r == nil {
+		return nil
+	}
+	clone := *r
+	clone.Path = append([]string(nil), r.Path...)
+	return &clone
+}
+
+// String renders the reference in the dialect its legacy form used, for
+// diagnostics and error messages. It is the reverse of ParseMappingSource for
+// every reference kind that expression dialect could express.
+func (r ValueRef) String() string {
+	switch r.Kind {
+	case ValueRefCapabilityResult:
+		return joinReference("source.result", r.Path)
+	case ValueRefCapabilityParams:
+		return joinReference("source.params", r.Path)
+	case ValueRefAssemblyParams:
+		return joinReference("execution.params", r.Path)
+	case ValueRefVariable:
+		return joinReference("variables."+r.Capability, r.Path)
+	case ValueRefLiteral:
+		return renderLiteral(r.Value)
+	default:
+		return ""
+	}
+}
+
+func joinReference(prefix string, path []string) string {
+	if len(path) == 0 {
+		return prefix
+	}
+	return prefix + "." + strings.Join(path, ".")
+}
+
+func renderLiteral(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return strconv.FormatBool(typed)
+	case string:
+		return "'" + typed + "'"
+	case float64:
+		return strconv.FormatFloat(typed, 'g', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
 // isPathSegment reports whether a segment can name a field: identifiers,
 // digits, underscores, hyphens and $-prefixed tokens, with no whitespace or
 // operator characters. A segment that carried `>=`, `+`, or other expression
