@@ -50,7 +50,11 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 	sys := manifest.FromResolvedProject(result.Project, opts.Variables)
 	// Canonicalize is identity for YAML-authored manifests but keeps the
 	// canonicalization invariant (snake_case binding keys) uniform.
-	if err := manifest.SaveToProjectRoot(root, manifest.Canonicalize(sys)); err != nil {
+	canonical, err := manifest.Canonicalize(sys)
+	if err != nil {
+		return fmt.Errorf("canonicalize manifest: %w", err)
+	}
+	if err := manifest.SaveToProjectRoot(root, canonical); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 

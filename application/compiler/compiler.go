@@ -25,17 +25,27 @@ func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 		return nil, fmt.Errorf("manifest is nil")
 	}
 
-	sysMeta := core.Metadata{
-		ID:          core.NewID("assembly_"),
-		Name:        m.Metadata.Name,
-		Description: m.Metadata.Description,
-		Version:     m.Metadata.Version,
+	// Binding mapping sources are authored per-surface and canonicalized when
+	// the manifest is written. Re-canonicalizing here keeps the compiler safe
+	// against manifests that bypass the authoring pipeline (hand-edited or
+	// produced by a future surface) without requiring every caller to
+	// remember the step.
+	canonical, err := manifest.Canonicalize(m)
+	if err != nil {
+		return nil, err
 	}
 
-	capabilities := make([]core.Capability, 0, len(m.Capabilities))
+	sysMeta := core.Metadata{
+		ID:          core.NewID("assembly_"),
+		Name:        canonical.Metadata.Name,
+		Description: canonical.Metadata.Description,
+		Version:     canonical.Metadata.Version,
+	}
+
+	capabilities := make([]core.Capability, 0, len(canonical.Capabilities))
 	capabilityMap := make(map[string]core.Capability)
 
-	for _, rs := range m.Capabilities {
+	for _, rs := range canonical.Capabilities {
 		svc, err := convertCapability(rs)
 		if err != nil {
 			return nil, err
@@ -44,8 +54,8 @@ func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 		capabilities = append(capabilities, svc)
 	}
 
-	bindings := make([]core.Binding, 0, len(m.Bindings))
-	for _, rc := range m.Bindings {
+	bindings := make([]core.Binding, 0, len(canonical.Bindings))
+	for _, rc := range canonical.Bindings {
 		conn, err := convertBinding(rc, capabilityMap)
 		if err != nil {
 			return nil, err
@@ -143,9 +153,16 @@ func convertBinding(conn manifest.Binding, capabilityMap map[string]core.Capabil
 
 	var mappings []core.MappingRule
 	for _, m := range conn.Mappings {
+		if m.Source == nil {
+			return core.Binding{}, fmt.Errorf("binding %s -> %s: mapping target %q has no source", conn.From, conn.To, m.Target)
+		}
+		source := *m.Source
+		if ref := source; (ref.Kind == core.ValueRefCapabilityResult || ref.Kind == core.ValueRefCapabilityParams) && ref.Capability != conn.From {
+			return core.Binding{}, fmt.Errorf("binding %s -> %s: mapping target %q references capability %q but the binding originates at %q", conn.From, conn.To, m.Target, ref.Capability, conn.From)
+		}
 		mappings = append(mappings, core.MappingRule{
 			TargetPath: m.Target,
-			Expression: m.Expression,
+			Source:     &source,
 		})
 	}
 

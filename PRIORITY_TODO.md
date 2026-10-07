@@ -355,7 +355,7 @@ Confirmed by direct experiment, not by reading alone.
 
 ### Findings during Phase 1 implementation
 
-- [ ] **P1-3** **(Phase 1, §16 Go half)** — `application/sdk/` is dead code (referenced by nothing in any Go module) and documents a fictional dialect (`{{ input.* }}`, `source.output.*`). It violates AGENTS.md §21 and would otherwise survive the cleanup teaching stale terminology. Deleted with this phase.
+- [x] **P1-3** **(Phase 1, §16 Go half)** — `application/sdk/` is dead code (referenced by nothing in any Go module) and documents a fictional dialect (`{{ input.* }}`, `source.output.*`). It violates AGENTS.md §21 and would otherwise survive the cleanup teaching stale terminology. Deleted with this phase.
 - [ ] **P1-4** **(Phase 1, §16 Go half)** — The CLI reads the terminal `capability.completed` payload under the JSON key `"Output"` (`application/internal/cli/output/model.go`), but the runtime serializes `CapabilityCompletedPayload{Result}` (`nore/internal/event/event.go`) — so capability result frames never render for the operator. This is the observable half of the `output → result` rename.
 - [ ] **P1-5** **(Phase 1, §16 Go half)** — `application/project/types.go` `ValidationConfig{Input, Output}` is unused YAML configuration. Deleted rather than renamed, per AGENTS.md §21.
 - [ ] **P1-6** **(§17 migration)** — YAML authoring uses `direction: input|output` for port classification (`application/compiler/manifest/yaml.go`). §16's listed public surfaces are SDK/CLI/HTTP/docs; the YAML key is an authoring-language surface. Decide its treatment during migration rather than renaming mid-Phase-1 and breaking existing YAML projects.

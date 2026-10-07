@@ -44,7 +44,7 @@ func testManifest() *manifest.Assembly {
 				From: "validate",
 				To:   "process",
 				Mappings: []manifest.BindingMapping{
-					{Target: "data", Expression: "source.output"},
+					{Target: "data", Expression: "source.result.output"},
 				},
 			},
 		},
@@ -86,8 +86,12 @@ func TestCompileBasic(t *testing.T) {
 	if conn.To.CapabilityID != core.ID("process") {
 		t.Errorf("binding to = %q, want process", conn.To.CapabilityID)
 	}
-	if len(conn.Mappings) != 1 || conn.Mappings[0].Expression != "source.output" {
-		t.Errorf("binding mappings = %#v", conn.Mappings)
+	if len(conn.Mappings) != 1 {
+		t.Fatalf("binding mappings = %#v", conn.Mappings)
+	}
+	ref := conn.Mappings[0].Source
+	if ref == nil || ref.Kind != core.ValueRefCapabilityResult || ref.Capability != "validate" || len(ref.Path) != 1 || ref.Path[0] != "output" {
+		t.Errorf("binding mapping source = %+v, want capabilityResult validate output", ref)
 	}
 }
 
