@@ -178,7 +178,7 @@ spec:
 
 `runtimeConfig` declares how N.O.R.E. should *drive* the capability through its capability runtime — execution mode, timeout, retry behavior, and reserved resource constraints. It is grouped deliberately (`execution`, `retry`, `resources`), is per capability, and is never capability input. Every field is optional; N.O.R.E. supplies its own defaults for anything unset.
 
-Execution flows along the bindings. Each binding defines what data flows between the two capabilities (`mappings`, expressed in CEL) and optionally which conditions must hold (`validations`). Execution params are available to expressions as `execution.params`; the upstream capability's result as `source.result`.
+Execution flows along the bindings. Each binding declares what data flows between the two capabilities (`mappings`) and optionally which conditions must hold (`validations`). A mapping source names a structured reference — the upstream capability's result (`source.result.<path>`), the execution params (`execution.params.<path>`), a literal, or a project variable — which the loader parses into the canonical structured form. `validations` remain CEL expressions evaluated over `source.result` and `execution.params`.
 
 ---
 
