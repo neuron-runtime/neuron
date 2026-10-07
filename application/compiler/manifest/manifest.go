@@ -88,9 +88,9 @@ type Binding struct {
 // Canonicalize parses it into Source once, so the persisted canonical manifest
 // only ever carries the structured form.
 type BindingMapping struct {
-	Target     string          `json:"target"`
-	Source     *core.ValueRef  `json:"source,omitempty"`
-	Expression string          `json:"expression,omitempty"`
+	Target     string         `json:"target"`
+	Source     *core.ValueRef `json:"source,omitempty"`
+	Expression string         `json:"expression,omitempty"`
 }
 
 // BindingValidation asserts a transition condition.

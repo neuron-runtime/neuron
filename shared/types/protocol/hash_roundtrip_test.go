@@ -17,8 +17,8 @@ func TestHashRoundTripStableWithStructuredRefs(t *testing.T) {
 			},
 			Bindings: []core.Binding{{
 				Metadata: core.Metadata{ID: "binding_abc", Name: "v->p"},
-				From: core.Endpoint{CapabilityID: "v"},
-				To: core.Endpoint{CapabilityID: "p"},
+				From:     core.Endpoint{CapabilityID: "v"},
+				To:       core.Endpoint{CapabilityID: "p"},
 				Mappings: []core.MappingRule{
 					{TargetPath: "validation_data", Source: &core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "v", Path: []string{"order", "customer_id"}}},
 				},
@@ -26,13 +26,23 @@ func TestHashRoundTripStableWithStructuredRefs(t *testing.T) {
 		},
 	}
 	h1, err := HashAssembly(a)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	data, err := json.Marshal(a)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Logf("wire: %s", data)
 	var decoded core.Assembly
-	if err := json.Unmarshal(data, &decoded); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
 	h2, err := HashAssembly(decoded)
-	if err != nil { t.Fatal(err) }
-	if h1 != h2 { t.Fatalf("hash unstable after JSON round trip: %s != %s", h1, h2) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h1 != h2 {
+		t.Fatalf("hash unstable after JSON round trip: %s != %s", h1, h2)
+	}
 }
