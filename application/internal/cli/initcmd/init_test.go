@@ -25,8 +25,10 @@ func TestScaffoldYAMLCompiles(t *testing.T) {
 	// The scaffolded YAML assembly must build to the canonical manifest and
 	// compile to a runtime Assembly without source-language-specific tweaks.
 	if err := build.Build(context.Background(), language.YAML, build.Options{
-		Root:  root,
-		Entry: "assembly.yaml",
+		Root:    root,
+		Entry:   "assembly.yaml",
+		Name:    "hello-scaffold",
+		Version: "1.0.0",
 	}); err != nil {
 		t.Fatalf("build scaffolded yaml project: %v", err)
 	}

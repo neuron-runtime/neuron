@@ -17,6 +17,12 @@ import (
 // scans it, so capability runtimes placed there resolve without extra configuration.
 const implicitCapabilityRuntimeRoot = "neuron/capabilityRuntimes"
 
+// scaffoldAssemblyVersion is the Assembly version every scaffold writes. It
+// appears in the project configuration (neuron.config.json) and in the
+// authored Assembly metadata (assembly.ts / assembly.yaml); `neuron build`
+// rejects a mismatch, so all three come from this single constant.
+const scaffoldAssemblyVersion = "1.0.0"
+
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Init,
@@ -113,14 +119,21 @@ func writeJSON(path string, data any) error {
 }
 
 // configTemplate is the scaffolded neuron.config.json shared by both
-// languages. It declares the authoring language, the Assembly entry file, and
-// the canonical local capability runtime root. Everything the runtime needs beyond that
-// has sane defaults inside N.O.R.E.
+// languages. It declares the project identity (name/version, which must
+// match the authored Assembly metadata), the authoring language, the Assembly
+// entry file, the loopback runtime endpoint, and the canonical local
+// capability runtime root. Everything the runtime needs beyond that has sane
+// defaults inside N.O.R.E. The keys are exactly the strict project
+// configuration schema: unknown keys are rejected at load time.
 func configTemplate(name, lang, entry string) map[string]any {
 	return map[string]any{
-		"lang":  lang,
-		"entry": entry,
+		"name":    name,
+		"version": scaffoldAssemblyVersion,
+		"lang":    lang,
+		"entry":   entry,
 		"runtime": map[string]any{
+			"host": "localhost",
+			"port": "auto",
 			"execution": map[string]any{
 				"mode":    "wait",
 				"timeout": "30m",
@@ -215,7 +228,7 @@ const sayHello = Capability({
 
 const manifest = Assembly({
   name: %q,
-  version: "1.0.0",
+  version: %q,
   description: "A friendly hello assembly",
 })
   .paramsSchema<{ name: string }>()
@@ -223,7 +236,7 @@ const manifest = Assembly({
   .toManifest();
 
 export default manifest;
-`, name)
+`, name, scaffoldAssemblyVersion)
 
 	return createFile(filepath.Join(root, "assembly.ts"), assembly, 0o644)
 }
@@ -259,13 +272,13 @@ kind: Assembly
 
 metadata:
   name: %s
-  version: 1.0.0
+  version: %s
   description: A friendly hello assembly
 
 capabilities:
   - ref: say-hello
     entry: capabilities/say-hello.yaml
-`, name)
+`, name, scaffoldAssemblyVersion)
 
 	return createFile(filepath.Join(root, "assembly.yaml"), assembly, 0o644)
 }
