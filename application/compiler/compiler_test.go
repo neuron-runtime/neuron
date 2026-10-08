@@ -12,9 +12,8 @@ func testManifest() *manifest.Assembly {
 		APIVersion: "neuron/v1",
 		Kind:       "Assembly",
 		Metadata: manifest.Metadata{
-			Name:        "order-processing",
-			Version:     "1.0.0",
-			Description: "Order processing pipeline",
+			Name:    "order-processing",
+			Version: "1.0.0",
 		},
 		Capabilities: []manifest.Capability{
 			{

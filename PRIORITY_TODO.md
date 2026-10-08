@@ -217,9 +217,9 @@ Confirmed by direct experiment, not by reading alone.
 
 - [ ] Change the TypeScript Assembly constructor from `Assembly({ name, version, description })` to `Assembly()`.
 - [ ] Remove Assembly `description` from the executable/public Assembly model.
-- [ ] Keep Assembly `name` and `version` in the canonical manifest, but source them from `neuron.config.*`.
+- [x] Keep Assembly `name` and `version` in the canonical manifest, but source them from `neuron.config.*`. **Implemented/verified.** ApplyIdentity injects config identity for every language; YAML authored metadata is now optional (P2-6), so config is the true source.
 - [ ] Update the project/compiler boundary so project configuration supplies Assembly metadata before canonicalization/hashing.
-- [ ] Keep Assembly version in the canonical artifact because it currently participates in Assembly identity and hashing.
+- [x] Keep Assembly version in the canonical artifact because it currently participates in Assembly identity and hashing. **Implemented/verified.** version stays in core.Metadata and the normalized hash; description was removed from the model and the hash (see appended §17 migration item).
 - [ ] Ensure Assembly metadata is not duplicated between project configuration and authored TypeScript.
 - [ ] Keep the existing `Assembly.paramsSchema(...)` API.
 - [ ] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK.
@@ -229,8 +229,8 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Preserve the declared Assembly result field names exactly in the result contract.
 - [ ] Validate every Assembly result mapping against the Assembly result schema.
 - [ ] Validate every referenced Capability result field at compile time in TypeScript and again during canonical compilation.
-- [ ] Ensure Assembly result mapping is represented structurally in the canonical manifest, not as arbitrary expression strings.
-- [ ] Update Assembly hashing so params/result contracts and result mappings are part of the build identity.
+- [x] Ensure Assembly result mapping is represented structurally in the canonical manifest, not as arbitrary expression strings. **Implemented (canonical half).** manifest.AssemblyResult/AssemblyResultField carry core.ValueRef sources; SDK emission lands with §7.9.
+- [x] Update Assembly hashing so params/result contracts and result mappings are part of the build identity. **Implemented.** normalizeAssembly includes assembly params and the result contract (schema + structured field sources); compiler copies them into core before HashAssembly; N.O.R.E. recomputes identically at registration.
 
 ## 8. Capability Public API
 
@@ -381,6 +381,7 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Define migration for existing build/registration records to immutable build artifacts.
 - [ ] Define migration for legacy `neuron.config.*` files under the new strict validation: the retired int `version: 1` (now rejected — must be the Assembly semver string) and `daemon.*`/storage keys in project files (now rejected; endpoint moves to `runtime.host`/`runtime.port` plus CLI overrides). See P2-3.
 - [ ] Define migration for existing `RootDir` values in frozen Capability Runtime records so runtime identity becomes artifact-based.
+- [ ] Define migration for existing registrations invalidated by the Phase 3 hash-input change: assembly `description` was removed from the model and assembly params/result were added to the normalized hash, so previously registered assemblies hash differently and must re-register.
 - [ ] Keep deprecated commands/API paths only for the minimum transition period required to avoid breaking existing projects unexpectedly.
 - [ ] Remove deprecated behavior after the new path is covered by end-to-end tests.
 

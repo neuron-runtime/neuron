@@ -36,10 +36,9 @@ func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 	}
 
 	sysMeta := core.Metadata{
-		ID:          core.NewID("assembly_"),
-		Name:        canonical.Metadata.Name,
-		Description: canonical.Metadata.Description,
-		Version:     canonical.Metadata.Version,
+		ID:      core.NewID("assembly_"),
+		Name:    canonical.Metadata.Name,
+		Version: canonical.Metadata.Version,
 	}
 
 	capabilities := make([]core.Capability, 0, len(canonical.Capabilities))
@@ -63,8 +62,18 @@ func (c *Compiler) Compile(m *manifest.Assembly) (*core.Assembly, error) {
 		bindings = append(bindings, conn)
 	}
 
+	// The Assembly's params and result are part of its public contract, so
+	// they are validated and carried into core before the assembly is hashed.
+	params := convertPorts(canonical.Params)
+	result, err := compileAssemblyResult(canonical, capabilityMap)
+	if err != nil {
+		return nil, err
+	}
+
 	return &core.Assembly{
 		Metadata: sysMeta,
+		Params:   params,
+		Result:   result,
 		Specification: core.AssemblySpec{
 			Capabilities: capabilities,
 			Triggers:     nil,
@@ -99,6 +108,97 @@ func (c *Compiler) InstanceKey(m *manifest.Assembly, env string) (protocol.Insta
 		Hash:       hash,
 		Env:        env,
 	}, nil
+}
+
+// convertPorts copies authored ports into the runtime representation. Port
+// names keep the author's exact casing, exactly as capability param/result
+// ports do today: only identifier tokens that participate in expression
+// resolution are ever snake_cased, and a declared contract is not one.
+func convertPorts(ports []manifest.Port) []core.Port {
+	out := make([]core.Port, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, core.Port{
+			Name:     p.Name,
+			Type:     core.ValueType(p.Type),
+			Required: p.Required,
+		})
+	}
+	return out
+}
+
+// compileAssemblyResult validates the Assembly's declared result contract
+// against the manifest and carries it into the runtime representation.
+//
+// Every field's name must be declared by the schema (the field name is the
+// public contract and is matched exactly), every field must carry a
+// validated structured source, and a capability-scoped source must name an
+// existing capability and one of its declared ports. Validation lives here,
+// in the compiler, so a bad result mapping fails the build for every
+// authoring language — not at the CLI, and not inside N.O.R.E.
+func compileAssemblyResult(m *manifest.Assembly, capabilityMap map[string]core.Capability) (*core.AssemblyResult, error) {
+	if m.Result == nil {
+		return nil, nil
+	}
+
+	result := &core.AssemblyResult{
+		Schema: convertPorts(m.Result.Schema),
+	}
+	schemaNames := make(map[string]bool, len(result.Schema))
+	for _, port := range result.Schema {
+		schemaNames[port.Name] = true
+	}
+
+	for _, field := range m.Result.Fields {
+		prefix := fmt.Sprintf("assembly result field %q", field.Name)
+
+		if !schemaNames[field.Name] {
+			return nil, fmt.Errorf("%s: the assembly result schema declares no field named %q", prefix, field.Name)
+		}
+		if field.Source == nil {
+			return nil, fmt.Errorf("%s: has no source reference", prefix)
+		}
+		if err := field.Source.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", prefix, err)
+		}
+
+		switch field.Source.Kind {
+		case core.ValueRefCapabilityResult, core.ValueRefCapabilityParams:
+			capability, ok := capabilityMap[field.Source.Capability]
+			if !ok {
+				return nil, fmt.Errorf("%s: references unknown capability %q", prefix, field.Source.Capability)
+			}
+			if len(field.Source.Path) == 0 {
+				return nil, fmt.Errorf("%s: %s reference to capability %q has an empty path; it must name one declared port", prefix, field.Source.Kind, field.Source.Capability)
+			}
+
+			ports := capability.Results
+			portKind := "result"
+			if field.Source.Kind == core.ValueRefCapabilityParams {
+				ports = capability.Params
+				portKind = "param"
+			}
+			root := core.CamelToSnake(field.Source.Path[0])
+			if !hasPort(ports, root) {
+				return nil, fmt.Errorf("%s: capability %q declares no %s port matching %q (snake_case: %q)", prefix, field.Source.Capability, portKind, field.Source.Path[0], root)
+			}
+		}
+
+		result.Fields = append(result.Fields, core.AssemblyResultField{
+			Name:   field.Name,
+			Source: field.Source,
+		})
+	}
+
+	return result, nil
+}
+
+func hasPort(ports []core.Port, name string) bool {
+	for _, port := range ports {
+		if core.CamelToSnake(port.Name) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func convertCapability(s manifest.Capability) (core.Capability, error) {

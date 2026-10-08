@@ -33,6 +33,21 @@ func Canonicalize(m *Assembly) (*Assembly, error) {
 			c.Validations[j].Expression = canonicalizeExpression(c.Validations[j].Expression)
 		}
 	}
+	// Assembly result mappings carry structured sources exactly like binding
+	// mappings: normalize every path segment to the canonical snake_case the
+	// runtime exposes, so one spelling reaches the compiler no matter which
+	// authoring surface wrote it.
+	if m.Result != nil {
+		for i := range m.Result.Fields {
+			source := m.Result.Fields[i].Source
+			if source == nil {
+				continue
+			}
+			for k, segment := range source.Path {
+				source.Path[k] = core.CamelToSnake(segment)
+			}
+		}
+	}
 	return m, nil
 }
 

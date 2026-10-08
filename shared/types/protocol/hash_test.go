@@ -333,3 +333,199 @@ func TestHashAssemblyIncludesTriggerRuntimeConfig(t *testing.T) {
 		t.Fatal("a trigger's declared runtimeConfig must change the assembly hash")
 	}
 }
+
+func assemblyWithContract(contract func(*core.Assembly)) core.Assembly {
+	assembly := assemblyOf(capability("a"))
+	contract(&assembly)
+	return assembly
+}
+
+func TestHashAssemblyIncludesAssemblyParamsAndResult(t *testing.T) {
+	withContract, err := HashAssembly(assemblyWithContract(func(a *core.Assembly) {
+		a.Params = []core.Port{{Name: "order", Type: "object", Required: true}}
+		a.Result = &core.AssemblyResult{
+			Schema: []core.Port{{Name: "status", Type: "string", Required: true}},
+			Fields: []core.AssemblyResultField{
+				{Name: "status", Source: &core.ValueRef{
+					Kind:       core.ValueRefCapabilityResult,
+					Capability: "a",
+					Path:       []string{"status"},
+				}},
+			},
+		}
+	}))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	withParamsOnly, err := HashAssembly(core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Params:   []core.Port{{Name: "order", Type: "object", Required: true}},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	withResultOnly, err := HashAssembly(core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Result: &core.AssemblyResult{
+			Schema: []core.Port{{Name: "status", Type: "string", Required: true}},
+			Fields: []core.AssemblyResultField{
+				{Name: "status", Source: &core.ValueRef{
+					Kind:       core.ValueRefCapabilityResult,
+					Capability: "a",
+					Path:       []string{"status"},
+				}},
+			},
+		},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	withoutContract, err := HashAssembly(assemblyOf(capability("a")))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	if withContract == withoutContract {
+		t.Fatal("an assembly contract must change the assembly hash")
+	}
+	if withParamsOnly == withoutContract {
+		t.Fatal("declared params must change the assembly hash")
+	}
+	if withResultOnly == withoutContract {
+		t.Fatal("a declared result must change the assembly hash")
+	}
+}
+
+func TestHashAssemblyNormalizesMissingAndEmptyResult(t *testing.T) {
+	missing, err := HashAssembly(assemblyOf(capability("a")))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	empty, err := HashAssembly(assemblyWithContract(func(a *core.Assembly) {
+		a.Result = &core.AssemblyResult{}
+	}))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	if missing != empty {
+		t.Fatal("an assembly with no result must hash the same as one declaring an empty result")
+	}
+}
+
+func TestHashAssemblyKeepsAssemblyParamsDeclaredOrder(t *testing.T) {
+	ordered := core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Params: []core.Port{
+			{Name: "order", Type: "object", Required: true},
+			{Name: "traceId", Type: "string"},
+		},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a")},
+		},
+	}
+	first, err := HashAssembly(ordered)
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	reordered := ordered
+	reordered.Params = []core.Port{
+		{Name: "traceId", Type: "string"},
+		{Name: "order", Type: "object", Required: true},
+	}
+	second, err := HashAssembly(reordered)
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	if first == second {
+		t.Fatal("the declared params order is the contract and must change the assembly hash")
+	}
+}
+
+func TestHashAssemblyDistinguishesAssemblyResultFieldSources(t *testing.T) {
+	baseFields := []core.AssemblyResultField{
+		{Name: "status", Source: &core.ValueRef{
+			Kind:       core.ValueRefCapabilityResult,
+			Capability: "a",
+			Path:       []string{"status"},
+		}},
+	}
+	base, err := HashAssembly(assemblyWithContract(func(a *core.Assembly) {
+		a.Result = &core.AssemblyResult{
+			Schema: []core.Port{{Name: "status", Type: "string", Required: true}},
+			Fields: baseFields,
+		}
+	}))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	variants := map[string][]core.AssemblyResultField{
+		"different capability": {{
+			Name:   "status",
+			Source: &core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "other", Path: []string{"status"}},
+		}},
+		"different path": {{
+			Name:   "status",
+			Source: &core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"status", "code"}},
+		}},
+		"different kind": {{
+			Name:   "status",
+			Source: &core.ValueRef{Kind: core.ValueRefAssemblyParams, Path: []string{"status"}},
+		}},
+		"literal": {{
+			Name:   "status",
+			Source: &core.ValueRef{Kind: core.ValueRefLiteral, Value: "fixed"},
+		}},
+		"different field name": {{
+			Name:   "code",
+			Source: &core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"status"}},
+		}},
+	}
+
+	for name, fields := range variants {
+		t.Run(name, func(t *testing.T) {
+			changed, err := HashAssembly(assemblyWithContract(func(a *core.Assembly) {
+				a.Result = &core.AssemblyResult{
+					Schema: []core.Port{{Name: "status", Type: "string", Required: true}},
+					Fields: fields,
+				}
+			}))
+			if err != nil {
+				t.Fatalf("hash assembly: %v", err)
+			}
+			if changed == base {
+				t.Fatalf("%s must change the assembly hash", name)
+			}
+		})
+	}
+}
+
+func TestHashAssemblyIgnoresAssemblyDescription(t *testing.T) {
+	// Assembly description was removed from the canonical model and from the
+	// hash: it carries no execution or deployment meaning, so editing it must
+	// not invalidate a registration.
+	described := assemblyWithContract(func(a *core.Assembly) {
+		a.Metadata.Description = "a friendly assembly"
+	})
+	first, err := HashAssembly(described)
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	second, err := HashAssembly(assemblyOf(capability("a")))
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	if first != second {
+		t.Fatal("an assembly description must not change the assembly hash")
+	}
+}

@@ -4,7 +4,7 @@ import "testing"
 
 func TestApplyIdentityInjectsConfiguredIdentity(t *testing.T) {
 	m := &Assembly{
-		Metadata: Metadata{Description: "keeps the authored description"},
+		Metadata: Metadata{},
 	}
 
 	if err := ApplyIdentity(m, "orders", "2.1.0"); err != nil {
@@ -16,14 +16,11 @@ func TestApplyIdentityInjectsConfiguredIdentity(t *testing.T) {
 	if m.Metadata.Version != "2.1.0" {
 		t.Errorf("version = %q, want 2.1.0", m.Metadata.Version)
 	}
-	if m.Metadata.Description != "keeps the authored description" {
-		t.Errorf("description = %q, want the authored description untouched", m.Metadata.Description)
-	}
 }
 
 func TestApplyIdentityAcceptsMatchingAuthoredMetadata(t *testing.T) {
 	m := &Assembly{
-		Metadata: Metadata{Name: "orders", Version: "2.1.0", Description: "authored"},
+		Metadata: Metadata{Name: "orders", Version: "2.1.0"},
 	}
 
 	if err := ApplyIdentity(m, "orders", "2.1.0"); err != nil {
@@ -31,9 +28,6 @@ func TestApplyIdentityAcceptsMatchingAuthoredMetadata(t *testing.T) {
 	}
 	if m.Metadata.Name != "orders" || m.Metadata.Version != "2.1.0" {
 		t.Errorf("metadata = %+v, want orders@2.1.0", m.Metadata)
-	}
-	if m.Metadata.Description != "authored" {
-		t.Errorf("description = %q, want the authored description untouched", m.Metadata.Description)
 	}
 }
 

@@ -22,9 +22,8 @@ func FromResolvedProject(rp *project.ResolvedProject) *Assembly {
 		APIVersion: "neuron/v1",
 		Kind:       "Assembly",
 		Metadata: Metadata{
-			Name:        rp.Assembly.Definition.Metadata.Name,
-			Version:     rp.Assembly.Definition.Metadata.Version,
-			Description: rp.Assembly.Definition.Metadata.Description,
+			Name:    rp.Assembly.Definition.Metadata.Name,
+			Version: rp.Assembly.Definition.Metadata.Version,
 		},
 	}
 

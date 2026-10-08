@@ -24,7 +24,6 @@ kind: Assembly
 metadata:
   name: hello
   version: 0.1.0
-  description: A friendly hello assembly
 
 capabilities:
   - ref: greet
@@ -68,9 +67,6 @@ func writeYAMLProjectWithoutIdentity(t *testing.T, dir string) {
 	files := map[string]string{
 		"assembly.yaml": `apiVersion: neuron/v1
 kind: Assembly
-
-metadata:
-  description: A friendly hello assembly
 
 capabilities:
   - ref: greet
@@ -130,10 +126,6 @@ func TestBuildPersistsIdentityInjectedManifest(t *testing.T) {
 	}
 	if m.Metadata.Version != "0.1.0" {
 		t.Errorf("persisted version = %q, want 0.1.0", m.Metadata.Version)
-	}
-	// Description stays authored; configuration owns only name and version.
-	if m.Metadata.Description != "A friendly hello assembly" {
-		t.Errorf("persisted description = %q, want the authored description", m.Metadata.Description)
 	}
 	if len(m.Capabilities) != 1 || m.Capabilities[0].Name != "greet" {
 		t.Errorf("persisted capabilities = %+v, want a single greet capability", m.Capabilities)

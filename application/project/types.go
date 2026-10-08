@@ -89,11 +89,13 @@ type BindingMetadata struct {
 	Description string `yaml:"description,omitempty"`
 }
 
-// AssemblyMetadata identifies a Assembly.
+// AssemblyMetadata identifies a Assembly. Name and Version are optional at
+// this boundary: neuron.config.* owns the Assembly identity, and
+// manifest.ApplyIdentity injects or validates them at the shared build seam.
+// Description is not part of the Assembly model.
 type AssemblyMetadata struct {
-	Name        string `yaml:"name"`
-	Version     string `yaml:"version"`
-	Description string `yaml:"description,omitempty"`
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
 }
 
 // CapabilityReference references a capability definition.

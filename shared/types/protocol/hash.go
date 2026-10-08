@@ -50,13 +50,28 @@ type normalizedAssembly struct {
 	Metadata     normalizedMetadata     `json:"metadata"`
 	Capabilities []normalizedCapability `json:"capabilities"`
 	Bindings     []normalizedBinding    `json:"bindings"`
+	// Params and Result are the Assembly's public contract. Params keep the
+	// author's declared order; the Result contributes its Schema in declared
+	// order and its Fields in declared order, each with its deterministic
+	// structured source. Neither is sorted: the order is the contract.
+	Params []core.Port               `json:"params,omitempty"`
+	Result *normalizedAssemblyResult `json:"result,omitempty"`
 }
 
 type normalizedMetadata struct {
-	Name        string            `json:"name"`
-	Version     string            `json:"version,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	Name    string            `json:"name"`
+	Version string            `json:"version,omitempty"`
+	Labels  map[string]string `json:"labels,omitempty"`
+}
+
+type normalizedAssemblyResult struct {
+	Schema []core.Port                     `json:"schema"`
+	Fields []normalizedAssemblyResultField `json:"fields"`
+}
+
+type normalizedAssemblyResultField struct {
+	Name   string         `json:"name"`
+	Source *core.ValueRef `json:"source"`
 }
 
 type normalizedCapability struct {
@@ -139,12 +154,36 @@ func normalizeAssembly(assembly core.Assembly) normalizedAssembly {
 
 	return normalizedAssembly{
 		Metadata: normalizedMetadata{
-			Name:        m.Name,
-			Version:     m.Version,
-			Description: m.Description,
-			Labels:      m.Labels,
+			Name:    m.Name,
+			Version: m.Version,
+			Labels:  m.Labels,
 		},
 		Capabilities: capabilities,
 		Bindings:     bindings,
+		Params:       append([]core.Port(nil), assembly.Params...),
+		Result:       normalizedResult(assembly.Result),
 	}
+}
+
+// normalizedResult renders an Assembly result for the hash. A result that
+// declares neither a schema nor any mapping contributes nothing, so a
+// registered assembly without a result and one with an empty result hash
+// identically — old payloads stay comparable to new ones.
+func normalizedResult(result *core.AssemblyResult) *normalizedAssemblyResult {
+	if result == nil {
+		return nil
+	}
+	normalized := &normalizedAssemblyResult{
+		Schema: append([]core.Port(nil), result.Schema...),
+	}
+	for _, field := range result.Fields {
+		normalized.Fields = append(normalized.Fields, normalizedAssemblyResultField{
+			Name:   field.Name,
+			Source: field.Source,
+		})
+	}
+	if len(normalized.Schema) == 0 && len(normalized.Fields) == 0 {
+		return nil
+	}
+	return normalized
 }

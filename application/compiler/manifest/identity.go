@@ -18,8 +18,9 @@ import (
 // authored value that matches, or is absent, is simply replaced by the
 // configured value.
 //
-// Only Name and Version are applied. Metadata.Description stays authored:
-// it is not part of the configuration-owned identity.
+// Only Name and Version are applied; description is not part of the model.
+// YAML-liberated assembly identity means configuration never competes with an
+// authored name or version that YAML surfaces may still carry.
 func ApplyIdentity(m *Assembly, name, version string) error {
 	if m == nil {
 		return fmt.Errorf("assembly manifest is nil")

@@ -14,16 +14,50 @@ type Assembly struct {
 	Capabilities []Capability `json:"capabilities"`
 	Bindings     []Binding    `json:"bindings"`
 
+	// Params declare the Assembly's public invocation contract. They are the
+	// source-language-neutral shape of the TypeScript paramsSchema.
+	Params []Port `json:"params,omitempty"`
+
+	// Result declares the Assembly's public result contract: the schema a
+	// caller reads after a synchronous execution completes, and the structured
+	// mapping that produces each field.
+	Result *AssemblyResult `json:"result,omitempty"`
+
 	// Variables are project-level values supplied by the project
 	// configuration. They have no meaning to the runtime itself.
 	Variables map[string]any `json:"variables,omitempty"`
 }
 
+// AssemblyResult is the public result contract of an Assembly execution: the
+// schema a caller reads after a synchronous run completes, plus the structured
+// mapping from capability results (and assembly params, project variables, and
+// literals) to each declared field. Field order is the author's declared
+// contract and is preserved verbatim: nothing here is an arbitrary expression
+// string, and the runtime resolves every field from its structured source.
+type AssemblyResult struct {
+	Schema []Port                `json:"schema"`
+	Fields []AssemblyResultField `json:"fields"`
+}
+
+// AssemblyResultField maps one declared Assembly result field to the value
+// that must produce it at execution time.
+type AssemblyResultField struct {
+	// Name is the public field name, exactly as the author declared it; it is
+	// the contract callers read, so it is matched exactly and never rewritten.
+	Name string `json:"name"`
+
+	// Source is the structured reference the runtime resolves at execution.
+	Source *core.ValueRef `json:"source"`
+}
+
 // Metadata identifies a Assembly in the manifest.
+//
+// Name and Version are the identity; both are owned by neuron.config.* and
+// injected by ApplyIdentity. Description is deliberately not part of the
+// model: identity is configuration-owned only.
 type Metadata struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // Capability describes one unit of computation.

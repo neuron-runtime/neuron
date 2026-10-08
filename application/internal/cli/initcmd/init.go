@@ -271,14 +271,11 @@ spec:
 		return err
 	}
 
-	// The YAML assembly authors no identity: neuron.config.json owns the
-	// Assembly name/version, and `neuron build` injects them at the shared
-	// build seam. Scaffolding them here would duplicate the configuration.
+	// The YAML assembly authors no identity and no description: neuron.config.json
+	// owns the Assembly name/version, and `neuron build` injects them at the
+	// shared build seam. Scaffolding them here would duplicate the configuration.
 	assembly := `apiVersion: neuron/v1
 kind: Assembly
-
-metadata:
-  description: A friendly hello assembly
 
 capabilities:
   - ref: say-hello
