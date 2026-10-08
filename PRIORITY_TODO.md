@@ -188,20 +188,30 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 6. Project Configuration Schema
 
-- [ ] Update `neuron.config.*` to own the Assembly's project-level identity.
-- [ ] Add `name`.
-- [ ] Add `version`.
-- [ ] Keep `lang`.
-- [ ] Keep `entry`.
-- [ ] Add `runtime.host`.
-- [ ] Add `runtime.port`.
-- [ ] Define `"auto"` as the default runtime port mode.
-- [ ] Keep registry/cache configuration separate from project runtime identity.
-- [ ] Reject internal storage, PID, socket, daemon, and other engine plumbing from normal project configuration.
-- [ ] Define strict validation for unknown configuration keys.
-- [ ] Update the existing YAML/JSON config loader and merge precedence rules.
-- [ ] Update `neuron init` templates to generate the new configuration.
-- [ ] Update configuration documentation and examples.
+- [x] Update `neuron.config.*` to own the Assembly's project-level identity. **Implemented.** `config.Config` carries `Name`/`Version`; the build injects them through the one shared boundary (`build.Build` → `manifest.ApplyIdentity`) before `Canonicalize`/fingerprint/`InstanceKey`, for both languages.
+- [x] Add `name`. **Implemented.** Required at build time: `ApplyIdentity` fails with an error naming `neuron.config.*` when it is absent; rejected as non-string at load time.
+- [x] Add `version`. **Implemented.** Assembly semver string (the unconsumed int config-schema key is deleted — see P2-3). Same requiredness and string-only rules as `name`.
+- [x] Keep `lang`. **Unchanged**, still honored by `language.Resolve`.
+- [x] Keep `entry`. **Unchanged**, still expanded against the project root.
+- [x] Add `runtime.host`. **Implemented.**, default `localhost` (loopback-first), overridable via config and `NEURON_RUNTIME_HOST`.
+- [x] Add `runtime.port`. **Implemented.** Accepts an integer or `"auto"` in files, strings from the environment, and either from CLI overrides; normalized once in the loader into `RuntimePort{Mode, Number}` so no other layer sees the union.
+- [x] Define `"auto"` as the default runtime port mode. **Implemented.** `RuntimePort{Mode: RuntimePortAuto}` is the compiled-in default; `RuntimePort.IsAuto()` is the accessor. Binding itself arrives in Phase 8 (§2).
+- [x] Keep registry/cache configuration separate from project runtime identity. **Unchanged by design.** Distribution settings stay under `capabilityRuntimes.*`; identity lives in `name`/`version`/`runtime.*`.
+- [x] Reject internal storage, PID, socket, daemon, and other engine plumbing from normal project configuration. **Implemented.** `validateConfigFile(path, projectScope)` denies `storage`, `capabilityRuntimes.storeDir`, and the whole `daemon` subtree in project files; the machine-level global file keeps `daemon.*` until Phase 8 removes the global model (confirmed decision), and CLI overrides (`--remote`, `--nore-path`) bypass file validation.
+- [x] Define strict validation for unknown configuration keys. **Implemented.** `checkUnknownKeys` walks the raw file against the `Config` struct's mapstructure tags (recursing into struct-typed nodes only; `variables` and registry list items stay free-form), reports the first unknown key in sorted order with its dotted path, and fails the load. Verified live: a typo key and `daemon.*` both abort `neuron build` with the offending path.
+- [x] Update the existing YAML/JSON config loader and merge precedence rules. **Implemented/verified.** One validation gate (`validateConfigFile`) now serves both file formats before merge; precedence stays defaults < global < project < env < CLI, with `runtime.port` normalized after env/CLI so the union collapses at the right seam. The precedence list is now documented correctly (P2-2).
+- [x] Update `neuron init` templates to generate the new configuration. **Implemented.** The scaffold emits `name`, `version`, `runtime.host`, `runtime.port` from one `scaffoldAssemblyVersion` constant shared with both authored-assembly templates, so config and authored metadata cannot drift; covered by `init_config_test.go`.
+- [x] Update configuration documentation and examples. **Implemented.** `application/README.md`, `docs/GETTING_STARTED.md`, `docs/MODULES.md`, `docs/ARCHITECTURE.md`, and all three example configs updated (P2-2 details).
+
+### Findings during Phase 2 implementation
+
+- [x] **P2-1** Two divergent `neuron init` config templates exist; the second is dead code. `application/internal/cli/config/config.go` (`NeuronConfigFileName`, `NeuronConfigDefaultTemplate`) is referenced by nothing in any module, emits YAML while the live template (`application/internal/cli/initcmd/init.go`) emits JSON, and diverges in content. Per AGENTS.md §21 it must be deleted as part of the §6 template update, not preserved alongside it. **Removed** with the template update — grep confirmed zero references; the package directory is gone.
+- [x] **P2-2** Configuration documentation contradicts the implementation. `application/README.md` lists a 4-layer merge precedence that omits the global `~/.config/neuron/config.yaml` layer the loader actually implements; its key table documents `capabilityRuntimes.storeDir` as a project key even though `rejectInternalKeys` rejects it; and it documents `daemon.*` as project configuration, which §6 removes. The docs item in §6 must fix all three, not just add the new keys. **Fixed:** five-layer precedence documented; `storeDir` and `daemon.*` removed from the project key table with an engine-plumbing rejection note (`--remote`/`--nore-path` remain the endpoint surface); new keys added with defaults; strict-unknown-key behavior documented.
+- [x] **P2-3** The existing `version` config key is an unconsumed int (config-schema version, default `1`; zero consumers, zero tests). §6 repurposes `version` as the Assembly semver string. The int form is deleted; a legacy `version: 1` file now fails strict validation with a clear message. Recorded here so §17 can carry the migration note. **Implemented** — the int key is gone, and `version: 1` is rejected at load time with `` `version` must be a quoted string (for example "1.0.0") `` (the decoder would otherwise silently coerce it; found by test-writing, fixed in `validateConfigFile`, pinned by `TestVersionIntegerRejected`).
+- [x] **P2-4** The TypeScript build path silently ignores `Options.Variables` (`application/build/typescript/typescript.go`), while the YAML path injects them via `manifest.FromResolvedProject`. Config-sourced identity injection must not repeat this split-brain: both languages must go through one shared injection boundary before canonicalization. The variables gap itself is re-homed to Phase 3, which owns the §7 project/compiler boundary update. **The injection-boundary half is implemented:** `Builder.Build` now returns the authored manifest and `application/build.Build` applies identity, canonicalization, and persistence exactly once for every language — so the TS path can no longer bypass the seam. The variables remainder is tracked as P2-7.
+- [x] **P2-5** `project.Options.Validate` is dead: `DefaultOptions` set it to `true`, but no code ever reads it — `project/resolver.go` runs `validateAssemblyBasic` unconditionally. **Removed** the field and its assignment (`application/project/project.go`); `DefaultOptions` remains as the public constructor.
+- [ ] **P2-6** **(re-homed: Phase 3, §7)** — YAML source validation requires authored `metadata.name`/`metadata.version` (`application/project/validator.go`), so for YAML projects config can only *match or conflict*, never *replace*, authored identity until §7 relaxes the authoring requirement. Discovered by the identity-injection work; must be settled with §7's "metadata is not duplicated" item.
+- [ ] **P2-7** **(re-homed: Phase 3, §7)** — the TypeScript build path still ignores `Options.Variables`; now that one shared post-build seam exists (`application/build.Build`), applying project variables there — or in the TS builder — is Phase 3 work alongside §7's project/compiler boundary update. Carried from P2-4.
 
 ## 7. Assembly Public API
 
@@ -236,19 +246,19 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 9. Structured Expressions and Compilation Protocol
 
-- [ ] Remove the use of arbitrary string expressions as the canonical representation of Capability references.
+- [ ] Remove the use of arbitrary string expressions as the canonical representation of Capability references. **(re-homed: closes across Phase 3 + Phase 11)** — the serialized canonical form is already structured (Phase 1 clears `Expression` on `Canonicalize` and the compiler/planner require `Source`); what remains is (a) the TypeScript SDK emitting structured references (Phase 3) and (b) deleting the legacy channel — `BindingMapping.Expression`, `MappingRule.legacyExpression`, and every `ParseMappingSource` call site — which requires the §17 migration first (Phase 11). Acceptance proven by §18.
 - [x] Replace values such as `"process-order.result.order.id"` with a structured reference object.
 - [x] Define one canonical structured reference type for params/result references across TypeScript SDK, manifest, compiler, protocol, and N.O.R.E.
 - [x] Represent at minimum the referenced Capability identity and the result field/path separately.
 - [x] Ensure nested result paths are represented as structured path segments rather than embedded in strings.
-- [ ] Keep expression operators/conditions structured rather than encoding them as opaque strings wherever the protocol can support it.
+- [ ] Keep expression operators/conditions structured rather than encoding them as opaque strings wherever the protocol can support it. **(re-homed: Phase 3)** — mapping sources can no longer carry operators at all (Phase 1 rejects them in `ParseMappingSource`); validations/conditions stay CEL strings permanently per the locked P1-1 decision. The remaining surface is the not-yet-existing Assembly result mapping (§7 requires it structural, §16 forbids new string-based result references).
 - [x] Define a source/reference union that can distinguish Assembly params, Capability results, project variables, literals, and supported expressions.
-- [ ] Make the TypeScript SDK emit structured references directly.
+- [ ] Make the TypeScript SDK emit structured references directly. **(re-homed: Phase 3, alongside §7/§8/§16 TS half)** — the SDK still emits `{target, expression: string}` (`packages/assembly-sdks/typescript/src/manifest.ts`, `expression.ts` builds CEL strings by concatenation); P1-1 names Phase 3 as the owner of this work.
 - [x] Make the compiler consume structured references directly.
 - [x] Make the canonical manifest serialize those references as objects.
 - [x] Update hashing/normalization to hash structured references deterministically.
 - [x] Update N.O.R.E. planning and transition evaluation to consume the structured representation.
-- [ ] Remove string parsing logic that exists only to reconstruct Capability identity from expressions.
+- [ ] Remove string parsing logic that exists only to reconstruct Capability identity from expressions. **(re-homed: Phase 11)** — `ParseMappingSource` still runs on the hot path of every build (both authoring surfaces emit strings until Phase 3) and on every persisted pre-Phase-1 registration (`nore/internal/planner/compiler.go` via `SourceRef`). Deletion is gated on Phase 3 emission, the YAML-surface decision (same deferral class as P1-6), §17 migration, and §17 deprecation removal.
 - [x] Add compatibility handling only where existing persisted manifests require migration.
 - [x] Add tests for nested paths, multiple Capability sources, invalid references, literal values, and deterministic serialization.
 
@@ -369,6 +379,7 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Define migration for existing Assembly manifests without Assembly params/results.
 - [ ] Define migration for existing string expression references to structured references.
 - [ ] Define migration for existing build/registration records to immutable build artifacts.
+- [ ] Define migration for legacy `neuron.config.*` files under the new strict validation: the retired int `version: 1` (now rejected — must be the Assembly semver string) and `daemon.*`/storage keys in project files (now rejected; endpoint moves to `runtime.host`/`runtime.port` plus CLI overrides). See P2-3.
 - [ ] Define migration for existing `RootDir` values in frozen Capability Runtime records so runtime identity becomes artifact-based.
 - [ ] Keep deprecated commands/API paths only for the minimum transition period required to avoid breaking existing projects unexpectedly.
 - [ ] Remove deprecated behavior after the new path is covered by end-to-end tests.
