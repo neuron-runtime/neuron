@@ -21,7 +21,14 @@ import (
 
 // Config is the effective Neuron configuration.
 type Config struct {
-	Version int `yaml:"version,omitempty" mapstructure:"version"`
+	// Name is the project-level identity of the Assembly this project
+	// defines. It is owned by the project configuration (neuron.config.*) —
+	// authored sources that also carry a name must agree with it.
+	Name string `yaml:"name,omitempty" mapstructure:"name"`
+
+	// Version is the Assembly version. It participates in Assembly identity
+	// and build hashing, so it is owned by the project configuration.
+	Version string `yaml:"version,omitempty" mapstructure:"version"`
 
 	// Lang is the canonical authoring language. It defaults to "typescript".
 	Lang string `yaml:"lang,omitempty" mapstructure:"lang"`
@@ -64,6 +71,16 @@ type Config struct {
 
 // RuntimeConfig holds N.O.R.E.-related runtime defaults.
 type RuntimeConfig struct {
+	// Host is the interface the project runtime binds to. It defaults to
+	// "localhost": the project runtime is a local, loopback-first endpoint,
+	// not a publicly reachable service.
+	Host string `yaml:"host,omitempty" mapstructure:"host"`
+
+	// Port is the TCP port the project runtime listens on. It is either
+	// "auto" (the default), where the OS assigns an available port, or an
+	// explicit port number.
+	Port RuntimePort `yaml:"port,omitempty" mapstructure:"port"`
+
 	Execution ExecutionConfig `yaml:"execution" mapstructure:"execution"`
 	Workers   WorkerConfig    `yaml:"workers"   mapstructure:"workers"`
 
@@ -75,6 +92,33 @@ type RuntimeConfig struct {
 	// never enters a deployment.
 	DetachedDrainTimeout string `yaml:"detachedDrainTimeout,omitempty" mapstructure:"detachedDrainTimeout"`
 }
+
+// RuntimePortMode is how the project runtime port is chosen.
+type RuntimePortMode string
+
+const (
+	// RuntimePortAuto asks the OS for an available port at startup.
+	RuntimePortAuto RuntimePortMode = "auto"
+
+	// RuntimePortFixed binds one explicit TCP port.
+	RuntimePortFixed RuntimePortMode = "fixed"
+)
+
+// RuntimePort is the project runtime's port setting. The configuration file
+// accepts either the string "auto" or an integer port number; the loader
+// normalizes both (plus environment and CLI values of any of those types)
+// into this type before the rest of Neuron sees it, so no other layer has to
+// understand the union.
+type RuntimePort struct {
+	Mode RuntimePortMode `yaml:"mode" mapstructure:"mode"`
+
+	// Number is the explicit port. It is meaningful only when Mode is
+	// RuntimePortFixed.
+	Number int `yaml:"number,omitempty" mapstructure:"number"`
+}
+
+// IsAuto reports whether the port is OS-assigned.
+func (p RuntimePort) IsAuto() bool { return p.Mode == RuntimePortAuto }
 
 // ExecutionConfig controls how executions behave by default.
 type ExecutionConfig struct {
@@ -93,6 +137,13 @@ type WorkerConfig struct {
 }
 
 // DaemonConfig controls the local N.O.R.E. daemon.
+//
+// Daemon plumbing is engine-level configuration: it is rejected from project
+// configuration files (neuron.config.*), because users address the project
+// runtime through `neuron`, not through socket paths and PID files. The keys
+// remain readable on Config because command-line overrides (--remote,
+// --nore-path) and the machine-level global file still populate them during
+// the transition to the project runtime.
 type DaemonConfig struct {
 	// Endpoint, when non-empty, selects a remote N.O.R.E. over its
 	// daemon/socket. An empty value means the local Unix socket daemon.

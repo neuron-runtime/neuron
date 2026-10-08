@@ -472,3 +472,118 @@ func TestDevMaxWorkersFromProjectConfig(t *testing.T) {
 		t.Errorf("dev.maxWorkers = %d, want 4", cfg.Dev.MaxWorkers)
 	}
 }
+
+func TestRuntimeHostDefault(t *testing.T) {
+	cfg, err := Load(Options{GlobalPath: "/nonexistent/global.yaml", ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.Host != "localhost" {
+		t.Errorf("default runtime.host = %q, want localhost", cfg.Runtime.Host)
+	}
+}
+
+func TestRuntimeHostFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", `
+runtime:
+  host: 127.0.0.1
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.Host != "127.0.0.1" {
+		t.Errorf("runtime.host = %q, want 127.0.0.1", cfg.Runtime.Host)
+	}
+}
+
+func TestRuntimeHostEnvOverride(t *testing.T) {
+	t.Setenv("NEURON_RUNTIME_HOST", "10.0.0.9")
+
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", `
+runtime:
+  host: 127.0.0.1
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+		Environment: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.Host != "10.0.0.9" {
+		t.Errorf("runtime.host = %q, want 10.0.0.9 (environment wins)", cfg.Runtime.Host)
+	}
+}
+
+func TestNameVersionFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", `
+name: my-proj
+version: 1.2.3
+`)
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Name != "my-proj" {
+		t.Errorf("name = %q, want my-proj", cfg.Name)
+	}
+	if cfg.Version != "1.2.3" {
+		t.Errorf("version = %q, want 1.2.3", cfg.Version)
+	}
+}
+
+// TestVersionIntegerRejected pins that a YAML integer `version: 1` — the
+// retired config-schema version — fails strict file validation instead of
+// being silently coerced to the string "1" and reinterpreted as an Assembly
+// version.
+func TestVersionIntegerRejected(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", "version: 1\n")
+
+	_, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err == nil {
+		t.Fatal("Load succeeded, want integer `version` to be rejected")
+	}
+	if !strings.Contains(err.Error(), "`version` must be a quoted string") {
+		t.Errorf("error = %q, want it to name the quoted-string rule", err)
+	}
+}
+
+// TestNameVersionAbsentLeavesEmptyStrings pins that Load does not require
+// name and version: they default to empty strings and requiredness is
+// enforced later, at build time.
+func TestNameVersionAbsentLeavesEmptyStrings(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "neuron.config.yaml", "lang: yaml\n")
+
+	cfg, err := Load(Options{
+		GlobalPath:  "/nonexistent/global.yaml",
+		ProjectPath: filepath.Join(dir, "neuron.config.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Name != "" {
+		t.Errorf("name = %q, want empty", cfg.Name)
+	}
+	if cfg.Version != "" {
+		t.Errorf("version = %q, want empty", cfg.Version)
+	}
+}

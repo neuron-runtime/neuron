@@ -22,9 +22,6 @@ type Options struct {
 	// selects the default <root>/assembly.yaml.
 	Entry string
 
-	// Validate controls basic source validation.
-	Validate bool
-
 	// Verbose enables diagnostic information for callers that
 	// want to expose resolution details.
 	//
@@ -34,9 +31,7 @@ type Options struct {
 
 // DefaultOptions returns sensible MVP defaults.
 func DefaultOptions() Options {
-	return Options{
-		Validate: true,
-	}
+	return Options{}
 }
 
 // Result contains the result of source resolution.

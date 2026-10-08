@@ -7,10 +7,11 @@ package config
 // CLI) override them.
 func Defaults() Config {
 	return Config{
-		Version: 1,
-		Lang:    "typescript",
+		Lang: "typescript",
 
 		Runtime: RuntimeConfig{
+			Host: "localhost",
+			Port: RuntimePort{Mode: RuntimePortAuto},
 			Execution: ExecutionConfig{
 				Mode:    "wait",
 				Timeout: "30m",

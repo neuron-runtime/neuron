@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 )
 
 // Options controls how Load assembles the effective configuration.
@@ -53,7 +52,7 @@ func Load(opts Options) (Config, error) {
 		}
 	}
 	if fileExists(globalPath) {
-		if err := rejectInternalKeys(globalPath); err != nil {
+		if err := validateConfigFile(globalPath, globalScope); err != nil {
 			return Config{}, err
 		}
 		v.SetConfigFile(globalPath)
@@ -83,7 +82,7 @@ func Load(opts Options) (Config, error) {
 				filepath.Base(projectPath),
 			)
 		}
-		if err := rejectInternalKeys(projectPath); err != nil {
+		if err := validateConfigFile(projectPath, projectScope); err != nil {
 			return Config{}, err
 		}
 		v.SetConfigFile(projectPath)
@@ -113,6 +112,13 @@ func Load(opts Options) (Config, error) {
 	// Command-line overrides.
 	for key, value := range opts.CLI {
 		v.Set(key, value)
+	}
+
+	// runtime.port is a union in the configuration file (integer or "auto")
+	// and can arrive as a string from the environment. Normalize it once, at
+	// this seam, so decoding and every downstream consumer see one type.
+	if err := normalizeRuntimePort(v); err != nil {
+		return Config{}, err
 	}
 
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -162,9 +168,12 @@ func projectRootFor(opts Options, projectPath string) string {
 // registerDefaults seeds every config key with its default so that partial
 // overrides from lower layers fall through to the compiled-in value.
 func registerDefaults(v *viper.Viper, cfg Config) {
+	v.SetDefault("name", cfg.Name)
 	v.SetDefault("version", cfg.Version)
 	v.SetDefault("lang", cfg.Lang)
 
+	v.SetDefault("runtime.host", cfg.Runtime.Host)
+	v.SetDefault("runtime.port", cfg.Runtime.Port)
 	v.SetDefault("runtime.execution.mode", cfg.Runtime.Execution.Mode)
 	v.SetDefault("runtime.execution.timeout", cfg.Runtime.Execution.Timeout)
 	v.SetDefault("runtime.workers.min", cfg.Runtime.Workers.Min)
@@ -296,33 +305,6 @@ func isLegacyConfigName(path string) bool {
 	default:
 		return false
 	}
-}
-
-// rejectInternalKeys rejects configuration-file keys that Neuron owns
-// internally and that must not be authored by users. Managing them in a config
-// file is how broken relative paths and unsupported providers leak in.
-func rejectInternalKeys(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-
-	var root map[string]any
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return fmt.Errorf("decode config: %w", err)
-	}
-
-	if _, ok := root["storage"]; ok {
-		return fmt.Errorf("config %s: `storage` is managed by Neuron and cannot be configured here", filepath.Base(path))
-	}
-
-	if capabilityRuntimes, ok := root["capabilityRuntimes"].(map[string]any); ok {
-		if _, ok := capabilityRuntimes["storeDir"]; ok {
-			return fmt.Errorf("config %s: `capabilityRuntimes.storeDir` is managed by Neuron and cannot be configured here", filepath.Base(path))
-		}
-	}
-
-	return nil
 }
 
 func fileExists(path string) bool {
