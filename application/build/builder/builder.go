@@ -32,7 +32,8 @@ type Options struct {
 	Version string
 
 	// Variables are project-level values written into the manifest. They
-	// come from the project configuration.
+	// come from the project configuration and are applied by the build
+	// package after the builder returns; builders never apply them.
 	Variables map[string]any
 
 	// Verbose enables builder-level diagnostics.

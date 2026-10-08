@@ -28,8 +28,8 @@ func (b Builder) Language() language.Language { return language.YAML }
 func New() Builder { return Builder{} }
 
 // Build resolves the project at opts.Root and returns its manifest. Identity
-// injection, canonicalization, and persistence are owned by the build
-// package so every authoring language shares one injection boundary.
+// and variable injection, canonicalization, and persistence are owned by the
+// build package so every authoring language shares one injection boundary.
 func (b Builder) Build(ctx context.Context, opts builder.Options) (*manifest.Assembly, error) {
 	if b.Out == nil {
 		b.Out = io.Discard
@@ -50,7 +50,7 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) (*manifest.Ass
 		return nil, fmt.Errorf("resolve project: %w", err)
 	}
 
-	sys := manifest.FromResolvedProject(result.Project, opts.Variables)
+	sys := manifest.FromResolvedProject(result.Project)
 
 	if opts.Verbose {
 		fmt.Fprintf(b.Out, "Resolved YAML project at %s\n", root)

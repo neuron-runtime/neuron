@@ -87,7 +87,11 @@ func TestYAMLBuilderBuildProducesManifest(t *testing.T) {
 	}
 }
 
-func TestYAMLBuilderCarriesVariables(t *testing.T) {
+// TestYAMLBuilderDoesNotApplyVariables pins that the builder returns the
+// authored manifest without touching project variables: application/build.Build
+// writes them at the shared seam, and a builder that applied them itself would
+// let the YAML frontend diverge from the TypeScript frontend.
+func TestYAMLBuilderDoesNotApplyVariables(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	writeProject(t, dir)
@@ -103,8 +107,8 @@ func TestYAMLBuilderCarriesVariables(t *testing.T) {
 	if sys == nil {
 		t.Fatal("Build returned a nil manifest")
 	}
-	if sys.Variables["environment"] != "staging" {
-		t.Errorf("variables = %#v, want environment=staging", sys.Variables)
+	if sys.Variables != nil {
+		t.Errorf("variables = %#v, want none from the builder", sys.Variables)
 	}
 }
 

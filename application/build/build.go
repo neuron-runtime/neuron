@@ -71,11 +71,11 @@ func Lookup(lang language.Language) (Builder, error) {
 }
 
 // Build dispatches to the builder registered for lang, then makes the
-// project configuration the single source of the Assembly's identity,
-// canonicalizes the manifest, and persists it as the project's
+// project configuration the single source of the Assembly's identity and
+// variables, canonicalizes the manifest, and persists it as the project's
 // .neuron/manifest.json. It is the one place in the pipeline where
-// identity injection, canonicalization, and persistence happen, so every
-// authoring language gets identical behavior.
+// identity and variable injection, canonicalization, and persistence
+// happen, so every authoring language gets identical behavior.
 func Build(ctx context.Context, lang language.Language, opts Options) error {
 	b, err := Lookup(lang)
 	if err != nil {
@@ -87,6 +87,15 @@ func Build(ctx context.Context, lang language.Language, opts Options) error {
 	}
 	if err := manifest.ApplyIdentity(sys, opts.Name, opts.Version); err != nil {
 		return fmt.Errorf("apply assembly identity: %w", err)
+	}
+	// Project variables (neuron.config.*) are written into the manifest
+	// exactly once, here, for every authoring language — a builder that no
+	// longer knows about them (the YAML path) cannot drop them and a builder
+	// that never did (the TypeScript path) cannot silently omit them. A nil
+	// value means the configuration declared none, so an authored Variables
+	// map from a future surface survives untouched.
+	if opts.Variables != nil {
+		sys.Variables = opts.Variables
 	}
 	canonical, err := manifest.Canonicalize(sys)
 	if err != nil {

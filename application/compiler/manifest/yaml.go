@@ -6,10 +6,14 @@ import (
 )
 
 // FromResolvedProject converts a resolved YAML assembly into the canonical
-// Assembly manifest. variables come from the project configuration, not from
-// the YAML project file itself. This is the bridge between the YAML frontend
+// Assembly manifest. This is the bridge between the YAML frontend
 // (project/) and the source-language-neutral manifest boundary.
-func FromResolvedProject(rp *project.ResolvedProject, variables map[string]any) *Assembly {
+//
+// Project variables (neuron.config.*) are deliberately not applied here:
+// application/build.Build writes them into the manifest exactly once, for
+// every authoring language, so the YAML frontend cannot diverge from the
+// TypeScript frontend.
+func FromResolvedProject(rp *project.ResolvedProject) *Assembly {
 	if rp == nil {
 		return nil
 	}
@@ -22,7 +26,6 @@ func FromResolvedProject(rp *project.ResolvedProject, variables map[string]any) 
 			Version:     rp.Assembly.Definition.Metadata.Version,
 			Description: rp.Assembly.Definition.Metadata.Description,
 		},
-		Variables: variables,
 	}
 
 	for _, rs := range rp.Assembly.Capabilities {

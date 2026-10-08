@@ -186,6 +186,57 @@ func TestBuildYAMLWithoutAuthoredIdentityRequiresConfig(t *testing.T) {
 	}
 }
 
+// stubBuilder is a minimal Builder registered in the build registry to prove
+// the shared seam applies project variables to every authoring language, not
+// just the shipped ones.
+type stubBuilder struct{}
+
+func (stubBuilder) Language() language.Language { return language.Language("test-stub") }
+
+func (stubBuilder) Build(_ context.Context, opts build.Options) (*manifest.Assembly, error) {
+	return &manifest.Assembly{
+		APIVersion: "neuron/v1",
+		Kind:       "Assembly",
+		Metadata:   manifest.Metadata{Name: opts.Name, Version: opts.Version},
+	}, nil
+}
+
+// TestBuildAppliesVariablesAtTheSharedSeam runs a freshly registered stub
+// builder through build.Build with project variables, proving the seam — and
+// not any individual builder — writes variables into the persisted manifest.
+// This is the boundary the YAML frontend used to own alone, which is exactly
+// how the TypeScript path lost them.
+func TestBuildAppliesVariablesAtTheSharedSeam(t *testing.T) {
+	if err := build.Register(stubBuilder{}); err != nil {
+		t.Fatalf("register stub builder: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := build.Build(context.Background(), stubBuilder{}.Language(), build.Options{
+		Root:      dir,
+		Name:      "hello",
+		Version:   "0.1.0",
+		Variables: map[string]any{"environment": "staging", "limits": map[string]any{"cpu": "1"}},
+	}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	m, err := manifest.LoadFromProjectRoot(dir)
+	if err != nil {
+		t.Fatalf("LoadFromProjectRoot: %v", err)
+	}
+	if m.Metadata.Name != "hello" || m.Metadata.Version != "0.1.0" {
+		t.Errorf("persisted identity = %q@%q, want hello@0.1.0", m.Metadata.Name, m.Metadata.Version)
+	}
+	if m.Variables["environment"] != "staging" {
+		t.Errorf("persisted variables = %#v, want environment=staging", m.Variables)
+	}
+	limits, ok := m.Variables["limits"].(map[string]any)
+	if !ok || limits["cpu"] != "1" {
+		t.Errorf("persisted nested variable limits = %#v, want cpu=1", m.Variables["limits"])
+	}
+}
+
 // TestBuildRequiresConfiguredIdentity verifies the seam rejects a build
 // when the project configuration carries no Assembly identity.
 func TestBuildRequiresConfiguredIdentity(t *testing.T) {
