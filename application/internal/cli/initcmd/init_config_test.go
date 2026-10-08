@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/project"
+	"gopkg.in/yaml.v3"
 )
 
 // scaffoldConfigPath is the project configuration every scaffold writes.
@@ -47,9 +49,9 @@ func parseScaffoldConfig(t *testing.T, root string) scaffoldedConfig {
 }
 
 // assertScaffoldIdentity checks the project identity and runtime endpoint the
-// scaffolded configuration must carry, and that they agree with the authored
-// Assembly metadata — `neuron build` fails on a mismatch.
-func assertScaffoldIdentity(t *testing.T, root, name, assemblyFile string) {
+// scaffolded configuration must carry: neuron.config.* is the single source
+// of the Assembly identity.
+func assertScaffoldIdentity(t *testing.T, root, name string) {
 	t.Helper()
 
 	cfg := parseScaffoldConfig(t, root)
@@ -66,9 +68,14 @@ func assertScaffoldIdentity(t *testing.T, root, name, assemblyFile string) {
 	if port := strings.TrimSpace(string(cfg.Runtime.Port)); port != `"auto"` {
 		t.Errorf("config runtime.port = %s, want \"auto\"", port)
 	}
+}
 
-	// The authored Assembly metadata must carry the same name/version the
-	// configuration declares; build rejects any divergence.
+// assertAuthoredIdentity checks that the authored Assembly source repeats the
+// configuration's identity. The TypeScript SDK surface still takes
+// name/version, so `neuron build` fails on any divergence.
+func assertAuthoredIdentity(t *testing.T, root, assemblyFile, name string) {
+	t.Helper()
+
 	source, err := os.ReadFile(filepath.Join(root, assemblyFile))
 	if err != nil {
 		t.Fatalf("read %s: %v", assemblyFile, err)
@@ -78,6 +85,26 @@ func assertScaffoldIdentity(t *testing.T, root, name, assemblyFile string) {
 	}
 	if !strings.Contains(string(source), scaffoldAssemblyVersion) {
 		t.Errorf("%s must declare version %q:\n%s", assemblyFile, scaffoldAssemblyVersion, source)
+	}
+}
+
+// assertConfigOwnsIdentity checks that the scaffolded YAML assembly authors
+// no Assembly identity at all: neuron.config.* owns name/version, so a
+// scaffold that repeats them would recreate the duplication the shared build
+// seam exists to remove.
+func assertConfigOwnsIdentity(t *testing.T, root, assemblyFile string) {
+	t.Helper()
+
+	source, err := os.ReadFile(filepath.Join(root, assemblyFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", assemblyFile, err)
+	}
+	var af project.AssemblyFile
+	if err := yaml.Unmarshal(source, &af); err != nil {
+		t.Fatalf("decode %s as an assembly file: %v\n%s", assemblyFile, err, source)
+	}
+	if af.Metadata.Name != "" || af.Metadata.Version != "" {
+		t.Errorf("%s authors assembly identity %+v; neuron.config.* must be the only source", assemblyFile, af.Metadata)
 	}
 }
 
@@ -103,7 +130,8 @@ func TestScaffoldTypeScriptConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertScaffoldIdentity(t, root, "hello-ts-config", "assembly.ts")
+	assertScaffoldIdentity(t, root, "hello-ts-config")
+	assertAuthoredIdentity(t, root, "assembly.ts", "hello-ts-config")
 
 	cfg := loadScaffolded(t, root)
 	if cfg.Name != "hello-ts-config" {
@@ -129,7 +157,8 @@ func TestScaffoldYAMLConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertScaffoldIdentity(t, root, "hello-yaml-config", "assembly.yaml")
+	assertScaffoldIdentity(t, root, "hello-yaml-config")
+	assertConfigOwnsIdentity(t, root, "assembly.yaml")
 
 	cfg := loadScaffolded(t, root)
 	if cfg.Name != "hello-yaml-config" {

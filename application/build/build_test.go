@@ -59,6 +59,52 @@ spec:
 	}
 }
 
+// writeYAMLProjectWithoutIdentity lays out a minimal YAML Neuron project
+// whose assembly authors no identity at all: neuron.config.* owns the
+// Assembly name/version, so nothing authored may duplicate it.
+func writeYAMLProjectWithoutIdentity(t *testing.T, dir string) {
+	t.Helper()
+
+	files := map[string]string{
+		"assembly.yaml": `apiVersion: neuron/v1
+kind: Assembly
+
+metadata:
+  description: A friendly hello assembly
+
+capabilities:
+  - ref: greet
+    entry: capabilities/greet.yaml
+`,
+		"capabilities/greet.yaml": `apiVersion: neuron/v1
+kind: Capability
+
+metadata:
+  name: greet
+  version: 0.1.0
+
+spec:
+  capability runtime:
+    type: set
+
+  mappings:
+    - direction: input
+      source: value
+      target: value
+`,
+	}
+
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestBuildPersistsIdentityInjectedManifest pins the shared injection
 // boundary: build.Build applies the project-configured identity, then
 // persists the manifest for every authoring language.
@@ -94,6 +140,49 @@ func TestBuildPersistsIdentityInjectedManifest(t *testing.T) {
 	}
 	if m.Variables["environment"] != "staging" {
 		t.Errorf("persisted variables = %#v, want environment=staging", m.Variables)
+	}
+}
+
+// TestBuildYAMLWithoutAuthoredIdentity proves a YAML assembly with no
+// authored metadata.name/version builds through the shared seam: config
+// supplies the identity and ApplyIdentity injects it before canonicalization.
+func TestBuildYAMLWithoutAuthoredIdentity(t *testing.T) {
+	dir := t.TempDir()
+	writeYAMLProjectWithoutIdentity(t, dir)
+
+	if err := build.Build(context.Background(), language.YAML, build.Options{
+		Root:    dir,
+		Name:    "hello",
+		Version: "0.1.0",
+	}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	m, err := manifest.LoadFromProjectRoot(dir)
+	if err != nil {
+		t.Fatalf("LoadFromProjectRoot: %v", err)
+	}
+	if m.Metadata.Name != "hello" {
+		t.Errorf("persisted name = %q, want hello", m.Metadata.Name)
+	}
+	if m.Metadata.Version != "0.1.0" {
+		t.Errorf("persisted version = %q, want 0.1.0", m.Metadata.Version)
+	}
+}
+
+// TestBuildYAMLWithoutAuthoredIdentityRequiresConfig pins that a build whose
+// configuration carries no identity still fails — at ApplyIdentity, which
+// names neuron.config.*, not at the project resolver.
+func TestBuildYAMLWithoutAuthoredIdentityRequiresConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeYAMLProjectWithoutIdentity(t, dir)
+
+	err := build.Build(context.Background(), language.YAML, build.Options{Root: dir})
+	if err == nil {
+		t.Fatal("expected an error when configuration carries no identity")
+	}
+	if !strings.Contains(err.Error(), `assembly name is required: add "name" to neuron.config.* (project configuration)`) {
+		t.Errorf("error = %q, want the required-name message", err)
 	}
 }
 

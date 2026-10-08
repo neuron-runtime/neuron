@@ -25,13 +25,12 @@ func validateAssemblyBasic(
 		)
 	}
 
-	if strings.TrimSpace(assembly.Metadata.Name) == "" {
-		errors = append(errors, "metadata.name is required")
-	}
-
-	if strings.TrimSpace(assembly.Metadata.Version) == "" {
-		errors = append(errors, "metadata.version is required")
-	}
+	// Assembly identity (metadata.name / metadata.version) is deliberately
+	// not required here. neuron.config.* owns it, and manifest.ApplyIdentity
+	// injects it at the shared build seam — failing there with an error that
+	// names the configuration when it is absent, or when an authored value
+	// conflicts with it. Requiring it here would make config able to only
+	// match or conflict, never replace, an authored value.
 
 	if len(assembly.Capabilities) == 0 {
 		errors = append(

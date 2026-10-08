@@ -18,9 +18,11 @@ import (
 const implicitCapabilityRuntimeRoot = "neuron/capabilityRuntimes"
 
 // scaffoldAssemblyVersion is the Assembly version every scaffold writes. It
-// appears in the project configuration (neuron.config.json) and in the
-// authored Assembly metadata (assembly.ts / assembly.yaml); `neuron build`
-// rejects a mismatch, so all three come from this single constant.
+// appears in the project configuration (neuron.config.json), which owns the
+// Assembly identity for every language, and in the authored Assembly metadata
+// of the TypeScript scaffold, whose SDK surface still takes name/version;
+// `neuron build` rejects a mismatch between the two. The YAML scaffold authors
+// no identity at all — configuration is its single source.
 const scaffoldAssemblyVersion = "1.0.0"
 
 func New() *cobra.Command {
@@ -119,12 +121,14 @@ func writeJSON(path string, data any) error {
 }
 
 // configTemplate is the scaffolded neuron.config.json shared by both
-// languages. It declares the project identity (name/version, which must
-// match the authored Assembly metadata), the authoring language, the Assembly
-// entry file, the loopback runtime endpoint, and the canonical local
-// capability runtime root. Everything the runtime needs beyond that has sane
-// defaults inside N.O.R.E. The keys are exactly the strict project
-// configuration schema: unknown keys are rejected at load time.
+// languages. It declares the project identity (name/version), which is the
+// single source of the Assembly identity for YAML projects and the
+// authoritative value the TypeScript scaffold's authored metadata must match,
+// plus the authoring language, the Assembly entry file, the loopback runtime
+// endpoint, and the canonical local capability runtime root. Everything the
+// runtime needs beyond that has sane defaults inside N.O.R.E. The keys are
+// exactly the strict project configuration schema: unknown keys are rejected
+// at load time.
 func configTemplate(name, lang, entry string) map[string]any {
 	return map[string]any{
 		"name":    name,
@@ -267,18 +271,19 @@ spec:
 		return err
 	}
 
-	assembly := fmt.Sprintf(`apiVersion: neuron/v1
+	// The YAML assembly authors no identity: neuron.config.json owns the
+	// Assembly name/version, and `neuron build` injects them at the shared
+	// build seam. Scaffolding them here would duplicate the configuration.
+	assembly := `apiVersion: neuron/v1
 kind: Assembly
 
 metadata:
-  name: %s
-  version: %s
   description: A friendly hello assembly
 
 capabilities:
   - ref: say-hello
     entry: capabilities/say-hello.yaml
-`, name, scaffoldAssemblyVersion)
+`
 
 	return createFile(filepath.Join(root, "assembly.yaml"), assembly, 0o644)
 }
