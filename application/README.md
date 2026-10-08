@@ -71,7 +71,7 @@ The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. W
 2. If not, starts it from the bundled `nore` binary with the effective configuration (socket path, data directory, worker count).
 3. Talks to it over the socket.
 
-The daemon runs as a persistent background process: it survives the CLI process and keeps serving instances until you stop it with `neuron daemon stop`. The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` configuration value. A remote daemon can be used instead with the `--remote` flag.
+The daemon runs as a persistent background process: it survives the CLI process and keeps serving instances until you stop it with `neuron daemon stop`. The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` value in the machine-level global configuration (`~/.config/neuron/config.yaml`) — `daemon.*` is rejected from project configuration. A remote daemon can be used instead with the `--remote` flag.
 
 The API requires a bearer token on every request except the health probe. The daemon generates one at startup and publishes it beside its socket in `nore.sock.token` (mode `0600`), so a local client authenticates automatically; `neuron` reads it from there, or from `NEURON_API_TOKEN` when the token file is not reachable (for example against `--remote`). The token is removed on graceful shutdown, because a credential outliving the process that issued it is a credential nobody rotated.
 
@@ -141,13 +141,19 @@ neuron init my-assembly
 neuron init my-assembly --lang yaml
 ```
 
-The scaffolded config declares the authoring language and entry file:
+The scaffolded config declares the project identity (`name` / `version`, which must match the authored Assembly metadata), the authoring language and entry file, and the loopback runtime endpoint:
 
 ```json
 {
+  "name": "my-assembly",
+  "version": "1.0.0",
   "lang": "typescript",
   "entry": "assembly.ts",
-  "runtime": { "execution": { "mode": "wait", "timeout": "30m" } },
+  "runtime": {
+    "host": "localhost",
+    "port": "auto",
+    "execution": { "mode": "wait", "timeout": "30m" }
+  },
   "capabilityRuntimes": { "localRoots": ["./neuron/capabilityRuntimes"] },
   "inspector": { "enabled": true, "address": "127.0.0.1:7433" }
 }
@@ -166,7 +172,7 @@ Flags:
   -r, --root string   project root (defaults to the current directory)
 ```
 
-`neuron build` runs the full authoring pipeline in one step:
+`neuron build` runs the full authoring pipeline in one step. The project configuration must declare the Assembly identity (`name` and `version`): the build fails with a clear error when either is missing, or when either disagrees with the authored Assembly metadata.
 
 | Step         | Responsibility                                                                                                                                                                                                                             |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -454,20 +460,27 @@ source <(neuron completion bash)
 
 ## Configuration Reference
 
-The CLI resolves configuration from several layers, later layers overriding earlier ones:
+The effective configuration is assembled from five layers, later layers overriding earlier ones:
 
 1. Built-in defaults (compiled in).
-2. The project's `neuron.config.json` / `neuron.config.yaml` / `neuron.config.yml` (or the file passed with `--config`).
-3. Environment variables.
-4. Command-line flags.
+2. The machine-level global configuration — `~/.config/neuron/config.yaml` (runtime defaults for this machine; during the transition this is also the only file that may carry `daemon.*`).
+3. The project's `neuron.config.json` / `neuron.config.yaml` / `neuron.config.yml` (or the file passed with `--config`).
+4. Environment variables (`NEURON_*`).
+5. Command-line flags.
+
+Project configuration is strict: unknown keys are rejected with an error, so a typo fails loudly instead of being silently ignored.
 
 **The scaffolded** `neuron.config.json` **produced by** `neuron init` (default TypeScript authoring):
 
 ```json
 {
+  "name": "my-assembly",
+  "version": "1.0.0",
   "lang": "typescript",
   "entry": "assembly.ts",
   "runtime": {
+    "host": "localhost",
+    "port": "auto",
     "execution": {
       "mode": "wait",
       "timeout": "30m"
@@ -490,24 +503,27 @@ The CLI resolves configuration from several layers, later layers overriding earl
 
 | Key                         | Default               | Meaning                                                                                                    |
 | --------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `name`                      | —                     | Assembly identity for this project; required for build, and must match the authored Assembly metadata        |
+| `version`                   | —                     | Assembly semantic version; required for build, participates in Assembly identity and build hashing           |
 | `lang`                      | `typescript`          | Project authoring language (`yaml`, `yml`, `typescript`, `ts`)                                             |
 | `entry`                     | `index.ts` / `assembly.yaml` | Path to the project's entry assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
 | `variables`                 | —                     | Free-form variables carried into the compiled assembly manifest (e.g. environment-specific settings)        |
+| `runtime.host`              | `localhost`           | Interface the project runtime binds to (loopback-first by default)                                         |
+| `runtime.port`              | `auto`                | Project runtime port: `"auto"` (OS-assigned) or an explicit integer port                                   |
 | `runtime.execution.mode`    | `wait`                | Execution mode (`wait` for a blocking result, `detach` for asynchronous)                                   |
 | `runtime.execution.timeout` | `30m`                 | Execution timeout                                                                                          |
 | `runtime.workers.min`       | `1`                   | Minimum capability runtime workers                                                                          |
 | `runtime.workers.max`       | `8`                   | Maximum capability runtime workers                                                                          |
-| `daemon.socket`             | `~/.neuron/nore.sock` | Local Unix socket for the daemon                                                                           |
-| `daemon.pidFile`            | platform default      | Where the daemon records its process ID                                                                    |
-| `daemon.norePath`           | (bundled)             | Path to the `nore` daemon binary                                                                           |
-| `capabilityRuntimes.storeDir` | `~/.neuron/capabilityRuntimes` | Where resolved modules are installed                                                                 |
+| `runtime.detachedDrainTimeout` | `30s`              | How long detached capability work may keep running after shutdown begins                                    |
 | `capabilityRuntimes.localRoots` | `./neuron/capabilityRuntimes` | Project-scoped directories treated as implicit `local` registries for resolution                      |
 | `capabilityRuntimes.registries` | none              | Registries used to resolve external modules; with no block, only built-in capability runtimes are available |
+| `capabilityRuntimes.defaultRegistries` | `["local"]` | Registries a requirement falls back to when it declares none of its own                                |
 | `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
 | `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
+| `dev.maxWorkers`            | `1`                   | How many capability runtime builds may run in parallel during `neuron build`                                |
 
 > [!NOTE]
-> Runtime internals — `storage.provider`, `storage.directory`, and `capabilityRuntimes.storeDir` — are managed by Neuron and rejected from project configuration files. The daemon data directory is controlled with `NEURON_DATA_DIR`.
+> Project configuration (`neuron.config.*`) rejects engine plumbing outright: `daemon.*` (daemon endpoint, socket, PID file, N.O.R.E. binary path), `storage.provider` / `storage.directory`, and `capabilityRuntimes.storeDir` are managed by Neuron, and unknown keys fail validation with an error. Address the engine endpoint with `--remote` / `--nore-path` (or `NEURON_*` variables) instead; `daemon.*` remains settable only in the machine-level global `~/.config/neuron/config.yaml` during the transition. The daemon data directory is controlled with `NEURON_DATA_DIR`.
 
 
 
@@ -527,11 +543,11 @@ Environment variables can also be used for any configuration value with the `NEU
 
 ### Project layout
 
-`neuron init <project>` scaffolds a **TypeScript** project by default: `neuron.config.json` (`lang: typescript`, `entry: assembly.ts`), `package.json`, `tsconfig.json`, `assembly.ts`, and `neuron/capabilityRuntimes/`. `neuron init <project> --lang yaml` scaffolds the canonical YAML layout instead (as shipped in `examples/ecommerce_order`):
+`neuron init <project>` scaffolds a **TypeScript** project by default: `neuron.config.json` (`name`, `version`, `lang: typescript`, `entry: assembly.ts`, `runtime.host` / `runtime.port`), `package.json`, `tsconfig.json`, `assembly.ts`, and `neuron/capabilityRuntimes/`. `neuron init <project> --lang yaml` scaffolds the canonical YAML layout instead (as shipped in `examples/ecommerce_order`):
 
 ```text
 <project>
-├── neuron.config.json   project configuration (lang, entry, runtime)
+├── neuron.config.json   project configuration (name, version, lang, entry, runtime)
 └── assembly.yaml        assembly definition (the entry file)
 ```
 

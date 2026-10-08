@@ -1,4 +1,6 @@
 {
+  "name": "hello",
+  "version": "1.0.0",
   "lang": "typescript",
   "entry": "assembly.ts",
   "runtime": {

@@ -190,9 +190,15 @@ The `local` registry serves a directory laid out exactly like the installed stor
 
 It exists so the full resolution → selection → packaging → installation pipeline works offline and in tests, and it demonstrates that registries are pluggable — "local" is just another provider.
 
-Configure registries per project in `neuron.config.yaml` (or `neuron.config.json` / `neuron.config.yml`):
+Configure registries per project in `neuron.config.yaml` (or `neuron.config.json` / `neuron.config.yml`). The project configuration also carries the Assembly identity — `name` and `version`, required for build:
 
 ```yaml
+# neuron.config.yaml
+name: my-assembly
+version: "1.0.0"
+lang: yaml
+entry: assembly.yaml
+
 capabilityRuntimes:
   registries:
     - name: local

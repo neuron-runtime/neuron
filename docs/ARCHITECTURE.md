@@ -186,7 +186,7 @@ Execution flows along the bindings. Each binding declares what data flows betwee
 
 ### YAML
 
-The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: Assembly` entry file (`assembly.yaml` by default). `neuron init` scaffolds it, and `neuron build` consumes it. See `examples/ecommerce_order` for a complete project.
+The YAML surface is the canonical, zero-tooling authoring experience. A project is a directory with `neuron.config.yaml` pointing at a `kind: Assembly` entry file (`assembly.yaml` by default). The project configuration owns the Assembly identity (`name` and `version`) as well as the authoring language, entry file, and runtime defaults — identity is settled in project configuration **before** the source is canonicalized. `neuron init` scaffolds it, and `neuron build` consumes it. See `examples/ecommerce_order` for a complete project.
 
 ### TypeScript — the SDK
 
@@ -235,6 +235,8 @@ flowchart TB
 ```
 
 The validator and compiler are language-agnostic: they consume and emit canonical structures. YAML-specific quirks stay inside the YAML loader; TypeScript-specific quirks stay inside the TS loader.
+
+Before canonicalization, the loader reads the project configuration (`neuron.config.*`): authoring language, entry file, project variables, and the Assembly identity (`name` / `version`, required for build). The project configuration is strict — unknown keys and engine plumbing (`daemon.*`, `storage.*`, `capabilityRuntimes.storeDir`) are rejected from project files.
 
 The TypeScript loader delegates the actual build to the SDK CLI (`neuron-sdk build --path <root> --entry <file>`), which executes the entry module and writes `.neuron/manifest.json` — then the same canonical path continues. The entry file is selected the same way for both authors: the project's `neuron.config.*` `entry` field.
 

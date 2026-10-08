@@ -1,11 +1,15 @@
 {
+  "name": "order-processing-ts",
+  "version": "2.0.0",
   "lang": "typescript",
   "entry": "assembly.ts",
   "runtime": {
     "execution": {
       "mode": "wait",
       "timeout": "120s"
-    }
+    },
+    "host": "localhost",
+    "port": "auto"
   },
   "inspector": {
     "enabled": true,

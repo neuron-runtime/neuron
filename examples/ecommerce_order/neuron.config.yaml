@@ -1,3 +1,5 @@
+name: order-processing
+version: "1.0.0"
 lang: yaml
 entry: assemblies/order-processing/assembly.yaml
 

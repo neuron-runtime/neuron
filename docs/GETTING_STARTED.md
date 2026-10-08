@@ -102,7 +102,7 @@ The whole definition is plain TypeScript — types are checked, mappings are ver
 neuron init my-first-system
 ```
 
-`neuron init` creates the directory and scaffolds a **TypeScript** project by default: a `neuron.config.json` with `lang: typescript`, a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a runnable `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
+`neuron init` creates the directory and scaffolds a **TypeScript** project by default: a `neuron.config.json` declaring the project identity (`name`, `version`) and `lang: typescript`, a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a runnable `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
 
 ```bash
 mv my-first-system examples/my-first-system
@@ -112,13 +112,17 @@ npm install
 
 > `neuron init --lang yaml` scaffolds the YAML authoring surface instead (`assembly.yaml` + `capabilities/`, no Node toolchain required).
 
-The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run. The TypeScript scaffold writes:
+The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run — including the Assembly identity. The TypeScript scaffold writes:
 
 ```yaml
 # neuron.config.json (abridged: the generated file is the same structure as JSON)
+name: my-first-system        # Assembly identity — required for build
+version: "1.0.0"             # Assembly semver — required for build
 lang: typescript
 entry: assembly.ts
 runtime:
+  host: localhost
+  port: "auto"
   execution:
     mode: wait
     timeout: 30m
@@ -127,11 +131,14 @@ capabilityRuntimes:
     - ./neuron/capabilityRuntimes
 ```
 
+> [!IMPORTANT]
+> `name` and `version` are the Assembly identity and are **required for `neuron build`** — the build fails with a clear error if either is missing, and it fails if either disagrees with the `Assembly({ name, version, ... })` metadata in the entry file. Scaffolded values come from the directory name and `1.0.0`; keep the config in sync when you rename or re-version the assembly.
+
 ### The scaffolded layout
 
 ```text
 examples/my-first-system/
-├── neuron.config.json         ← config: lang, entry, runtime
+├── neuron.config.json         ← config: name, version, lang, entry, runtime
 ├── package.json               ← declares @neuron/sdk
 ├── tsconfig.json              ← strict TypeScript, noEmit
 ├── assembly.ts                ← the Assembly definition (the entry)
@@ -217,12 +224,17 @@ const manifest = Assembly({
 export default manifest;
 ```
 
-Point the project configuration at the entry file (it must default-export the manifest):
+Point the project configuration at the entry file (it must default-export the manifest), and make its `name` / `version` agree with the `Assembly({ name, version })` metadata above — `neuron build` fails with a clear error if they diverge. Edit the scaffolded file; do not add a second `neuron.config.*` file:
 
 ```yaml
-# neuron.config.yaml
+# neuron.config.json (scaffolded file, rendered as YAML for readability)
+name: order-processing   # must match Assembly({ name: "order-processing", ... })
+version: "1.0.0"         # must match Assembly({ version: "1.0.0" })
 lang: typescript
 entry: assembly.ts
+runtime:
+  host: localhost
+  port: "auto"
 ```
 
 > [!NOTE]
@@ -290,9 +302,19 @@ catalog/example/echo/1.0.0/
 
 ### Register the catalog as a local registry
 
-Add a `local` registry in your project's `neuron.config.yaml`:
+Add a `local` registry to the same project configuration (the file also carries the Assembly identity — `name` / `version` are required for build):
 
 ```yaml
+# neuron.config.json (rendered as YAML for readability)
+name: order-processing
+version: "1.0.0"
+lang: typescript
+entry: assembly.ts
+
+runtime:
+  host: localhost
+  port: "auto"
+
 capabilityRuntimes:
   registries:
     - name: local
