@@ -8,7 +8,6 @@ import (
 
 	"github.com/neuron-runtime/neuron/application/build/builder"
 	yamlpkg "github.com/neuron-runtime/neuron/application/build/yaml"
-	"github.com/neuron-runtime/neuron/application/compiler/manifest"
 )
 
 // writeProject lays out a minimal YAML Neuron project in dir.
@@ -55,64 +54,63 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestYAMLBBuilderBuildProducesManifest(t *testing.T) {
+func TestYAMLBuilderBuildProducesManifest(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	writeProject(t, dir)
 
-	if err := yamlpkg.New().Build(ctx, builder.Options{
+	sys, err := yamlpkg.New().Build(ctx, builder.Options{
 		Root:  dir,
 		Entry: filepath.Join("assemblies", "hello", "assembly.yaml"),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-
-	manifestPath := filepath.Join(dir, ".neuron", "manifest.json")
-	if _, err := os.Stat(manifestPath); err != nil {
-		t.Fatalf("expected manifest at %s: %v", manifestPath, err)
+	if sys == nil {
+		t.Fatal("Build returned a nil manifest")
 	}
 
-	m, err := manifest.LoadFromProjectRoot(dir)
-	if err != nil {
-		t.Fatalf("LoadFromProjectRoot: %v", err)
+	// The builder returns the authored manifest; identity injection,
+	// canonicalization and persistence are owned by the build package.
+	if sys.Metadata.Name != "hello" {
+		t.Errorf("manifest name = %q, want hello", sys.Metadata.Name)
 	}
-	if m.Metadata.Name != "hello" {
-		t.Errorf("manifest name = %q, want hello", m.Metadata.Name)
+	if sys.Metadata.Version != "0.1.0" {
+		t.Errorf("manifest version = %q, want 0.1.0", sys.Metadata.Version)
 	}
-	if len(m.Capabilities) == 0 {
+	if len(sys.Capabilities) == 0 {
 		t.Error("expected at least one capability in the manifest")
 	}
 	// Project variables come from the config (Builder options), not the YAML.
-	if len(m.Variables) != 0 {
-		t.Errorf("variables = %#v, want none", m.Variables)
+	if len(sys.Variables) != 0 {
+		t.Errorf("variables = %#v, want none", sys.Variables)
 	}
 }
 
-func TestYAMLBBuilderCarriesVariables(t *testing.T) {
+func TestYAMLBuilderCarriesVariables(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	writeProject(t, dir)
 
-	if err := yamlpkg.New().Build(ctx, builder.Options{
+	sys, err := yamlpkg.New().Build(ctx, builder.Options{
 		Root:      dir,
 		Entry:     filepath.Join("assemblies", "hello", "assembly.yaml"),
 		Variables: map[string]any{"environment": "staging"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-
-	m, err := manifest.LoadFromProjectRoot(dir)
-	if err != nil {
-		t.Fatalf("LoadFromProjectRoot: %v", err)
+	if sys == nil {
+		t.Fatal("Build returned a nil manifest")
 	}
-	if m.Variables["environment"] != "staging" {
-		t.Errorf("variables = %#v, want environment=staging", m.Variables)
+	if sys.Variables["environment"] != "staging" {
+		t.Errorf("variables = %#v, want environment=staging", sys.Variables)
 	}
 }
 
-func TestYAMLBBuilderRequiresRoot(t *testing.T) {
+func TestYAMLBuilderRequiresRoot(t *testing.T) {
 	b := yamlpkg.New()
-	if err := b.Build(context.Background(), builder.Options{}); err == nil {
+	if _, err := b.Build(context.Background(), builder.Options{}); err == nil {
 		t.Fatal("expected error when root is empty")
 	}
 }

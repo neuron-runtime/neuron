@@ -121,10 +121,13 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 
 	// Build the project into the canonical .neuron/manifest.json for the
 	// resolved language. Configuration is the single source of truth for the
-	// entry file and project variables.
+	// Assembly identity (name/version), the entry file, and project
+	// variables.
 	if err := build.Build(ctx, lang, build.Options{
 		Root:      root,
 		Entry:     cfg.Entry,
+		Name:      cfg.Name,
+		Version:   cfg.Version,
 		Variables: cfg.Variables,
 		Verbose:   opts.Verbose,
 		Out:       cmd.ErrOrStderr(),

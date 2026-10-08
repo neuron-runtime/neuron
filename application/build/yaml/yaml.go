@@ -1,6 +1,7 @@
 // Package yaml implements the Builder for YAML-authored Neuron projects. It
-// resolves the project layout (assemblies/, capabilities/, bindings/) and converts
-// it into the canonical .neuron/manifest.json.
+// resolves the project layout (assemblies/, capabilities/, bindings/) into a
+// manifest; the build package then applies the project-configured identity,
+// canonicalizes, and persists it as .neuron/manifest.json.
 package yaml
 
 import (
@@ -26,15 +27,17 @@ func (b Builder) Language() language.Language { return language.YAML }
 // New returns a Builder with output discarded unless configured otherwise.
 func New() Builder { return Builder{} }
 
-// Build resolves the project at opts.Root and writes .neuron/manifest.json.
-func (b Builder) Build(ctx context.Context, opts builder.Options) error {
+// Build resolves the project at opts.Root and returns its manifest. Identity
+// injection, canonicalization, and persistence are owned by the build
+// package so every authoring language shares one injection boundary.
+func (b Builder) Build(ctx context.Context, opts builder.Options) (*manifest.Assembly, error) {
 	if b.Out == nil {
 		b.Out = io.Discard
 	}
 
 	root := opts.Root
 	if root == "" {
-		return fmt.Errorf("project root is required")
+		return nil, fmt.Errorf("project root is required")
 	}
 
 	buildOpts := project.DefaultOptions()
@@ -44,22 +47,13 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 
 	result, err := project.Resolve(ctx, buildOpts)
 	if err != nil {
-		return fmt.Errorf("resolve project: %w", err)
+		return nil, fmt.Errorf("resolve project: %w", err)
 	}
 
 	sys := manifest.FromResolvedProject(result.Project, opts.Variables)
-	// Canonicalize is identity for YAML-authored manifests but keeps the
-	// canonicalization invariant (snake_case binding keys) uniform.
-	canonical, err := manifest.Canonicalize(sys)
-	if err != nil {
-		return fmt.Errorf("canonicalize manifest: %w", err)
-	}
-	if err := manifest.SaveToProjectRoot(root, canonical); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
 
 	if opts.Verbose {
-		fmt.Fprintf(b.Out, "Wrote manifest to %s\n", manifest.ManifestPath(root))
+		fmt.Fprintf(b.Out, "Resolved YAML project at %s\n", root)
 	}
-	return nil
+	return sys, nil
 }

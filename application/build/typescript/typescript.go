@@ -1,6 +1,7 @@
 // Package typescript implements the Builder for TypeScript-authored Neuron
 // projects. Building delegates to the neuron-sdk CLI, which evaluates the
-// project entry and writes the canonical .neuron/manifest.json.
+// project entry and writes a manifest; the build package then applies the
+// project-configured identity, canonicalizes, and persists it.
 package typescript
 
 import (
@@ -38,21 +39,23 @@ func (b Builder) Language() language.Language { return language.TypeScript }
 // New returns a Builder with output discarded unless configured otherwise.
 func New() Builder { return Builder{} }
 
-// Build produces .neuron/manifest.json for the project at opts.Root by
-// invoking the neuron-sdk build command.
-func (b Builder) Build(ctx context.Context, opts builder.Options) error {
+// Build invokes the neuron-sdk build command for the project at opts.Root
+// and returns the manifest the SDK wrote. Identity injection,
+// canonicalization, and persistence are owned by the build package so
+// every authoring language shares one injection boundary.
+func (b Builder) Build(ctx context.Context, opts builder.Options) (*manifest.Assembly, error) {
 	if b.Out == nil {
 		b.Out = io.Discard
 	}
 
 	root := opts.Root
 	if root == "" {
-		return fmt.Errorf("project root is required")
+		return nil, fmt.Errorf("project root is required")
 	}
 
 	sdkPath, err := ResolveSDK(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	args := []string{"build", "--path", root}
@@ -68,27 +71,21 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 
 	tsLoader := typescript.NewTSLoader(cmd)
 	if err := loader.New(tsLoader).Handler.BuildContext(ctx); err != nil {
-		return fmt.Errorf("typescript build failed: %w", err)
+		return nil, fmt.Errorf("typescript build failed: %w", err)
 	}
 
-	// The SDK writes camelCase binding keys inherited from JS objects;
-	// canonicalize them so every language produces the same snake_case shape.
+	// The SDK writes camelCase binding keys inherited from JS objects; the
+	// build package canonicalizes them after this return so every language
+	// produces the same snake_case shape on disk.
 	sys, err := manifest.LoadFromProjectRoot(root)
 	if err != nil {
-		return fmt.Errorf("load manifest: %w", err)
-	}
-	canonical, err := manifest.Canonicalize(sys)
-	if err != nil {
-		return fmt.Errorf("canonicalize manifest: %w", err)
-	}
-	if err := manifest.SaveToProjectRoot(root, canonical); err != nil {
-		return fmt.Errorf("write canonical manifest: %w", err)
+		return nil, fmt.Errorf("load manifest: %w", err)
 	}
 
 	if opts.Verbose {
 		fmt.Fprintf(b.Out, "Built TypeScript project at %s\n", root)
 	}
-	return nil
+	return sys, nil
 }
 
 // ResolveSDK locates the neuron-sdk binary, preferring a project-local install
