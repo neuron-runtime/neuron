@@ -12,7 +12,7 @@ export interface OrderItem {
   priceCents: number;
 }
 
-export interface OrderInput {
+export interface OrderParams {
   id: string;
   customerId: string;
   customerEmail: string;
@@ -22,94 +22,94 @@ export interface OrderInput {
   shippingAddress: Address;
 }
 
-export interface AssemblyInput {
-  order: OrderInput;
+export interface AssemblyParams {
+  order: OrderParams;
 }
 
-export interface ValidateOrderInput {
-  order: OrderInput;
+export interface ValidateOrderParams {
+  order: OrderParams;
 }
 
-export interface ValidateOrderOutput {
-  order: OrderInput;
+export interface ValidateOrderResult {
+  order: OrderParams;
 }
 
-export interface ParseOrderInput {
-  order: OrderInput;
+export interface ParseOrderParams {
+  order: OrderParams;
   validationData: unknown;
 }
 
-export interface ParseOrderOutput {
-  order: OrderInput;
+export interface ParseOrderResult {
+  order: OrderParams;
   validationData: unknown;
 }
 
-export interface EnrichCustomerInput {
-  order: OrderInput;
+export interface EnrichCustomerParams {
+  order: OrderParams;
   customerId: string;
 }
 
-export interface EnrichCustomerOutput {
-  order: OrderInput;
+export interface EnrichCustomerResult {
+  order: OrderParams;
   customerId: string;
 }
 
-export interface CalculateTotalsInput {
-  order: OrderInput;
+export interface CalculateTotalsParams {
+  order: OrderParams;
   items: OrderItem[];
   email: string;
 }
 
-export interface CalculateTotalsOutput {
-  order: OrderInput;
+export interface CalculateTotalsResult {
+  order: OrderParams;
   items: OrderItem[];
   email: string;
 }
 
-export interface AuthorizePaymentInput {
-  order: OrderInput;
+export interface AuthorizePaymentParams {
+  order: OrderParams;
   amountCents: number;
   currency: string;
   email: string;
 }
 
-export interface AuthorizePaymentOutput {
-  order: OrderInput;
+export interface AuthorizePaymentResult {
+  order: OrderParams;
   amountCents: number;
   currency: string;
   email: string;
 }
 
-export interface CapturePaymentInput {
-  order: OrderInput;
+export interface CapturePaymentParams {
+  order: OrderParams;
   amountCents: number;
 }
 
-export interface CapturePaymentOutput {
-  order: OrderInput;
+export interface CapturePaymentResult {
+  order: OrderParams;
   amountCents: number;
 }
 
-export interface CreateShipmentInput {
-  order: OrderInput;
+export interface CreateShipmentParams {
+  order: OrderParams;
   shippingAddress: Address;
   email: string;
 }
 
-export interface CreateShipmentOutput {
-  order: OrderInput;
+export interface CreateShipmentResult {
+  order: OrderParams;
   shippingAddress: Address;
   email: string;
 }
 
-export interface SendConfirmationInput {
-  order: OrderInput;
+export interface SendConfirmationParams {
+  order: OrderParams;
   email: string;
   grandTotal: number;
 }
 
-export interface SendConfirmationOutput {
-  order: OrderInput;
+export interface SendConfirmationResult {
+  order: OrderParams;
   email: string;
   grandTotal: number;
 }

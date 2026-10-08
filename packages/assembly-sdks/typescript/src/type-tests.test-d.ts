@@ -1,13 +1,13 @@
 import { Capability, Assembly, connect, string, type Expression } from "./index.js";
 
-interface GitHubReadInput {
+interface GitHubReadParams {
     owner: string;
     repository: string;
     path: string;
     branch?: string;
 }
 
-interface GitHubReadOutput {
+interface GitHubReadResult {
     content: string;
     path: string;
     sha: string;
@@ -16,22 +16,22 @@ interface GitHubReadOutput {
     };
 }
 
-interface AnalyzeInput {
+interface AnalyzeParams {
     content: string;
     path: string;
 }
 
-interface AnalyzeOutput {
+interface AnalyzeResult {
     summary: string;
 }
 
 const githubRead = Capability({ name: "github.read" })
-    .paramsSchema<GitHubReadInput>()
-    .resultSchema<GitHubReadOutput>();
+    .paramsSchema<GitHubReadParams>()
+    .resultSchema<GitHubReadResult>();
 
 const analyzeContent = Capability({ name: "analyze.content" })
-    .paramsSchema<AnalyzeInput>()
-    .resultSchema<AnalyzeOutput>();
+    .paramsSchema<AnalyzeParams>()
+    .resultSchema<AnalyzeResult>();
 
 githubRead.result.content satisfies Expression<string>;
 githubRead.result.path satisfies Expression<string>;
@@ -47,7 +47,7 @@ githubRead.withParams({
     path: "README.md",
 });
 
-// @ts-expect-error required input path is missing.
+// @ts-expect-error required params field path is missing.
 githubRead.withParams({
     owner: "neuron-runtime",
     repository: "neuron",
@@ -59,28 +59,28 @@ analyzeContent.withParams({
 });
 
 analyzeContent.withParams({
-    // @ts-expect-error number expressions cannot bind to string inputs.
+    // @ts-expect-error number expressions cannot bind to string params.
     content: githubRead.result.metadata.size,
     path: githubRead.result.path,
 });
 
-// @ts-expect-error sha is a string but the required path input is missing.
+// @ts-expect-error sha is a string but the required params field path is missing.
 analyzeContent.withParams({
     content: githubRead.result.sha,
 });
 
-analyzeContent.connect<GitHubReadOutput>((source) => ({
+analyzeContent.connect<GitHubReadResult>((source) => ({
     content: source.result.content,
     path: source.result.path,
 }));
 
-analyzeContent.connect<GitHubReadOutput>((source) => ({
+analyzeContent.connect<GitHubReadResult>((source) => ({
     // @ts-expect-error source result has no fileData field.
     content: source.result.fileData,
     path: source.result.path,
 }));
 
-connect<GitHubReadOutput, AnalyzeInput>((source) => ({
+connect<GitHubReadResult, AnalyzeParams>((source) => ({
     content: source.result.content,
     path: source.result.path,
 }));
@@ -97,7 +97,7 @@ fromRuntimeSchema.withParams({ requiredName: "ok" });
 fromRuntimeSchema.withParams({ optionalName: "ok" });
 
 Assembly({ name: "repository-analysis" })
-    .paramsSchema<GitHubReadInput>()
+    .paramsSchema<GitHubReadParams>()
     .withParams((data) =>
         githubRead.withParams({
             owner: data.owner,

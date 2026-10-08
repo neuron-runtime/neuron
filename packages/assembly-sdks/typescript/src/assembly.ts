@@ -14,16 +14,16 @@ import { schemaToManifest, type InferSchema, type SchemaObject } from "./schema.
 // A value that produces one or more flat capability invocations. Edges between
 // them are derived at compilation time from the data each node references;
 // composition carries no ordering of its own.
-export type Runnable<TInput extends object = object> =
-  | Composition<TInput>
-  | CompositionNode<object, TInput>
-  | CapabilityDefinition<object, TInput>
+export type Runnable<TParams extends object = object> =
+  | Composition<TParams>
+  | CompositionNode<object, TParams>
+  | CapabilityDefinition<object, TParams>
   | CapabilityComposition
-  | Runnable<TInput>[];
+  | Runnable<TParams>[];
 
-export class AssemblyDefinition<TInput extends object = object> {
+export class AssemblyDefinition<TParams extends object = object> {
   private _nodes: CapabilityComposition[] = [];
-  private _inputPorts: ReturnType<typeof schemaToManifest>["ports"] = [];
+  private _paramPorts: ReturnType<typeof schemaToManifest>["ports"] = [];
 
   constructor(
     readonly name: string,
@@ -37,18 +37,18 @@ export class AssemblyDefinition<TInput extends object = object> {
     const next = new AssemblyDefinition<object>(this.name, this.version, this.description);
     next._nodes = [...this._nodes];
     if (schema) {
-      next._inputPorts = schemaToManifest(schema).ports;
+      next._paramPorts = schemaToManifest(schema).ports;
     } else {
-      next._inputPorts = [...this._inputPorts];
+      next._paramPorts = [...this._paramPorts];
     }
     return next;
   }
 
-  get params(): Expressionify<TInput> {
-    return createExecutionContext<TInput>().params;
+  get params(): Expressionify<TParams> {
+    return createExecutionContext<TParams>().params;
   }
 
-  withParams(define: (data: Expressionify<TInput>) => Runnable): this {
+  withParams(define: (data: Expressionify<TParams>) => Runnable): this {
     return this.run(define(this.params));
   }
 

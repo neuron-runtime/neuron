@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { CapturePaymentInput, CapturePaymentOutput } from "../types";
+import type { CapturePaymentParams, CapturePaymentResult } from "../types";
 
 export const capturePayment = Capability({
   name: "capture-payment",
@@ -7,5 +7,5 @@ export const capturePayment = Capability({
   description: "Capture an authorized payment",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<CapturePaymentInput>()
-  .resultSchema<CapturePaymentOutput>();
+  .paramsSchema<CapturePaymentParams>()
+  .resultSchema<CapturePaymentResult>();

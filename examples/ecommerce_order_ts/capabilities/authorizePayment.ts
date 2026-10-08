@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { AuthorizePaymentInput, AuthorizePaymentOutput } from "../types";
+import type { AuthorizePaymentParams, AuthorizePaymentResult } from "../types";
 
 export const authorizePayment = Capability({
   name: "authorize-payment",
@@ -7,5 +7,5 @@ export const authorizePayment = Capability({
   description: "Authorize payment for the order",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<AuthorizePaymentInput>()
-  .resultSchema<AuthorizePaymentOutput>();
+  .paramsSchema<AuthorizePaymentParams>()
+  .resultSchema<AuthorizePaymentResult>();

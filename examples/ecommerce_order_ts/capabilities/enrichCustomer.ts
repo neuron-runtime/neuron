@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { EnrichCustomerInput, EnrichCustomerOutput } from "../types";
+import type { EnrichCustomerParams, EnrichCustomerResult } from "../types";
 
 export const enrichCustomer = Capability({
   name: "enrich-customer",
@@ -7,5 +7,5 @@ export const enrichCustomer = Capability({
   description: "Enrich with customer data",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<EnrichCustomerInput>()
-  .resultSchema<EnrichCustomerOutput>();
+  .paramsSchema<EnrichCustomerParams>()
+  .resultSchema<EnrichCustomerResult>();

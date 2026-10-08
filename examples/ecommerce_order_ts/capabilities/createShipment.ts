@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { CreateShipmentInput, CreateShipmentOutput } from "../types";
+import type { CreateShipmentParams, CreateShipmentResult } from "../types";
 
 export const createShipment = Capability({
   name: "create-shipment",
@@ -7,5 +7,5 @@ export const createShipment = Capability({
   description: "Create a shipment for the order",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<CreateShipmentInput>()
-  .resultSchema<CreateShipmentOutput>();
+  .paramsSchema<CreateShipmentParams>()
+  .resultSchema<CreateShipmentResult>();

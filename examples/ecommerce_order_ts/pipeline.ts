@@ -9,24 +9,24 @@ import {
   createShipment,
   sendConfirmation,
 } from "./capabilities/index.js";
-import type { AssemblyInput } from "./types.js";
+import type { AssemblyParams } from "./types.js";
 
 /**
- * Builds the order-processing pipeline from the assembly input.
+ * Builds the order-processing pipeline from the assembly params.
  *
- * `AssemblyInput` (execution context) is passed in as `data`, so the original
+ * `AssemblyParams` (execution context) is passed in as `data`, so the original
  * order is reachable from any step via `data.order` (compiled to
  * `execution.params.order`). Each capability also forwards the order through
  * its own result, so in-flight mappings read it back from the previous step's
  * result (`source.result.order`).
  *
  * Every capability runtime is `neuron:core:set`, which echoes the capability
- * input (plus config), so a capability only results the data its input
+ * params (plus config), so a capability only results the data its params
  * carried. Bindings are therefore kept to fields the previous step actually
  * emits, and gateway conditions test order data rather than domain objects no
  * mock step produces.
  */
-export function buildPipeline(data: Expressionify<{ order: AssemblyInput["order"] }>) {
+export function buildPipeline(data: Expressionify<{ order: AssemblyParams["order"] }>) {
   return validateOrder
     .withParams({
       order: data.order,

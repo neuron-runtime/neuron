@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { CalculateTotalsInput, CalculateTotalsOutput } from "../types";
+import type { CalculateTotalsParams, CalculateTotalsResult } from "../types";
 
 export const calculateTotals = Capability({
   name: "calculate-totals",
@@ -7,5 +7,5 @@ export const calculateTotals = Capability({
   description: "Calculate order totals with tax and discounts",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<CalculateTotalsInput>()
-  .resultSchema<CalculateTotalsOutput>();
+  .paramsSchema<CalculateTotalsParams>()
+  .resultSchema<CalculateTotalsResult>();

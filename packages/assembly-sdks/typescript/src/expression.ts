@@ -30,12 +30,12 @@ export type ExpressionArray<T> = {
   readonly [index: number]: Expressionify<T>;
 };
 
-export interface SourceContext<TOutput extends object> {
-  readonly result: Expressionify<TOutput>;
+export interface SourceContext<TResult extends object> {
+  readonly result: Expressionify<TResult>;
 }
 
-export interface ExecutionContext<TInput extends object> {
-  readonly params: Expressionify<TInput>;
+export interface ExecutionContext<TParams extends object> {
+  readonly params: Expressionify<TParams>;
 }
 
 const expressionRefs = new WeakMap<object, string>();
@@ -88,18 +88,18 @@ export function expressionRef(value: unknown): string | undefined {
   return expressionRefs.get(value as unknown as object);
 }
 
-export function createSourceContext<TOutput extends object>(): SourceContext<TOutput> {
+export function createSourceContext<TResult extends object>(): SourceContext<TResult> {
   return {
     get result() {
-      return createExpressionProxy<TOutput>("source.result");
+      return createExpressionProxy<TResult>("source.result");
     },
   };
 }
 
-export function createExecutionContext<TInput extends object>(): ExecutionContext<TInput> {
+export function createExecutionContext<TParams extends object>(): ExecutionContext<TParams> {
   return {
     get params() {
-      return createExpressionProxy<TInput>("execution.params");
+      return createExpressionProxy<TParams>("execution.params");
     },
   };
 }

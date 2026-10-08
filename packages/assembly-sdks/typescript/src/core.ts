@@ -1,6 +1,6 @@
 export {
     delay,
     http,
-    type HttpInputType,
-    type HttpOutputType
+    type HttpParamsType,
+    type HttpResultType
 } from './core/capabilities';

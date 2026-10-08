@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { SendConfirmationInput, SendConfirmationOutput } from "../types";
+import type { SendConfirmationParams, SendConfirmationResult } from "../types";
 
 export const sendConfirmation = Capability({
   name: "send-confirmation",
@@ -7,5 +7,5 @@ export const sendConfirmation = Capability({
   description: "Send order confirmation email",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<SendConfirmationInput>()
-  .resultSchema<SendConfirmationOutput>();
+  .paramsSchema<SendConfirmationParams>()
+  .resultSchema<SendConfirmationResult>();

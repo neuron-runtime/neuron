@@ -105,20 +105,20 @@ export type ParamBindings<T extends object> = {
 
 export interface Connection<TSource extends object = object, TTarget extends object = object> {
   readonly __kind: "connection";
-  readonly __serviceRef?: string;
+  readonly __capabilityRef?: string;
   readonly __bindings: Array<{ target: string; expression: string }>;
   readonly __conditions: Array<{ expression: string; message: string }>;
   when(condition: Expression<boolean>, message: string): Connection<TSource, TTarget>;
 }
 
-export interface CapabilityReference<TInput extends object, TOutput extends object> {
+export interface CapabilityReference<TParams extends object, TResult extends object> {
   readonly ref: string;
-  readonly result: Expressionify<TOutput>;
-  withParams(bindings: ParamBindings<TInput>): CompositionNode<TInput, TOutput>;
-  withParams<TSource extends object>(connection: Connection<TSource, TInput>): CompositionNode<TInput, TOutput>;
+  readonly result: Expressionify<TResult>;
+  withParams(bindings: ParamBindings<TParams>): CompositionNode<TParams, TResult>;
+  withParams<TSource extends object>(connection: Connection<TSource, TParams>): CompositionNode<TParams, TResult>;
   connect<TSource extends object>(
-    define: (source: SourceContext<TSource>) => ParamBindings<TInput>
-  ): Connection<TSource, TInput>;
+    define: (source: SourceContext<TSource>) => ParamBindings<TParams>
+  ): Connection<TSource, TParams>;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,18 +154,18 @@ type CapabilityState = {
   runtime: CapabilityRuntimeManifest;
   version?: string;
   description?: string;
-  inputPorts: PortManifest[];
-  outputPorts: PortManifest[];
-  inputRules: Record<string, FieldRules>;
+  paramPorts: PortManifest[];
+  resultPorts: PortManifest[];
+  paramRules: Record<string, FieldRules>;
 };
 
 // ---------------------------------------------------------------------------
 // CompositionNode — a single capability invocation with bindings
 // ---------------------------------------------------------------------------
 
-export class CompositionNode<TInput extends object = object, TOutput extends object = object> {
-  readonly __inputMarker?: TInput;
-  readonly __outputMarker?: TOutput;
+export class CompositionNode<TParams extends object = object, TResult extends object = object> {
+  readonly __paramsMarker?: TParams;
+  readonly __resultMarker?: TResult;
   readonly _composition: CapabilityComposition;
 
   constructor(capabilityRef: string, compositionOverride?: Partial<CapabilityComposition>) {
@@ -188,20 +188,20 @@ export class CompositionNode<TInput extends object = object, TOutput extends obj
     return this._composition.bindings;
   }
 
-  get result(): Expressionify<TOutput> {
-    return createExpressionProxy<TOutput>("source.result", this._composition.capabilityRef);
+  get result(): Expressionify<TResult> {
+    return createExpressionProxy<TResult>("source.result", this._composition.capabilityRef);
   }
 
-  bind<TNextInput extends object, TNextOutput extends object>(
-    target: BindTarget<TOutput, TNextInput, TNextOutput>,
+  bind<TNextParams extends object, TNextResult extends object>(
+    target: BindTarget<TResult, TNextParams, TNextResult>,
     condition?: Condition
-  ): Composition<TNextOutput> {
+  ): Composition<TNextResult> {
     const targets = toNodes(target, condition).map((node) =>
       node.sources.length === 0 && !node.anchor
         ? { ...node, anchor: this._composition.capabilityRef }
         : node
     );
-    return new Composition<TNextOutput>([this._composition, ...targets]);
+    return new Composition<TNextResult>([this._composition, ...targets]);
   }
 }
 
@@ -215,8 +215,8 @@ export class CompositionNode<TInput extends object = object, TOutput extends obj
 // directly.
 // ---------------------------------------------------------------------------
 
-export class Composition<TOutput extends object = object> {
-  readonly __outputMarker?: TOutput;
+export class Composition<TResult extends object = object> {
+  readonly __resultMarker?: TResult;
   readonly _nodes: CapabilityComposition[];
 
   constructor(nodes: CapabilityComposition[]) {
@@ -227,15 +227,15 @@ export class Composition<TOutput extends object = object> {
     return this._nodes;
   }
 
-  get result(): Expressionify<TOutput> {
+  get result(): Expressionify<TResult> {
     const last = this._nodes[this._nodes.length - 1];
-    return createExpressionProxy<TOutput>("source.result", last?.capabilityRef);
+    return createExpressionProxy<TResult>("source.result", last?.capabilityRef);
   }
 
-  bind<TNextInput extends object, TNextOutput extends object>(
-    target: BindTarget<TOutput, TNextInput, TNextOutput>,
+  bind<TNextParams extends object, TNextResult extends object>(
+    target: BindTarget<TResult, TNextParams, TNextResult>,
     condition?: Condition
-  ): Composition<TNextOutput> {
+  ): Composition<TNextResult> {
     const last = this._nodes[this._nodes.length - 1];
     const anchor = last?.capabilityRef;
     const targets = toNodes(target, condition).map((node) =>
@@ -243,7 +243,7 @@ export class Composition<TOutput extends object = object> {
         ? { ...node, anchor }
         : node
     );
-    return new Composition<TNextOutput>([...this._nodes, ...targets]);
+    return new Composition<TNextResult>([...this._nodes, ...targets]);
   }
 }
 
@@ -251,8 +251,8 @@ export class Composition<TOutput extends object = object> {
 // CapabilityDefinition — immutable capability blueprint
 // ---------------------------------------------------------------------------
 
-export class CapabilityDefinition<TInput extends object = object, TOutput extends object = object>
-  implements CapabilityReference<TInput, TOutput> {
+export class CapabilityDefinition<TParams extends object = object, TResult extends object = object>
+  implements CapabilityReference<TParams, TResult> {
   readonly ref: string;
   private readonly _state: CapabilityState;
 
@@ -262,9 +262,9 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
       runtime: state?.runtime ?? { name: "neuron:core:set", version: "latest", registry: "local" },
       version: state?.version,
       description: state?.description,
-      inputPorts: state?.inputPorts ?? [],
-      outputPorts: state?.outputPorts ?? [],
-      inputRules: state?.inputRules ?? {},
+      paramPorts: state?.paramPorts ?? [],
+      resultPorts: state?.resultPorts ?? [],
+      paramRules: state?.paramRules ?? {},
     };
   }
 
@@ -283,35 +283,35 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
     return this.clone({ runtime: resolveRuntimeDeclaration(declaration) }) as this;
   }
 
-  paramsSchema<T extends object>(): CapabilityDefinition<T, TOutput>;
-  paramsSchema<S extends SchemaObject>(schema: S): CapabilityDefinition<InferSchema<S>, TOutput>;
-  paramsSchema(schema?: SchemaObject): CapabilityDefinition<object, TOutput> {
+  paramsSchema<T extends object>(): CapabilityDefinition<T, TResult>;
+  paramsSchema<S extends SchemaObject>(schema: S): CapabilityDefinition<InferSchema<S>, TResult>;
+  paramsSchema(schema?: SchemaObject): CapabilityDefinition<object, TResult> {
     if (!schema) return this.clone();
     const { ports, rules } = schemaToManifest(schema);
-    return this.clone({ inputPorts: ports, inputRules: rules });
+    return this.clone({ paramPorts: ports, paramRules: rules });
   }
 
-  resultSchema<T extends object>(): CapabilityDefinition<TInput, T>;
-  resultSchema<S extends SchemaObject>(schema: S): CapabilityDefinition<TInput, InferSchema<S>>;
-  resultSchema(schema?: SchemaObject): CapabilityDefinition<TInput, object> {
+  resultSchema<T extends object>(): CapabilityDefinition<TParams, T>;
+  resultSchema<S extends SchemaObject>(schema: S): CapabilityDefinition<TParams, InferSchema<S>>;
+  resultSchema(schema?: SchemaObject): CapabilityDefinition<TParams, object> {
     if (!schema) return this.clone();
     const { ports } = schemaToManifest(schema);
-    return this.clone({ outputPorts: ports });
+    return this.clone({ resultPorts: ports });
   }
 
-  get result(): Expressionify<TOutput> {
-    return createExpressionProxy<TOutput>("source.result", this.ref);
+  get result(): Expressionify<TResult> {
+    return createExpressionProxy<TResult>("source.result", this.ref);
   }
 
-  get params(): Expressionify<TInput> {
-    return createExpressionProxy<TInput>("source.params", this.ref);
+  get params(): Expressionify<TParams> {
+    return createExpressionProxy<TParams>("source.params", this.ref);
   }
 
-  withParams(bindings: ParamBindings<TInput>): CompositionNode<TInput, TOutput>;
-  withParams<TSource extends object>(connection: Connection<TSource, TInput>): CompositionNode<TInput, TOutput>;
-  withParams(bindingsOrConnection: ParamBindings<TInput> | Connection<object, TInput>): CompositionNode<TInput, TOutput> {
+  withParams(bindings: ParamBindings<TParams>): CompositionNode<TParams, TResult>;
+  withParams<TSource extends object>(connection: Connection<TSource, TParams>): CompositionNode<TParams, TResult>;
+  withParams(bindingsOrConnection: ParamBindings<TParams> | Connection<object, TParams>): CompositionNode<TParams, TResult> {
     if (isConnection(bindingsOrConnection)) {
-      return new CompositionNode<TInput, TOutput>(this.ref, {
+      return new CompositionNode<TParams, TResult>(this.ref, {
         capabilityDef: this as unknown as CapabilityDefinition<object, object>,
         bindings: bindingsFromConnection(bindingsOrConnection),
         incomingConditions: bindingsOrConnection.__conditions.map((c) => ({
@@ -321,7 +321,7 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
       });
     }
     const { bindings, sources } = bindingsFromObject(bindingsOrConnection);
-    return new CompositionNode<TInput, TOutput>(this.ref, {
+    return new CompositionNode<TParams, TResult>(this.ref, {
       capabilityDef: this as unknown as CapabilityDefinition<object, object>,
       bindings,
       sources,
@@ -329,15 +329,15 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
   }
 
   connect<TSource extends object>(
-    define: (source: SourceContext<TSource>) => ParamBindings<TInput>
-  ): Connection<TSource, TInput> {
+    define: (source: SourceContext<TSource>) => ParamBindings<TParams>
+  ): Connection<TSource, TParams> {
     return makeConnection(this.ref, define(createSourceContext<TSource>()));
   }
 
-  bind<TNextInput extends object, TNextOutput extends object>(
-    target: BindTarget<TOutput, TNextInput, TNextOutput>,
+  bind<TNextParams extends object, TNextResult extends object>(
+    target: BindTarget<TResult, TNextParams, TNextResult>,
     condition?: Condition
-  ): Composition<TNextOutput> {
+  ): Composition<TNextResult> {
     const sourceComp: CapabilityComposition = {
       kind: "capability",
       capabilityRef: this.ref,
@@ -349,7 +349,7 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
     const targets = toNodes(target, condition).map((node) =>
       node.sources.length === 0 && !node.anchor ? { ...node, anchor: this.ref } : node
     );
-    return new Composition<TNextOutput>([sourceComp, ...targets]);
+    return new Composition<TNextResult>([sourceComp, ...targets]);
   }
 
   toManifest(): CapabilityManifest {
@@ -358,8 +358,8 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
       version: this._state.version,
       description: this._state.description,
       capabilityRuntime: this.manifestRuntime(),
-      params: this._state.inputPorts,
-      results: this._state.outputPorts,
+      params: this._state.paramPorts,
+      results: this._state.resultPorts,
     };
   }
 
@@ -373,19 +373,19 @@ export class CapabilityDefinition<TInput extends object = object, TOutput extend
     return resolveRuntimeDeclaration(this._state.runtime);
   }
 
-  asReference(): CapabilityReference<TInput, TOutput> {
+  asReference(): CapabilityReference<TParams, TResult> {
     return this;
   }
 
-  private clone<TNextInput extends object = TInput, TNextOutput extends object = TOutput>(
+  private clone<TNextParams extends object = TParams, TNextResult extends object = TResult>(
     patch: Partial<CapabilityState> = {}
-  ): CapabilityDefinition<TNextInput, TNextOutput> {
-    return new CapabilityDefinition<TNextInput, TNextOutput>(this.ref, {
+  ): CapabilityDefinition<TNextParams, TNextResult> {
+    return new CapabilityDefinition<TNextParams, TNextResult>(this.ref, {
       ...this._state,
       runtime: this.manifestRuntime(),
-      inputPorts: [...this._state.inputPorts],
-      outputPorts: [...this._state.outputPorts],
-      inputRules: { ...this._state.inputRules },
+      paramPorts: [...this._state.paramPorts],
+      resultPorts: [...this._state.resultPorts],
+      paramRules: { ...this._state.paramRules },
       ...patch,
     });
   }
@@ -429,10 +429,10 @@ function resolveRuntimeDeclaration(declaration: RuntimeDeclaration): CapabilityR
 // Factory
 // ---------------------------------------------------------------------------
 
-export function Capability<TInput extends object = object, TOutput extends object = object>(
+export function Capability<TParams extends object = object, TResult extends object = object>(
   config: { name: string; version?: string; description?: string }
-): CapabilityDefinition<TInput, TOutput> {
-  return new CapabilityDefinition<TInput, TOutput>(config.name, {
+): CapabilityDefinition<TParams, TResult> {
+  return new CapabilityDefinition<TParams, TResult>(config.name, {
     version: config.version,
     description: config.description,
     runtime: { name: "neuron:core:set", version: "latest", registry: "local" },
@@ -444,7 +444,7 @@ export function Capability<TInput extends object = object, TOutput extends objec
 // ---------------------------------------------------------------------------
 
 export function makeConnection<TSource extends object, TTarget extends object>(
-  serviceRef: string | undefined,
+  capabilityRef: string | undefined,
   bindings: ParamBindings<TTarget>,
   conditions: Array<{ expression: string; message: string }> = []
 ): Connection<TSource, TTarget> {
@@ -453,11 +453,11 @@ export function makeConnection<TSource extends object, TTarget extends object>(
   );
   return {
     __kind: "connection",
-    __serviceRef: serviceRef,
+    __capabilityRef: capabilityRef,
     __bindings: entries,
     __conditions: conditions,
     when(condition: Expression<boolean>, message: string) {
-      return makeConnection<TSource, TTarget>(serviceRef, bindings, [
+      return makeConnection<TSource, TTarget>(capabilityRef, bindings, [
         ...conditions,
         { expression: String(condition), message },
       ]);
@@ -469,15 +469,15 @@ export function makeConnection<TSource extends object, TTarget extends object>(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-type BindTarget<TSource extends object, TInput extends object, TOutput extends object> =
-  | CapabilityDefinition<TInput, TOutput>
-  | CapabilityReference<TInput, TOutput>
-  | CompositionNode<TInput, TOutput>
-  | Composition<TOutput>
-  | Connection<TSource, TInput>;
+type BindTarget<TSource extends object, TParams extends object, TResult extends object> =
+  | CapabilityDefinition<TParams, TResult>
+  | CapabilityReference<TParams, TResult>
+  | CompositionNode<TParams, TResult>
+  | Composition<TResult>
+  | Connection<TSource, TParams>;
 
-function toNodes<TInput extends object, TOutput extends object>(
-  value: BindTarget<object, TInput, TOutput>,
+function toNodes<TParams extends object, TResult extends object>(
+  value: BindTarget<object, TParams, TResult>,
   condition?: Condition
 ): CapabilityComposition[] {
   if (value instanceof CompositionNode) {
@@ -493,7 +493,7 @@ function toNodes<TInput extends object, TOutput extends object>(
   if (isConnection(value)) {
     const comp: CapabilityComposition = {
       kind: "capability",
-      capabilityRef: value.__serviceRef ?? "",
+      capabilityRef: value.__capabilityRef ?? "",
       bindings: bindingsFromConnection(value),
       incomingConditions: value.__conditions.map((c) => ({
         expression: c.expression,

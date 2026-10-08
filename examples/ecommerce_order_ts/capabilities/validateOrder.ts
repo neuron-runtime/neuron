@@ -1,5 +1,5 @@
 import { Capability } from "@neuron/sdk";
-import type { ValidateOrderInput, ValidateOrderOutput } from "../types";
+import type { ValidateOrderParams, ValidateOrderResult } from "../types";
 
 export const validateOrder = Capability({
   name: "validate-order",
@@ -7,5 +7,5 @@ export const validateOrder = Capability({
   description: "Validate incoming order request",
 })
   .runtime({ name: "neuron:core:set" })
-  .paramsSchema<ValidateOrderInput>()
-  .resultSchema<ValidateOrderOutput>();
+  .paramsSchema<ValidateOrderParams>()
+  .resultSchema<ValidateOrderResult>();

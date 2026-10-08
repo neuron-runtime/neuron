@@ -257,7 +257,7 @@ githubRead.withParams({
 
 ```ts
 const pipeline = validateOrder
-  .withParams({ order: assemblyInput.order })
+  .withParams({ order: assemblyParams.order })
   .bind(
     authorizePayment.withParams({
       order: validateOrder.result.order,
@@ -308,7 +308,7 @@ When automatic field-by-field binding isn't enough — different field names, a 
 import { connect } from "@neuron/sdk";
 
 // Map a GitHub-read result to an analyzer's expected params shape
-const githubToAnalyzer = connect<GitHubReadOutput, AnalyzeInput>(
+const githubToAnalyzer = connect<GitHubReadResult, AnalyzeParams>(
   (source) => ({
     content: source.result.content,
     path: source.result.path,
@@ -356,7 +356,7 @@ Two capabilities that reference the **same** capability's result run in **parall
 
 ```ts
 const notify = validateResult
-  .withParams({ order: assemblyInput.order })
+  .withParams({ order: assemblyParams.order })
   .bind(sendReceipt.withParams({ email: validateResult.result.customerEmail }))
   .bind(updateCrm.withParams({ customerId: validateResult.result.customerId }));
 ```
