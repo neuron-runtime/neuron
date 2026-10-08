@@ -111,13 +111,14 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 	}
 
 	resolvedConfig, err := node.Configurations.Resolve(ctx, resolver.CapabilityEnvironment{
-		Params: input,
+		// The `params` variable always exposes the canonical snake_case keys,
+		// whether the capability's input reached it through authored camelCase
+		// assembly params or through structured mapping targets. A single
+		// spelling keeps configuration templates and binding expressions
+		// consistent, which is what P0-23 demanded.
+		Params: data.SnakeMap(input),
 		Execution: map[string]any{
 			"id": string(execution.ID), "correlation_id": string(execution.CorrelationID),
-			// `params` is the one name the Assembly's initial parameters have in
-			// every expression dialect. A Capability configuration template and a
-			// Binding expression that both want them must agree on how to spell
-			// it, or an author has to learn two vocabularies for one value.
 			"params": data.SnakeMap(execution.InitialParams()),
 			"blueprint": map[string]any{
 				"id": string(execution.Blueprint.Metadata.ID), "name": execution.Blueprint.Metadata.Name,

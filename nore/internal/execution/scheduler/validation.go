@@ -12,15 +12,15 @@ func validateInput(capability core2.Capability, input map[string]any) error {
 		value, exists := getPath(input, port.Name)
 		if !exists {
 			if port.Required {
-				return fmt.Errorf("required input %q is missing for capability %s", port.Name, capability.Metadata.ID)
+				return fmt.Errorf("required param %q is missing for capability %s", port.Name, capability.Metadata.ID)
 			}
 			continue
 		}
 		if value == nil {
-			return fmt.Errorf("input %q is null for capability %s", port.Name, capability.Metadata.ID)
+			return fmt.Errorf("param %q is null for capability %s", port.Name, capability.Metadata.ID)
 		}
 		if !matchesValueType(value, port.Type) {
-			return fmt.Errorf("input %q for capability %s expected %s but received %T", port.Name, capability.Metadata.ID, port.Type, value)
+			return fmt.Errorf("param %q for capability %s expected %s but received %T", port.Name, capability.Metadata.ID, port.Type, value)
 		}
 	}
 	return nil

@@ -1,33 +1,67 @@
 package manifest
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
-// Canonicalize rewrites binding mapping targets and expressions in place so
-// identifier keys follow the canonical snake_case convention. Only the casing
-// of identifier tokens changes; operators, numbers, quoted string literals and
-// $-prefixed tokens are preserved. TS-authored manifests carry camelCase keys
-// inherited from JavaScript sources; unifying them on disk means every
-// downstream stage treats keys identically regardless of source language.
-func Canonicalize(m *Assembly) *Assembly {
+// Canonicalize rewrites an authored manifest in place so identifier keys
+// follow the canonical snake_case convention and binding mappings carry
+// structured sources instead of legacy mapping-expression strings.
+//
+// Only the casing of identifier tokens changes; operators, numbers, quoted
+// string literals and $-prefixed tokens in validation expressions are
+// preserved. TS-authored manifests carry camelCase keys inherited from
+// JavaScript sources; unifying them on disk means every downstream stage
+// treats keys identically regardless of source language.
+func Canonicalize(m *Assembly) (*Assembly, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
 	for i := range m.Bindings {
 		c := &m.Bindings[i]
 		for j := range c.Mappings {
 			c.Mappings[j].Target = core.CamelToSnake(c.Mappings[j].Target)
-			c.Mappings[j].Expression = canonicalizeExpression(c.Mappings[j].Expression)
+			if err := canonicalizeMappingSource(c, j); err != nil {
+				return nil, err
+			}
 		}
 		for j := range c.Validations {
 			c.Validations[j].Expression = canonicalizeExpression(c.Validations[j].Expression)
 		}
 	}
-	return m
+	return m, nil
+}
+
+// canonicalizeMappingSource replaces a mapping's legacy expression dialect
+// with its canonical structured source. A mapping authored with no expression
+// and no source cannot be resolved and is rejected here.
+func canonicalizeMappingSource(c *Binding, j int) error {
+	mapping := &c.Mappings[j]
+	if mapping.Source == nil {
+		if strings.TrimSpace(mapping.Expression) == "" {
+			return fmt.Errorf("binding %s -> %s: mapping target %q has no source expression", c.From, c.To, mapping.Target)
+		}
+		source, err := core.ParseMappingSource(c.From, mapping.Expression)
+		if err != nil {
+			return fmt.Errorf("binding %s -> %s: mapping target %q: %w", c.From, c.To, mapping.Target, err)
+		}
+		mapping.Source = &source
+	}
+	// Structured sources authored from another surface may still carry
+	// camelCase keys; normalize every segment to the canonical snake_case the
+	// runtime exposes.
+	for k, segment := range mapping.Source.Path {
+		mapping.Source.Path[k] = core.CamelToSnake(segment)
+	}
+	if err := mapping.Source.Validate(); err != nil {
+		return fmt.Errorf("binding %s -> %s: mapping target %q: %w", c.From, c.To, mapping.Target, err)
+	}
+	mapping.Expression = ""
+	return nil
 }
 
 // canonicalizeExpression rewrites camelCase identifier tokens to snake_case.

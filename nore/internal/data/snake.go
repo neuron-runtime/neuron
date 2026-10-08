@@ -1,6 +1,6 @@
 // Package data provides helpers for normalizing runtime payload shapes so
 // N.O.R.E. operates on canonical snake_case keys regardless of the casing
-// authors chose at the source (for example camelCase --input for a
+// authors chose at the source (for example camelCase --params for a
 // TypeScript-authored assembly).
 package data
 

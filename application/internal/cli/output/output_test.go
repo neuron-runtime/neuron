@@ -51,12 +51,12 @@ func TestModelFold(t *testing.T) {
 	if v.Status != StatusRunning {
 		t.Fatalf("status = %v, want running", v.Status)
 	}
-	_ = v.Fold(evt("capability.completed", "hello.say", `{"Output":{"name":"neuron"}}`))
+	_ = v.Fold(evt("capability.completed", "hello.say", `{"Result":{"name":"neuron"}}`))
 	if len(v.Capabilities) != 1 || v.Capabilities[0].State != CapabilityCompleted {
 		t.Fatalf("capability not completed: %+v", v.Capabilities)
 	}
-	if v.Capabilities[0].Output["name"] != "neuron" {
-		t.Fatalf("output not folded: %+v", v.Capabilities[0].Output)
+	if v.Capabilities[0].Result["name"] != "neuron" {
+		t.Fatalf("result not folded: %+v", v.Capabilities[0].Result)
 	}
 	_ = v.Fold(evt("execution.completed", "", ""))
 	if v.Status != StatusCompleted {
@@ -141,7 +141,7 @@ func TestStaticRendererNoANSI(t *testing.T) {
 	ctx := context.Background()
 	_ = r.Handle(ctx, evt("execution.started", "", ""))
 	_ = r.Handle(ctx, evt("capability.started", "hello.say", ""))
-	_ = r.Handle(ctx, evt("capability.completed", "hello.say", `{"Output":{"name":"neuron"}}`))
+	_ = r.Handle(ctx, evt("capability.completed", "hello.say", `{"Result":{"name":"neuron"}}`))
 	_ = r.Handle(ctx, evt("execution.completed", "", ""))
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestJSONRendererEmitsNDJSON(t *testing.T) {
 	}
 	ctx := context.Background()
 	_ = r.Handle(ctx, evt("execution.started", "", ""))
-	_ = r.Handle(ctx, evt("capability.completed", "hello.say", `{"Output":{"name":"neuron"}}`))
+	_ = r.Handle(ctx, evt("capability.completed", "hello.say", `{"Result":{"name":"neuron"}}`))
 	_ = r.Handle(ctx, evt("execution.completed", "", ""))
 	if err := r.Close(); err != nil {
 		t.Fatal(err)

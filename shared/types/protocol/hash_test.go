@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -175,6 +176,130 @@ func TestHashAssemblyIgnoresNilAndEmptyRuntimeConfig(t *testing.T) {
 	}
 	if nilConfig != emptyConfig {
 		t.Fatal("an author who declares no runtimeConfig must hash the same as one declaring an empty group")
+	}
+}
+
+func bindingWithSource(source core.ValueRef) core.Binding {
+	return core.Binding{
+		From: core.Endpoint{CapabilityID: "a"},
+		To:   core.Endpoint{CapabilityID: "b"},
+		Mappings: []core.MappingRule{
+			{TargetPath: "order", Source: &source},
+		},
+	}
+}
+
+func TestHashAssemblyHashesStructuredReferencesDeterministically(t *testing.T) {
+	assembly := core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a"), capability("b")},
+			Bindings: []core.Binding{
+				bindingWithSource(core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"order", "customer_id"}}),
+			},
+		},
+	}
+	first, err := HashAssembly(assembly)
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	// Bindings are sorted by From/To, so declaring them in reverse order must
+	// not change the hash.
+	reversed := assembly
+	reversed.Specification.Bindings = []core.Binding{
+		{From: core.Endpoint{CapabilityID: "a"}, To: core.Endpoint{CapabilityID: "b"}, Mappings: assembly.Specification.Bindings[0].Mappings},
+	}
+	second, err := HashAssembly(reversed)
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	if first != second {
+		t.Fatalf("hash must not depend on binding order with structured refs: %s != %s", first, second)
+	}
+}
+
+func TestHashAssemblyDistinguishesMappingSources(t *testing.T) {
+	variants := map[string]core.ValueRef{
+		"different capability": {Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"order"}},
+		"different path":       {Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"order", "total"}},
+		"different kind":       {Kind: core.ValueRefAssemblyParams, Path: []string{"order"}},
+		"literal":              {Kind: core.ValueRefLiteral, Value: "fixed"},
+	}
+	base, err := HashAssembly(core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a"), capability("b")},
+			Bindings:     []core.Binding{bindingWithSource(variants["different capability"])},
+		},
+	})
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	for name, source := range variants {
+		t.Run(name, func(t *testing.T) {
+			changed, err := HashAssembly(core.Assembly{
+				Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+				Specification: core.AssemblySpec{
+					Capabilities: []core.Capability{capability("a"), capability("b")},
+					Bindings:     []core.Binding{bindingWithSource(source)},
+				},
+			})
+			if err != nil {
+				t.Fatalf("hash assembly: %v", err)
+			}
+			if changed == base && name != "different capability" {
+				t.Fatalf("%s must change the assembly hash", name)
+			}
+		})
+	}
+}
+
+func TestHashAssemblyParsedLegacyMatchesStructured(t *testing.T) {
+	// A mapping loaded from a pre-structure artifact (legacy expression string)
+	// must hash identically to the same mapping authored as a structured ref,
+	// because the parser normalizes the legacy string into the same ValueRef.
+	var legacy core.MappingRule
+	if err := json.Unmarshal([]byte(`{"TargetPath":"order","Expression":"source.result.order.customerId"}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy: %v", err)
+	}
+	parsed, err := legacy.SourceRef("a")
+	if err != nil {
+		t.Fatalf("SourceRef: %v", err)
+	}
+
+	hashLegacy, err := HashAssembly(core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a"), capability("b")},
+			Bindings: []core.Binding{{
+				From: core.Endpoint{CapabilityID: "a"}, To: core.Endpoint{CapabilityID: "b"},
+				Mappings: []core.MappingRule{{TargetPath: "order", Source: &parsed}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+
+	hashStructured, err := HashAssembly(core.Assembly{
+		Metadata: core.Metadata{Name: "assembly", Version: "1.0.0"},
+		Specification: core.AssemblySpec{
+			Capabilities: []core.Capability{capability("a"), capability("b")},
+			Bindings: []core.Binding{{
+				From: core.Endpoint{CapabilityID: "a"}, To: core.Endpoint{CapabilityID: "b"},
+				Mappings: []core.MappingRule{{
+					TargetPath: "order",
+					Source:     &core.ValueRef{Kind: core.ValueRefCapabilityResult, Capability: "a", Path: []string{"order", "customer_id"}},
+				}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("hash assembly: %v", err)
+	}
+	if hashLegacy != hashStructured {
+		t.Fatalf("parsed legacy and structured sources must hash identically: %s != %s", hashLegacy, hashStructured)
 	}
 }
 

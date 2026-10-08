@@ -61,7 +61,7 @@ order-processing-ts@2.0.0#<key>:development
 Now run it. The assembly expects a typed input of `{ order: {...} }`, so pass one explicitly:
 
 ```bash
-neuron run --input '{"order":{"id":"ord_1001","customerId":"cus_42","customerEmail":"ada@acme.io","currency":"USD","total":4250,"items":[{"sku":"SKU-AG-1","name":"Wireless Mouse","qty":1,"priceCents":4250}],"shippingAddress":{"street":"1 Market St","city":"San Francisco","zip":"94105"}}}'
+neuron run --params '{"order":{"id":"ord_1001","customerId":"cus_42","customerEmail":"ada@acme.io","currency":"USD","total":4250,"items":[{"sku":"SKU-AG-1","name":"Wireless Mouse","qty":1,"priceCents":4250}],"shippingAddress":{"street":"1 Market St","city":"San Francisco","zip":"94105"}}}'
 ```
 
 The CLI asks N.O.R.E. to create an instance and execute the assembly, streaming live execution events:
@@ -237,7 +237,7 @@ pnpm build:sdk
 
 cd examples/my-first-system
 neuron build
-neuron run --input '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmail":"grace@acme.io","currency":"EUR","total":2250,"items":[{"sku":"SKU-RG-2","name":"Keyboard","qty":1,"priceCents":2250}],"shippingAddress":{"street":"2 Rue de Paris","city":"Lyon","zip":"69002"}}}'
+neuron run --params '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmail":"grace@acme.io","currency":"EUR","total":2250,"items":[{"sku":"SKU-RG-2","name":"Keyboard","qty":1,"priceCents":2250}],"shippingAddress":{"street":"2 Rue de Paris","city":"Lyon","zip":"69002"}}}'
 ```
 
 Watch the events stream:
@@ -373,7 +373,7 @@ neuron remove example:echo@1.0.0
 Now run:
 
 ```bash
-neuron run --input '{"order":{"id":"ord_3001","customerId":"cus_11","customerEmail":"leo@acme.io","currency":"USD","total":1900,"items":[{"sku":"SKU-WB-3","name":"Webcam","qty":1,"priceCents":1900}],"shippingAddress":{"street":"3 King St","city":"London","zip":"EC2A 4BX"}}}'
+neuron run --params '{"order":{"id":"ord_3001","customerId":"cus_11","customerEmail":"leo@acme.io","currency":"USD","total":1900,"items":[{"sku":"SKU-WB-3","name":"Webcam","qty":1,"priceCents":1900}],"shippingAddress":{"street":"3 King St","city":"London","zip":"EC2A 4BX"}}}'
 ```
 
 The execution launches the installed module **out-of-process**, passes your input through the capability runtime protocol, and streams the events back.

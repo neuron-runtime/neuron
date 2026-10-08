@@ -167,7 +167,7 @@ The YAML example is the zero-tooling surface — no SDK build required. From a r
 ```bash
 cd examples/ecommerce_order
 neuron build
-neuron run --input '{
+neuron run --params '{
   "order": {
     "id": "ord_1001",
     "customerId": "cus_42",
@@ -183,7 +183,7 @@ neuron run --input '{
 A working install streams the assembly's live execution events and finishes in a terminal state (`execution.completed`).
 
 > [!TIP]
-> `neuron run` reads the execution params from `--input`; without it the capabilities have no order to work on. For the TypeScript walkthrough (which needs `pnpm install && pnpm build:sdk`) see [docs/GETTING_STARTED.md](./GETTING_STARTED.md).
+> `neuron run` reads the execution params from `--params`; without it the capabilities have no order to work on. For the TypeScript walkthrough (which needs `pnpm install && pnpm build:sdk`) see [docs/GETTING_STARTED.md](./GETTING_STARTED.md).
 
 ---
 

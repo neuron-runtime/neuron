@@ -335,7 +335,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	if i.Status() != StatusRunning {
 		return nil, fmt.Errorf("instance %s is not running", i.ID)
 	}
-	// Canonical casing is snake_case; normalize camelCase --input (e.g. from
+	// Canonical casing is snake_case; normalize camelCase --params (e.g. from
 	// a TypeScript-authored assembly) once so every expression resolves.
 	input = data.SnakeMap(input)
 

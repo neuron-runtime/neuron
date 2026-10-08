@@ -149,8 +149,6 @@ type CapabilitySpec struct {
 
 	Mappings []MappingDefinition `yaml:"mappings,omitempty"`
 
-	Validation *ValidationConfig `yaml:"validation,omitempty"`
-
 	// Execution is the legacy capability-level execution block.
 	//
 	// Deprecated: declare runtime configuration under
@@ -212,12 +210,6 @@ type MappingDefinition struct {
 
 	// Optional mapping expression.
 	Expression string `yaml:"expression,omitempty"`
-}
-
-// ValidationConfig describes capability validation declarations.
-type ValidationConfig struct {
-	Input  map[string]any `yaml:"input,omitempty"`
-	Output map[string]any `yaml:"output,omitempty"`
 }
 
 // ExecutionConfig is the legacy capability-level execution block.

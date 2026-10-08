@@ -80,10 +80,17 @@ type Binding struct {
 	Validations []BindingValidation `json:"validations"`
 }
 
-// BindingMapping maps a source expression to a target path.
+// BindingMapping maps a value from the source Capability or execution context
+// into a target Capability param path.
+//
+// Source is the canonical structured reference. Authoring surfaces that still
+// emit the legacy mapping-expression dialect populate Expression instead;
+// Canonicalize parses it into Source once, so the persisted canonical manifest
+// only ever carries the structured form.
 type BindingMapping struct {
-	Target     string `json:"target"`
-	Expression string `json:"expression"`
+	Target     string         `json:"target"`
+	Source     *core.ValueRef `json:"source,omitempty"`
+	Expression string         `json:"expression,omitempty"`
 }
 
 // BindingValidation asserts a transition condition.

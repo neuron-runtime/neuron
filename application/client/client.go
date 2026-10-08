@@ -94,7 +94,7 @@ func (c *Client) EnsureInstance(ctx context.Context, key protocol.InstanceKey, a
 // Execute triggers a workflow execution on a specific instance using the provided input data.
 // If mode is "detach", it returns immediately with ExecuteResponse (HTTP 202).
 // Otherwise, it waits for completion and returns ExecutionResult (HTTP 200).
-func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, assembly *core.Assembly, input map[string]any, mode string) (protocol.ExecutionResult, error) {
+func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, assembly *core.Assembly, params map[string]any, mode string) (protocol.ExecutionResult, error) {
 	if instanceKey.AssemblyID == "" {
 		return protocol.ExecutionResult{}, fmt.Errorf("instance AssemblyID is required")
 	}
@@ -105,7 +105,7 @@ func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, 
 	}
 
 	req := protocol.ExecuteRequest{
-		Params: input,
+		Params: params,
 		Mode:   mode,
 	}
 
@@ -137,13 +137,13 @@ func (c *Client) Execute(ctx context.Context, instanceKey protocol.InstanceKey, 
 // ExecuteByKey triggers a workflow execution on the assembly identified by key,
 // without sending the assembly definition. The server lazily creates the instance
 // from the durable registered assembly on the first execution.
-func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.InstanceKey, target string, input map[string]any, mode string) (protocol.ExecutionResult, error) {
+func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.InstanceKey, target string, params map[string]any, mode string) (protocol.ExecutionResult, error) {
 	if key.AssemblyID == "" && target == "" {
 		return protocol.ExecutionResult{}, fmt.Errorf("instance AssemblyID or Name is required")
 	}
 
 	req := protocol.ExecuteRequest{
-		Params: input,
+		Params: params,
 		Mode:   mode,
 	}
 

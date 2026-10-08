@@ -39,10 +39,13 @@ type ExecutionNode struct {
 	Next []ExecutionTransition
 }
 
+// CompiledMapping is a structurally resolved binding mapping: the planner
+// resolves a mapping's authored source into a canonical ValueRef, and the
+// scheduler reads the referenced value out of the transition environment at
+// execution time. Mappings are never evaluated as programs.
 type CompiledMapping struct {
 	TargetPath string
-	Expression string
-	Program    resolver.Program
+	Source     shared.ValueRef
 }
 
 type CompiledValidation struct {

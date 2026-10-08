@@ -77,8 +77,11 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	manifest.Canonicalize(sys)
-	if err := manifest.SaveToProjectRoot(root, sys); err != nil {
+	canonical, err := manifest.Canonicalize(sys)
+	if err != nil {
+		return fmt.Errorf("canonicalize manifest: %w", err)
+	}
+	if err := manifest.SaveToProjectRoot(root, canonical); err != nil {
 		return fmt.Errorf("write canonical manifest: %w", err)
 	}
 
