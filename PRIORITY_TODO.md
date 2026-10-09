@@ -216,19 +216,19 @@ Confirmed by direct experiment, not by reading alone.
 ## 7. Assembly Public API
 
 - [ ] Change the TypeScript Assembly constructor from `Assembly({ name, version, description })` to `Assembly()`.
-- [ ] Remove Assembly `description` from the executable/public Assembly model.
+- [ ] Remove Assembly `description` from the executable/public Assembly model. **(Go half complete in Phase 3 unit 3: `description` is gone from the canonical manifest, the compiled core flow, and the content hash; YAML `metadata.description` no longer flows. The SDK `Assembly()` surface lands with §7.1.)**
 - [x] Keep Assembly `name` and `version` in the canonical manifest, but source them from `neuron.config.*`. **Implemented/verified.** ApplyIdentity injects config identity for every language; YAML authored metadata is now optional (P2-6), so config is the true source.
-- [ ] Update the project/compiler boundary so project configuration supplies Assembly metadata before canonicalization/hashing.
+- [x] Update the project/compiler boundary so project configuration supplies Assembly metadata before canonicalization/hashing. **Implemented/verified.** `application/build.Build` injects config identity through `manifest.ApplyIdentity` before `Canonicalize` and before the compiler hashes the assembly, for every authoring language.
 - [x] Keep Assembly version in the canonical artifact because it currently participates in Assembly identity and hashing. **Implemented/verified.** version stays in core.Metadata and the normalized hash; description was removed from the model and the hash (see appended §17 migration item).
 - [ ] Ensure Assembly metadata is not duplicated between project configuration and authored TypeScript.
 - [ ] Keep the existing `Assembly.paramsSchema(...)` API.
-- [ ] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK.
+- [ ] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK. **(Go half complete: `manifest.Assembly.Params` and the compiled core carry the contract. The SDK must emit `params` instead of dropping `_paramPorts`.)**
 - [ ] Add `Assembly.resultSchema<T>()`.
 - [ ] Add `Assembly.result({...})` for defining the public Assembly result mapping.
 - [ ] Allow Assembly `.result({...})` to reference results from multiple different Capabilities.
 - [ ] Preserve the declared Assembly result field names exactly in the result contract.
-- [ ] Validate every Assembly result mapping against the Assembly result schema.
-- [ ] Validate every referenced Capability result field at compile time in TypeScript and again during canonical compilation.
+- [ ] Validate every Assembly result mapping against the Assembly result schema. **(Go half complete: the compiler rejects a result field the schema does not declare. The SDK must validate at authoring time too.)**
+- [ ] Validate every referenced Capability result field at compile time in TypeScript and again during canonical compilation. **(Go half complete: the compiler rejects capability-scoped sources naming an unknown capability or undeclared port. The TypeScript SDK half lands with §7.9.)**
 - [x] Ensure Assembly result mapping is represented structurally in the canonical manifest, not as arbitrary expression strings. **Implemented (canonical half).** manifest.AssemblyResult/AssemblyResultField carry core.ValueRef sources; SDK emission lands with §7.9.
 - [x] Update Assembly hashing so params/result contracts and result mappings are part of the build identity. **Implemented.** normalizeAssembly includes assembly params and the result contract (schema + structured field sources); compiler copies them into core before HashAssembly; N.O.R.E. recomputes identically at registration.
 
