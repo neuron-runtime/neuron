@@ -193,6 +193,121 @@ describe("Assembly", () => {
   });
 });
 
+describe("Assembly result contract", () => {
+  it("emits assembly params and a structured result contract", () => {
+    const exec = createExecutionContext<{ order: { id: string } }>();
+    const validate = Capability("validate")
+      .paramsSchema({ order: record().required() })
+      .resultSchema({ orderId: string(), valid: boolean() });
+    const ship = Capability("ship")
+      .paramsSchema({ orderId: string().required() })
+      .resultSchema({ tracking: string(), carrier: string() });
+
+    const sys = Assembly()
+      .paramsSchema({ order: record().required() })
+      .resultSchema({ passed: boolean(), shipment: string(), carrier: string() })
+      .withParams((data) =>
+        validate
+          .withParams({ order: data.order })
+          .bind(ship.withParams({ orderId: validate.result.orderId }))
+      )
+      .result({
+        passed: validate.result.valid,
+        shipment: exec.params.order.id,
+        carrier: ship.result.carrier,
+      });
+
+    const manifest = sys.toManifest();
+    expect(manifest.params?.map((p) => p.name)).toEqual(["order"]);
+    expect(manifest.result?.schema.map((p) => p.name)).toEqual(["passed", "shipment", "carrier"]);
+    expect(manifest.result?.fields).toEqual([
+      { name: "passed", source: { kind: "capabilityResult", capability: "validate", path: ["valid"] } },
+      { name: "shipment", source: { kind: "assemblyParams", path: ["order", "id"] } },
+      { name: "carrier", source: { kind: "capabilityResult", capability: "ship", path: ["carrier"] } },
+    ]);
+  });
+
+  it("preserves declared result field order and names verbatim", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean(), orderId: string() });
+    const sys = Assembly()
+      .resultSchema({ first: boolean(), second: string() })
+      .run(validate.withParams({}))
+      .result({
+        second: validate.result.orderId,
+        first: validate.result.valid,
+      });
+
+    expect(sys.toManifest().result!.fields.map((f) => f.name)).toEqual(["second", "first"]);
+  });
+
+  it("accepts literal result sources", () => {
+    const a = Capability("a").resultSchema({ out: string() });
+    const sys = Assembly()
+      .resultSchema({ out: string(), fee: string() })
+      .run(a.withParams({}))
+      .result({ out: a.result.out, fee: "flat" });
+
+    expect(sys.toManifest().result!.fields[1]).toEqual({
+      name: "fee",
+      source: { kind: "literal", value: "flat" },
+    });
+  });
+
+  it("rejects a result field the result schema does not declare", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const sys = Assembly()
+      .resultSchema({ declared: boolean() })
+      .run(validate.withParams({}))
+      .result({ undeclared: validate.result.valid });
+
+    expect(() => sys.toManifest()).toThrow(
+      'the assembly result schema declares no field named "undeclared"'
+    );
+  });
+
+  it("rejects unqualified source.* references in the result contract", () => {
+    const source = createSourceContext<{ email: string }>();
+    const exec = createExecutionContext<{ order: { id: string } }>();
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+
+    const sys = Assembly().resultSchema({ email: string() }).run(validate.withParams({}));
+    expect(() => sys.result({ email: source.result.email })).toThrow(/source\.\*/);
+    expect(() => sys.result({ id: exec.params.order.id })).not.toThrow();
+  });
+
+  it("detects a capability referenced by the result contract but missing from the run", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const external = Capability("external").resultSchema({ out: string() });
+
+    const sys = Assembly()
+      .resultSchema({ valid: boolean(), out: string() })
+      .run(validate.withParams({}))
+      .result({ valid: validate.result.valid, out: external.result.out });
+
+    expect(() => sys.toManifest()).toThrow(/Capability "external" is referenced/);
+  });
+
+  it("rejects a result source naming an undeclared capability port", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const sys = Assembly()
+      .resultSchema({ valid: boolean() })
+      .run(validate.withParams({}))
+      .result({ valid: (validate.result as any).total });
+
+    expect(() => sys.toManifest()).toThrow(
+      /capability "validate" declares no result port matching "total"/
+    );
+  });
+
+  it("omits params and result when none are declared", () => {
+    const a = Capability("a");
+    const sys = Assembly().run(a.withParams({}));
+    const manifest = sys.toManifest();
+    expect("params" in manifest).toBe(false);
+    expect("result" in manifest).toBe(false);
+  });
+});
+
 describe("Assembly with full ecommerce pipeline", () => {
   it("produces the correct manifest for the order-processing pipeline", () => {
     const exec = createExecutionContext<{

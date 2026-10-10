@@ -45,6 +45,8 @@ export type {
 
 export type {
   AssemblyManifest,
+  AssemblyResultManifest,
+  AssemblyResultFieldManifest,
   CapabilityManifest,
   CapabilityRuntimeManifest,
   BindingManifest,

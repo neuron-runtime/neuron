@@ -105,6 +105,33 @@ Assembly()
             path: data.path,
         })
     );
+
+// ---------------------------------------------------------------------------
+// Assembly result contract
+// ---------------------------------------------------------------------------
+
+interface AssemblyResult {
+    summary: string;
+    sha: string;
+}
+
+Assembly()
+    .paramsSchema<GitHubReadParams>()
+    .resultSchema<AssemblyResult>()
+    .withParams((data) =>
+        githubRead.withParams({
+            owner: data.owner,
+            repository: data.repository,
+            path: data.path,
+        })
+    )
+    .result({
+        summary: analyzeContent.result.summary,
+        sha: githubRead.result.sha,
+    });
+
+// The type-only resultSchema form and the schema form both accept `.result()`.
+Assembly().resultSchema({ summary: string(), sha: string() });
 // ---------------------------------------------------------------------------
 // Runtime declaration and runtime configuration
 // ---------------------------------------------------------------------------

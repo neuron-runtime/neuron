@@ -6,6 +6,32 @@ export interface AssemblyManifest {
   variables?: Record<string, unknown>;
   capabilities: CapabilityManifest[];
   bindings: BindingManifest[];
+
+  // Params declare the Assembly's public invocation contract. They are the
+  // source-language-neutral shape of the TypeScript paramsSchema. Omitted
+  // entirely when no schema was declared.
+  params?: PortManifest[];
+
+  // Result declares the Assembly's public result contract: the schema a caller
+  // reads after a synchronous execution, and the structured mapping that
+  // produces each declared field. Omitted entirely when no result was declared.
+  result?: AssemblyResultManifest;
+}
+
+/**
+ * AssemblyResultManifest is the public result contract of an Assembly
+ * execution. Field order is the author's declared contract and is preserved
+ * verbatim; each field resolves from a structured source at execution time,
+ * never from an arbitrary expression string.
+ */
+export interface AssemblyResultManifest {
+  schema: PortManifest[];
+  fields: AssemblyResultFieldManifest[];
+}
+
+export interface AssemblyResultFieldManifest {
+  name: string;
+  source: ValueRefManifest;
 }
 
 export interface CapabilityManifest {

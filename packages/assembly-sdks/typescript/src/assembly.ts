@@ -1,14 +1,17 @@
 import type {
   BindingManifest,
   AssemblyManifest,
+  AssemblyResultFieldManifest,
   ValueRefManifest,
+  PortManifest,
 } from "./manifest.js";
-import { createExecutionContext, type Expressionify } from "./expression.js";
+import { createExecutionContext, toValueRef, type Expressionify } from "./expression.js";
 import {
   Composition,
   CompositionNode,
   CapabilityDefinition,
   type CapabilityComposition,
+  type ParamValue,
 } from "./capability.js";
 import { schemaToManifest, type InferSchema, type SchemaObject } from "./schema.js";
 
@@ -24,7 +27,9 @@ export type Runnable<TParams extends object = object> =
 
 export class AssemblyDefinition<TParams extends object = object> {
   private _nodes: CapabilityComposition[] = [];
-  private _paramPorts: ReturnType<typeof schemaToManifest>["ports"] = [];
+  private _paramPorts: PortManifest[] = [];
+  private _resultPorts: PortManifest[] = [];
+  private _resultFields: AssemblyResultFieldManifest[] = [];
 
   paramsSchema<T extends object>(): AssemblyDefinition<T>;
   paramsSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<InferSchema<S>>;
@@ -36,7 +41,42 @@ export class AssemblyDefinition<TParams extends object = object> {
     } else {
       next._paramPorts = [...this._paramPorts];
     }
+    next._resultPorts = [...this._resultPorts];
+    next._resultFields = [...this._resultFields];
     return next;
+  }
+
+  /**
+   * Declares the Assembly's public result schema. The type-only form carries
+   * no runtime rules and is for authoring ergonomics; the schema form records
+   * the typed result ports that every `.result({...})` field must be declared
+   * against.
+   */
+  resultSchema<T extends object = object>(): AssemblyDefinition<TParams>;
+  resultSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<TParams>;
+  resultSchema(schema?: SchemaObject): AssemblyDefinition<TParams> {
+    const next = new AssemblyDefinition<TParams>();
+    next._nodes = [...this._nodes];
+    next._paramPorts = [...this._paramPorts];
+    next._resultPorts = schema ? schemaToManifest(schema).ports : [...this._resultPorts];
+    next._resultFields = [...this._resultFields];
+    return next;
+  }
+
+  /**
+   * Declares the Assembly's public result contract: one structured source per
+   * declared field. Field order is the author's contract and is preserved
+   * verbatim. Each value is the same structured reference surface as
+   * `.withParams()`: a capability `.result`/`.params` field, an assembly
+   * `.params` field, or a literal.
+   */
+  result(fields: Record<string, ParamValue<unknown>>): this {
+    for (const [name, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+      const source = toResultSource(name, value);
+      this._resultFields.push({ name, source });
+    }
+    return this;
   }
 
   get params(): Expressionify<TParams> {
@@ -60,7 +100,7 @@ export class AssemblyDefinition<TParams extends object = object> {
     const capabilityDefs = new Map<string, CapabilityDefinition<object, object>>();
     collectCapabilityDefs(this._nodes, capabilityDefs);
 
-    collectMissingRefs(this._nodes, capabilityDefs);
+    collectMissingRefs(this._nodes, capabilityDefs, this._resultFields);
 
     const capabilities: AssemblyManifest["capabilities"] = [];
     for (const [ref, def] of capabilityDefs) {
@@ -69,12 +109,74 @@ export class AssemblyDefinition<TParams extends object = object> {
 
     const bindings = collectBindings(this._nodes, capabilityDefs);
 
-    return {
+    const manifest: AssemblyManifest = {
       apiVersion: "neuron/v1",
       kind: "Assembly",
       capabilities,
       bindings,
     };
+
+    if (this._paramPorts.length > 0) {
+      manifest.params = this._paramPorts.map((p) => ({ ...p }));
+    }
+
+    if (this._resultFields.length > 0) {
+      this.validateResultFields(capabilityDefs);
+      manifest.result = {
+        schema: this._resultPorts.map((p) => ({ ...p })),
+        fields: this._resultFields.map((f) => ({
+          name: f.name,
+          source: cloneSource(f.source),
+        })),
+      };
+    }
+
+    return manifest;
+  }
+
+  /**
+   * Validates every declared result mapping against the result schema and the
+   * referenced capability ports, mirroring the canonical compiler's checks:
+   * the field name must be declared by the schema, a capability-scoped source
+   * must name an existing capability with a matching declared port, and the
+   * source must otherwise be structurally valid. Field names are the public
+   * contract and are matched exactly.
+   */
+  private validateResultFields(capabilityDefs: Map<string, CapabilityDefinition<object, object>>): void {
+    const schemaNames = new Set(this._resultPorts.map((p) => p.name));
+    for (const field of this._resultFields) {
+      const prefix = `assembly result field "${field.name}"`;
+      if (!schemaNames.has(field.name)) {
+        throw new Error(`${prefix}: the assembly result schema declares no field named "${field.name}"`);
+      }
+      const source = field.source;
+      if (source.kind === "capabilityResult" || source.kind === "capabilityParams") {
+        const capability = source.capability;
+        if (!capability) {
+          throw new Error(`${prefix}: ${source.kind} reference has no capability identity`);
+        }
+        const def = capabilityDefs.get(capability);
+        if (!def) {
+          throw new Error(`${prefix}: references unknown capability "${capability}"`);
+        }
+        if (!source.path || source.path.length === 0) {
+          throw new Error(
+            `${prefix}: ${source.kind} reference to capability "${capability}" has an empty path; it must name one declared port`
+          );
+        }
+        const ports = source.kind === "capabilityResult" ? def.toManifest().results : def.toManifest().params;
+        const root = camelToSnake(source.path[0]!);
+        if (!ports.some((p) => camelToSnake(p.name) === root)) {
+          throw new Error(
+            `${prefix}: capability "${capability}" declares no ${
+              source.kind === "capabilityResult" ? "result" : "param"
+            } port matching "${source.path[0]}" (snake_case: "${root}")`
+          );
+        }
+      } else if (source.kind !== "assemblyParams" && source.kind !== "literal") {
+        throw new Error(`${prefix}: source kind "${source.kind}" is not supported for assembly result fields`);
+      }
+    }
   }
 }
 
@@ -157,7 +259,8 @@ function collectCapabilityDefs(
 
 function collectMissingRefs(
   nodes: CapabilityComposition[],
-  capabilityDefs: Map<string, CapabilityDefinition<object, object>>
+  capabilityDefs: Map<string, CapabilityDefinition<object, object>>,
+  resultFields: AssemblyResultFieldManifest[] = []
 ): void {
   const referenced = new Set<string>();
   for (const node of nodes) {
@@ -167,11 +270,14 @@ function collectMissingRefs(
     if (node.anchor) referenced.add(node.anchor);
     referenced.add(node.capabilityRef);
   }
+  for (const field of resultFields) {
+    if (field.source.capability) referenced.add(field.source.capability);
+  }
   for (const ref of referenced) {
     if (!capabilityDefs.has(ref)) {
       throw new Error(
         `Capability "${ref}" is referenced in the assembly definition but not defined. ` +
-        `Ensure the capability was created with Capability("${ref}") and used via .withParams(), .connect(), or .bind().`
+        `Ensure the capability was created with Capability("${ref}") and used via .withParams(), .connect(), .bind(), or .result().`
       );
     }
   }
@@ -283,4 +389,77 @@ interface CapabilityTarget {
   capabilityRef: string;
   bindings: Record<string, ValueRefManifest>;
   incomingConditions: Array<{ expression: string; message?: string }>;
+}
+
+/**
+ * toResultSource converts a declared result-field value into its structured
+ * source. A capability-scoped reference must be written as a named
+ * capability `.result`/`.params` reference — unlike bindings there is no
+ * source capability to qualify an unqualified `source.*` reference against.
+ */
+function toResultSource(name: string, value: unknown): ValueRefManifest {
+  const source = toValueRef(value);
+  if (
+    (source.kind === "capabilityResult" || source.kind === "capabilityParams") &&
+    !source.capability
+  ) {
+    throw new Error(
+      `assembly result field "${name}" references source.* but no capability is known; ` +
+      `reference a capability's .result or .params directly`
+    );
+  }
+  return cloneSource(source);
+}
+
+function cloneSource(source: ValueRefManifest): ValueRefManifest {
+  return {
+    ...source,
+    path: source.path ? [...source.path] : undefined,
+  };
+}
+
+/**
+ * camelToSnake ports the canonical snake_case convention (shared/types/core
+ * `CamelToSnake`) so the SDK validates result-field sources against the exact
+ * matching the canonical compiler applies: port names may be authored in any
+ * casing and both sides resolve on the snake_cased form.
+ */
+function camelToSnake(value: string): string {
+  const runes = Array.from(value);
+  const out: string[] = [];
+  for (let i = 0; i < runes.length; i++) {
+    const r = runes[i]!;
+    if (r === "_" || isDigit(r)) {
+      out.push(r);
+      continue;
+    }
+    if (isUpper(r)) {
+      if (i > 0) {
+        const prev = runes[i - 1]!;
+        const boundary = isLowerOrDigit(prev) ||
+          (isUpper(prev) && i + 1 < runes.length && isLower(runes[i + 1]!));
+        if (boundary) out.push("_");
+      }
+      out.push(r.toLowerCase());
+      continue;
+    }
+    out.push(r);
+  }
+  return out.join("");
+}
+
+function isLower(r: string): boolean {
+  return r !== r.toUpperCase() && r === r.toLowerCase();
+}
+
+function isUpper(r: string): boolean {
+  return r === r.toUpperCase() && r !== r.toLowerCase();
+}
+
+function isDigit(r: string): boolean {
+  return r >= "0" && r <= "9";
+}
+
+function isLowerOrDigit(r: string): boolean {
+  return isLower(r) || isDigit(r);
 }
