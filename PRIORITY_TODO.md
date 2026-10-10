@@ -221,15 +221,15 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Update the project/compiler boundary so project configuration supplies Assembly metadata before canonicalization/hashing. **Implemented/verified.** `application/build.Build` injects config identity through `manifest.ApplyIdentity` before `Canonicalize` and before the compiler hashes the assembly, for every authoring language.
 - [x] Keep Assembly version in the canonical artifact because it currently participates in Assembly identity and hashing. **Implemented/verified.** version stays in core.Metadata and the normalized hash; description was removed from the model and the hash (see appended §17 migration item).
 - [x] Ensure Assembly metadata is not duplicated between project configuration and authored TypeScript. **Implemented/verified.** The SDK no longer authors any identity; `neuron.config.*` is the single source and `neuron build` injects it at the shared seam.
-- [ ] Keep the existing `Assembly.paramsSchema(...)` API.
-- [ ] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK. **(Go half complete: `manifest.Assembly.Params` and the compiled core carry the contract. The SDK must emit `params` instead of dropping `_paramPorts`.)**
-- [ ] Add `Assembly.resultSchema<T>()`.
-- [ ] Add `Assembly.result({...})` for defining the public Assembly result mapping.
-- [ ] Allow Assembly `.result({...})` to reference results from multiple different Capabilities.
-- [ ] Preserve the declared Assembly result field names exactly in the result contract.
-- [ ] Validate every Assembly result mapping against the Assembly result schema. **(Go half complete: the compiler rejects a result field the schema does not declare. The SDK must validate at authoring time too.)**
-- [ ] Validate every referenced Capability result field at compile time in TypeScript and again during canonical compilation. **(Go half complete: the compiler rejects capability-scoped sources naming an unknown capability or undeclared port. The TypeScript SDK half lands with §7.9.)**
-- [x] Ensure Assembly result mapping is represented structurally in the canonical manifest, not as arbitrary expression strings. **Implemented (canonical half).** manifest.AssemblyResult/AssemblyResultField carry core.ValueRef sources; SDK emission lands with §7.9.
+- [x] Keep the existing `Assembly.paramsSchema(...)` API. **Implemented/verified.** Unchanged builder with typed + schema overloads; retained and re-verified.
+- [x] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK. **Implemented.** `manifest.Assembly.Params` and the compiled core carry the contract, and the SDK now emits `params` (when non-empty) from `_paramPorts` instead of dropping it.
+- [x] Add `Assembly.resultSchema<T>()`. **Implemented/verified.** Type-only and schema-based overloads; `.result()` fields are validated against the declared schema ports.
+- [x] Add `Assembly.result({...})` for defining the public Assembly result mapping. **Implemented/verified.** Accepts capability `.result`/`.params` references, assembly params, and literals; rejects unqualified `source.*` references.
+- [x] Allow Assembly `.result({...})` to reference results from multiple different Capabilities. **Implemented/verified.** Each field carries its own structured capability-scoped source; unit-tested with two capabilities contributing to one result contract.
+- [x] Preserve the declared Assembly result field names exactly in the result contract. **Implemented/verified.** Field order and names are emitted verbatim and pinned by test.
+- [x] Validate every Assembly result mapping against the Assembly result schema. **Implemented.** The compiler rejects a result field the schema does not declare, and the SDK now validates at authoring time too (`validateResultFields` mirrors the compiler: schema-declared field names, existing capability, declared capability port, path non-empty).
+- [x] Validate every referenced Capability result field at compile time in TypeScript and again during canonical compilation. **Implemented.** SDK validation mirrors the canonical compiler (snake_case port matching via the ported `camelToSnake`); missing capability references are caught by the extended `collectMissingRefs`.
+- [x] Ensure Assembly result mapping is represented structurally in the canonical manifest, not as arbitrary expression strings. **Implemented.** `manifest.AssemblyResult`/`AssemblyResultField` carry `core.ValueRef` sources and the SDK emits structured `{name, source}` fields; no string result references exist anywhere.
 - [x] Update Assembly hashing so params/result contracts and result mappings are part of the build identity. **Implemented.** normalizeAssembly includes assembly params and the result contract (schema + structured field sources); compiler copies them into core before HashAssembly; N.O.R.E. recomputes identically at registration.
 
 ## 8. Capability Public API
@@ -246,14 +246,14 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 9. Structured Expressions and Compilation Protocol
 
-- [ ] Remove the use of arbitrary string expressions as the canonical representation of Capability references. **(re-homed: closes across Phase 3 + Phase 11)** — the serialized canonical form is already structured (Phase 1 clears `Expression` on `Canonicalize` and the compiler/planner require `Source`); what remains is (a) the TypeScript SDK emitting structured references (Phase 3) and (b) deleting the legacy channel — `BindingMapping.Expression`, `MappingRule.legacyExpression`, and every `ParseMappingSource` call site — which requires the §17 migration first (Phase 11). Acceptance proven by §18.
+- [ ] Remove the use of arbitrary string expressions as the canonical representation of Capability references. **(re-homed: closes across Phase 3 + Phase 11)** — the serialized canonical form is already structured (Phase 1 clears `Expression` on `Canonicalize` and the compiler/planner require `Source`); the TypeScript SDK now emits structured references directly (closed in §9.256); what remains is (b) deleting the legacy channel — `BindingMapping.Expression`, `MappingRule.legacyExpression`, and every `ParseMappingSource` call site — which requires the §17 migration first (Phase 11). Acceptance proven by §18.
 - [x] Replace values such as `"process-order.result.order.id"` with a structured reference object.
 - [x] Define one canonical structured reference type for params/result references across TypeScript SDK, manifest, compiler, protocol, and N.O.R.E.
 - [x] Represent at minimum the referenced Capability identity and the result field/path separately.
 - [x] Ensure nested result paths are represented as structured path segments rather than embedded in strings.
 - [ ] Keep expression operators/conditions structured rather than encoding them as opaque strings wherever the protocol can support it. **(re-homed: Phase 3)** — mapping sources can no longer carry operators at all (Phase 1 rejects them in `ParseMappingSource`); validations/conditions stay CEL strings permanently per the locked P1-1 decision. The remaining surface is the not-yet-existing Assembly result mapping (§7 requires it structural, §16 forbids new string-based result references).
 - [x] Define a source/reference union that can distinguish Assembly params, Capability results, project variables, literals, and supported expressions.
-- [ ] Make the TypeScript SDK emit structured references directly. **(re-homed: Phase 3, alongside §7/§8/§16 TS half)** — the SDK still emits `{target, expression: string}` (`packages/assembly-sdks/typescript/src/manifest.ts`, `expression.ts` builds CEL strings by concatenation); P1-1 names Phase 3 as the owner of this work.
+- [x] Make the TypeScript SDK emit structured references directly. **Implemented.** The SDK emits `{target, source}` with the canonical ValueRef shape (`kind`/`capability`/`path`/`value`); expression proxies track semantic segments + referenced capability, generic `source.*` references are qualified with the binding's source capability at emission time, and expression operators are rejected as mapping values. `pnpm test/typecheck/build` green.
 - [x] Make the compiler consume structured references directly.
 - [x] Make the canonical manifest serialize those references as objects.
 - [x] Update hashing/normalization to hash structured references deterministically.
@@ -357,11 +357,11 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Replace public `input` terminology with `params` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation. **Implemented.** Go/CLI/HTTP halves landed in Phase 1 (P1-3/4/5/7); the TypeScript SDK, examples, and user documentation halves landed in Phase 3 (commit `refactor(sdk): use params and result terminology...` + the docs sweep). The YAML authoring key `direction: input|output` remains deferred per P1-6.
 - [x] Replace public `output` terminology with `result` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation. **Implemented.** Same distribution as §16.1; the capability/assembly public types, method names, and manifest keys now read `params`/`result`.
 - [x] Use `params` for Capability invocation data. **Implemented/verified.** SDK `TParams`/`paramPorts`/`paramRules`, Go `Params` ports, and runtime payloads all use `params`.
-- [x] Use `result` for Capability and Assembly returned data. **Implemented/verified.** SDK `TResult`/`resultPorts`/`result`, Go `Results`, and runtime `Result` payloads all use `result`; the Assembly result mapping is structural (lands with §7.9 emission).
-- [ ] Use `Assembly.paramsSchema()` and `Assembly.resultSchema()`. **SDK half pending:** `paramsSchema` is retained and re-verified; `Assembly.resultSchema()` lands with §7.9 (Assembly result contract + emission).
+- [x] Use `result` for Capability and Assembly returned data. **Implemented/verified.** SDK `TResult`/`resultPorts`/`result`, Go `Results`, and runtime `Result` payloads all use `result`; the Assembly result mapping is structural and emitted by the SDK (commits landing §7.9).
+- [x] Use `Assembly.paramsSchema()` and `Assembly.resultSchema()`. **Implemented/verified.** `paramsSchema` retained and re-verified; `Assembly.resultSchema()` lands with §7.9 (Assembly result contract + emission).
 - [x] Use `Capability.paramsSchema()` and `Capability.resultSchema()`. **Implemented/verified.** Both long-standing capability methods keep their semantics (§8.243).
 - [x] Rename TypeScript generic concepts toward `TParams` and `TResult`. **Implemented/verified.** SDK generics, example types, and docs use `TParams`/`TResult`; example `*Input`/`*Output` types became `*Params`/`*Result`.
-- [ ] Remove new APIs that introduce arbitrary string-based result references.
+- [x] Remove new APIs that introduce arbitrary string-based result references. **Implemented.** The SDK emits only structured values (`{kind, capability, path, value}`) for bindings and the Assembly result mapping — never `source.result.*` strings; no new string-based result reference API was added.
 
 ### Findings during Phase 1 implementation
 
