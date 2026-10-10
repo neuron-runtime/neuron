@@ -12,9 +12,7 @@ export type HttpResultType<T = unknown> = {
     body?: T;
 }
 
-export const http = Capability({
-    name: "neuron:core:http"
-}).paramsSchema<HttpParamsType>()
+export const http = Capability("neuron:core:http").paramsSchema<HttpParamsType>()
 .resultSchema<HttpResultType>()
 .runtime({
     name: 'neuron:core:http',

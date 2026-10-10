@@ -84,7 +84,7 @@ Look at what you just ran:
 
 ```text
 examples/ecommerce_order_ts/
-├── assembly.ts        the Assembly: identity + input schema + composition
+├── assembly.ts        the Assembly: params schema + composition (no identity)
 ├── pipeline.ts        the composition: how capabilities chain and guard
 ├── capabilities/      each Capability: identity, capability runtime, contracts
 └── types.ts           the shared domain types (Order, OrderItem, ...)
@@ -132,7 +132,7 @@ capabilityRuntimes:
 ```
 
 > [!IMPORTANT]
-> `name` and `version` are the Assembly identity and are **required for `neuron build`** — the build fails with a clear error if either is missing, and it fails if either disagrees with the `Assembly({ name, version, ... })` metadata in the entry file. Scaffolded values come from the directory name and `1.0.0`; keep the config in sync when you rename or re-version the assembly.
+> `name` and `version` are the Assembly identity and are **required for `neuron build`**. They live in `neuron.config.*` and nowhere else: the authored Assembly (TypeScript or YAML) never repeats them, and `neuron build` injects the configured identity into the canonical manifest at the shared build seam. Scaffolded values come from the directory name and `1.0.0`; edit the config to rename or re-version the assembly.
 
 ### The scaffolded layout
 
@@ -179,20 +179,12 @@ export interface Order {
 import { Capability, Assembly } from "@neuron/sdk";
 import type { Order } from "./types";
 
-const validateOrder = Capability({
-  name: "order.validate",
-  version: "1.0.0",
-  description: "Validate an incoming order",
-})
+const validateOrder = Capability("order.validate")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
 
-const authorizePayment = Capability({
-  name: "payment.authorize",
-  version: "1.0.0",
-  description: "Authorize payment for an order",
-})
+const authorizePayment = Capability("payment.authorize")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order; amount: number }>()
   .resultSchema<{ order: Order; amount: number }>();
@@ -203,11 +195,8 @@ const authorizePayment = Capability({
 `Assembly` defines the pipeline: bind the assembly's execution input to the first capability with `.withParams(data => ...)`, chain capabilities with `.bind()`, and map each capability's results into the next capability's params with `.withParams({ ... })`:
 
 ```ts
-const manifest = Assembly({
-  name: "order-processing",
-  version: "1.0.0",
-  description: "Validate and authorize customer orders",
-})
+// The Assembly authors no identity: neuron.config.json owns the name/version.
+const manifest = Assembly()
   .paramsSchema<{ order: Order }>()
   .withParams((data) =>
     validateOrder
@@ -224,12 +213,12 @@ const manifest = Assembly({
 export default manifest;
 ```
 
-Point the project configuration at the entry file (it must default-export the manifest), and make its `name` / `version` agree with the `Assembly({ name, version })` metadata above — `neuron build` fails with a clear error if they diverge. Edit the scaffolded file; do not add a second `neuron.config.*` file:
+Point the project configuration at the entry file (it must default-export the manifest); the config **is** the Assembly identity — the authored entry repeats none of it. Edit the scaffolded file; do not add a second `neuron.config.*` file:
 
 ```yaml
 # neuron.config.json (scaffolded file, rendered as YAML for readability)
-name: order-processing   # must match Assembly({ name: "order-processing", ... })
-version: "1.0.0"         # must match Assembly({ version: "1.0.0" })
+name: order-processing   # the Assembly name — config is the single source
+version: "1.0.0"         # the Assembly version — config is the single source
 lang: typescript
 entry: assembly.ts
 runtime:
@@ -329,11 +318,7 @@ Add an echo capability to your assembly and chain it at the end:
 
 ```ts
 // assembly.ts
-const echo = Capability({
-  name: "echo",
-  version: "1.0.0",
-  description: "Echo a message through the reference module",
-})
+const echo = Capability("echo")
   .runtime({ name: "example:echo", version: "^1.0.0", registry: "local" })
   .paramsSchema<{ message: string }>();
 ```

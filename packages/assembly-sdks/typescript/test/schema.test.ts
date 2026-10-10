@@ -74,7 +74,7 @@ describe("Infer type utility", () => {
 
 describe("typed capability with schema", () => {
   it("carries the schema in the manifest via toManifest", () => {
-    const svc = Capability({ name: "user.create" }).paramsSchema({
+    const svc = Capability("user.create").paramsSchema({
       email: string().email().required(),
     });
 

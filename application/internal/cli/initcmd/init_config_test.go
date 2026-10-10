@@ -70,21 +70,25 @@ func assertScaffoldIdentity(t *testing.T, root, name string) {
 	}
 }
 
-// assertAuthoredIdentity checks that the authored Assembly source repeats the
-// configuration's identity. The TypeScript SDK surface still takes
-// name/version, so `neuron build` fails on any divergence.
-func assertAuthoredIdentity(t *testing.T, root, assemblyFile, name string) {
+// assertTypeScriptAuthorsNoIdentity checks that the scaffolded TypeScript
+// assembly authors no Assembly identity at all: neuron.config.* owns
+// name/version, so a scaffold that repeats them would recreate the duplication
+// the shared build seam exists to remove.
+func assertTypeScriptAuthorsNoIdentity(t *testing.T, root, assemblyFile string) {
 	t.Helper()
 
 	source, err := os.ReadFile(filepath.Join(root, assemblyFile))
 	if err != nil {
 		t.Fatalf("read %s: %v", assemblyFile, err)
 	}
-	if !strings.Contains(string(source), name) {
-		t.Errorf("%s must declare the scaffold name %q:\n%s", assemblyFile, name, source)
+	if !strings.Contains(string(source), "Assembly()") {
+		t.Errorf("%s must use the zero-argument Assembly() constructor:\n%s", assemblyFile, source)
 	}
-	if !strings.Contains(string(source), scaffoldAssemblyVersion) {
-		t.Errorf("%s must declare version %q:\n%s", assemblyFile, scaffoldAssemblyVersion, source)
+	if strings.Contains(string(source), "Assembly({") {
+		t.Errorf("%s must not author Assembly identity:\n%s", assemblyFile, source)
+	}
+	if strings.Contains(string(source), scaffoldAssemblyVersion) {
+		t.Errorf("%s must not author version %q; neuron.config.* is the only source:\n%s", assemblyFile, scaffoldAssemblyVersion, source)
 	}
 }
 
@@ -131,7 +135,7 @@ func TestScaffoldTypeScriptConfig(t *testing.T) {
 	}
 
 	assertScaffoldIdentity(t, root, "hello-ts-config")
-	assertAuthoredIdentity(t, root, "assembly.ts", "hello-ts-config")
+	assertTypeScriptAuthorsNoIdentity(t, root, "assembly.ts")
 
 	cfg := loadScaffolded(t, root)
 	if cfg.Name != "hello-ts-config" {

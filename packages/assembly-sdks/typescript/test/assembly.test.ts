@@ -6,18 +6,13 @@ import { string, number, boolean, record } from "../src/schema.js";
 import { createExecutionContext, createSourceContext } from "../src/expression.js";
 
 describe("Assembly", () => {
-  it("throws when missing version", () => {
-    const sys = Assembly({ name: "test" }).run({ kind: "capability", capabilityRef: "a", bindings: {}, incomingConditions: [] });
-    expect(() => sys.toManifest()).toThrow('Assembly "test" is missing a version');
-  });
-
   it("throws when missing definition", () => {
-    const sys = Assembly({ name: "test", version: "1.0.0" });
-    expect(() => sys.toManifest()).toThrow('Assembly "test" has no definition');
+    const sys = Assembly();
+    expect(() => sys.toManifest()).toThrow("Assembly has no definition");
   });
 
   it("throws when capability is referenced but not defined", () => {
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run({
+    const sys = Assembly().run({
       kind: "capability",
       capabilityRef: "a",
       bindings: {},
@@ -27,23 +22,22 @@ describe("Assembly", () => {
   });
 
   it("produces a basic manifest with one capability (no registration needed)", () => {
-    const a = Capability({ name: "a" });
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(a.withParams({}));
+    const a = Capability("a");
+    const sys = Assembly().run(a.withParams({}));
 
     const manifest = sys.toManifest();
     expect(manifest.apiVersion).toBe("neuron/v1");
     expect(manifest.kind).toBe("Assembly");
-    expect(manifest.metadata).toEqual({ name: "test", version: "1.0.0" });
     expect(manifest.capabilities).toHaveLength(1);
     expect(manifest.capabilities[0]!.name).toBe("a");
     expect(manifest.bindings).toHaveLength(0);
   });
 
   it("produces a manifest with a sequence and empty binding (auto-passthrough)", () => {
-    const a = Capability({ name: "a" });
-    const b = Capability({ name: "b" });
+    const a = Capability("a");
+    const b = Capability("b");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       a.bind(b.withParams({}))
     );
 
@@ -59,18 +53,18 @@ describe("Assembly", () => {
   });
 
   it("auto-passthrough maps matching runtime schema fields", () => {
-    const a = Capability({ name: "a" }).resultSchema({
+    const a = Capability("a").resultSchema({
       content: string(),
       path: string(),
       ignored: number(),
     });
-    const b = Capability({ name: "b" }).paramsSchema({
+    const b = Capability("b").paramsSchema({
       content: string().required(),
       path: string().required(),
       count: number(),
     });
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(a.bind(b));
+    const sys = Assembly().run(a.bind(b));
 
     expect(sys.toManifest().bindings[0].mappings).toEqual([
       { target: "content", expression: "source.result.content" },
@@ -79,10 +73,10 @@ describe("Assembly", () => {
   });
 
   it("produces a manifest with mappings from withParams bindings", () => {
-    const a = Capability({ name: "a" }).resultSchema({ data: string(), valid: boolean() });
-    const b = Capability({ name: "b" }).paramsSchema({ data: string().required() });
+    const a = Capability("a").resultSchema({ data: string(), valid: boolean() });
+    const b = Capability("b").paramsSchema({ data: string().required() });
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       a.bind(
         b.withParams({
           data: a.result.data,
@@ -97,10 +91,10 @@ describe("Assembly", () => {
   });
 
   it("produces validations from bind() conditions", () => {
-    const a = Capability({ name: "a" }).resultSchema({ valid: boolean() });
-    const b = Capability({ name: "b" });
+    const a = Capability("a").resultSchema({ valid: boolean() });
+    const b = Capability("b");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       a.bind(b.withParams({}), {
         when: a.result.valid.equals(true),
         message: "Failed",
@@ -114,11 +108,11 @@ describe("Assembly", () => {
   });
 
   it("derives parallel execution when multiple capabilities share a source", () => {
-    const a = Capability({ name: "a" }).resultSchema({ email: string() });
-    const b = Capability({ name: "b" });
-    const c = Capability({ name: "c" });
+    const a = Capability("a").resultSchema({ email: string() });
+    const b = Capability("b");
+    const c = Capability("c");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       a
         .bind(b.withParams({ email: a.result.email }))
         .bind(c.withParams({ email: a.result.email }))
@@ -132,10 +126,10 @@ describe("Assembly", () => {
   });
 
   it("runs independent capabilities as parallel entries with no bindings", () => {
-    const a = Capability({ name: "a" });
-    const b = Capability({ name: "b" });
+    const a = Capability("a");
+    const b = Capability("b");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run([
+    const sys = Assembly().run([
       a.withParams({}),
       b.withParams({}),
     ]);
@@ -146,11 +140,11 @@ describe("Assembly", () => {
   });
 
   it("rejects fan-in when a capability reads from multiple sources", () => {
-    const a = Capability({ name: "a" }).resultSchema({ x: string() });
-    const b = Capability({ name: "b" }).resultSchema({ y: string() });
-    const target = Capability({ name: "target" }).paramsSchema({ x: string(), y: string() });
+    const a = Capability("a").resultSchema({ x: string() });
+    const b = Capability("b").resultSchema({ y: string() });
+    const target = Capability("target").paramsSchema({ x: string(), y: string() });
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run([
+    const sys = Assembly().run([
       a.withParams({}),
       b.withParams({}),
       target.withParams({ x: a.result.x, y: b.result.y }),
@@ -162,10 +156,10 @@ describe("Assembly", () => {
   });
 
   it("deduplicates capabilities referenced multiple times", () => {
-    const a = Capability({ name: "a" });
-    const b = Capability({ name: "b" });
+    const a = Capability("a");
+    const b = Capability("b");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       a.bind(b.withParams({}))
     );
 
@@ -175,15 +169,15 @@ describe("Assembly", () => {
   });
 
   it("supports connect() connections with when() conditions", () => {
-    const verify = Capability({ name: "verify" })
+    const verify = Capability("verify")
       .resultSchema({ verified: boolean(), id: string() });
-    const save = Capability({ name: "save" }).paramsSchema({ id: string().required() });
+    const save = Capability("save").paramsSchema({ id: string().required() });
 
     const source = createSourceContext<{ verified: boolean }>();
     const verifyToSave = connect<{ verified: boolean; id: string }, { id: string }>((src) => ({ id: src.result.id }))
       .when(source.result.verified.equals(true), "Not verified");
 
-    const sys = Assembly({ name: "test", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       verify.bind(save.withParams(verifyToSave))
     );
 
@@ -218,22 +212,22 @@ describe("Assembly with full ecommerce pipeline", () => {
       captureResult: { status: string };
       shipment: { trackingNumber: string; carrier: string };
     }>();
-    const validateOrder = Capability({ name: "validate-order" })
+    const validateOrder = Capability("validate-order")
       .runtime({ name: "set" })
       .paramsSchema({ order: record().required() })
       .resultSchema({ valid: boolean(), status: string() });
 
-    const parseOrder = Capability({ name: "parse-order" })
+    const parseOrder = Capability("parse-order")
       .runtime({ name: "set" })
       .paramsSchema({ validationData: record().required() })
       .resultSchema({ currency: string(), items: record() });
 
-    const enrichCustomer = Capability({ name: "enrich-customer" })
+    const enrichCustomer = Capability("enrich-customer")
       .runtime({ name: "set" })
       .paramsSchema({ customerId: string().required() })
       .resultSchema({ customerData: record() });
 
-    const calculateTotals = Capability({ name: "calculate-totals" })
+    const calculateTotals = Capability("calculate-totals")
       .runtime({ name: "set" })
       .paramsSchema({
         items: record().required(),
@@ -243,7 +237,7 @@ describe("Assembly with full ecommerce pipeline", () => {
       })
       .resultSchema({ total: number() });
 
-    const authorizePayment = Capability({ name: "authorize-payment" })
+    const authorizePayment = Capability("authorize-payment")
       .runtime({ name: "set" })
       .paramsSchema({
         amountCents: number().required(),
@@ -252,12 +246,12 @@ describe("Assembly with full ecommerce pipeline", () => {
       })
       .resultSchema({ paymentIntent: record() });
 
-    const capturePayment = Capability({ name: "capture-payment" })
+    const capturePayment = Capability("capture-payment")
       .runtime({ name: "set" })
       .paramsSchema({ paymentIntentId: string().required() })
       .resultSchema({ captureResult: record() });
 
-    const createShipment = Capability({ name: "create-shipment" })
+    const createShipment = Capability("create-shipment")
       .runtime({ name: "set" })
       .paramsSchema({
         order: record().required(),
@@ -265,7 +259,7 @@ describe("Assembly with full ecommerce pipeline", () => {
       })
       .resultSchema({ shipment: record() });
 
-    const sendConfirmation = Capability({ name: "send-confirmation" })
+    const sendConfirmation = Capability("send-confirmation")
       .runtime({ name: "set" })
       .paramsSchema({
         trackingNumber: string(),
@@ -275,7 +269,7 @@ describe("Assembly with full ecommerce pipeline", () => {
       })
       .resultSchema({ confirmationSent: boolean() });
 
-    const sys = Assembly({ name: "order-processing", version: "1.0.0" }).run(
+    const sys = Assembly().run(
       validateOrder
         .withParams({ order: exec.params.order })
         .bind(parseOrder.withParams({ validationData: source.result.status }), {
@@ -319,8 +313,6 @@ describe("Assembly with full ecommerce pipeline", () => {
 
     expect(manifest.apiVersion).toBe("neuron/v1");
     expect(manifest.kind).toBe("Assembly");
-    expect(manifest.metadata.name).toBe("order-processing");
-    expect(manifest.metadata.version).toBe("1.0.0");
     expect(manifest.capabilities).toHaveLength(8);
     expect(manifest.bindings).toHaveLength(7);
   });

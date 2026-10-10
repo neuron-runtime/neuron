@@ -17,12 +17,11 @@ import (
 // scans it, so capability runtimes placed there resolve without extra configuration.
 const implicitCapabilityRuntimeRoot = "neuron/capabilityRuntimes"
 
-// scaffoldAssemblyVersion is the Assembly version every scaffold writes. It
-// appears in the project configuration (neuron.config.json), which owns the
-// Assembly identity for every language, and in the authored Assembly metadata
-// of the TypeScript scaffold, whose SDK surface still takes name/version;
-// `neuron build` rejects a mismatch between the two. The YAML scaffold authors
-// no identity at all — configuration is its single source.
+// scaffoldAssemblyVersion is the Assembly version every scaffold writes into
+// the project configuration (neuron.config.*), which owns the Assembly
+// identity for every language. No authored Assembly surface repeats it: the
+// TypeScript and YAML scaffolds both author no identity, and `neuron build`
+// injects the configured name/version at the shared build seam.
 const scaffoldAssemblyVersion = "1.0.0"
 
 func New() *cobra.Command {
@@ -219,28 +218,24 @@ func scaffoldTypeScript(root, name string) error {
 		return err
 	}
 
-	assembly := fmt.Sprintf(`import { Capability, Assembly } from "@neuron/sdk";
+	// The TypeScript assembly authors no identity and no description:
+	// neuron.config.json owns the Assembly name/version, and `neuron build`
+	// injects them at the shared build seam. Scaffolding them here would
+	// duplicate the configuration.
+	assembly := `import { Capability, Assembly } from "@neuron/sdk";
 
-const sayHello = Capability({
-  name: "hello.say",
-  version: "1.0.0",
-  description: "Return a friendly greeting",
-})
+const sayHello = Capability("hello.say")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ name: string }>()
   .resultSchema<{ name: string; message: string }>();
 
-const manifest = Assembly({
-  name: %q,
-  version: %q,
-  description: "A friendly hello assembly",
-})
+const manifest = Assembly()
   .paramsSchema<{ name: string }>()
   .withParams((data) => sayHello.withParams({ name: data.name }))
   .toManifest();
 
 export default manifest;
-`, name, scaffoldAssemblyVersion)
+`
 
 	return createFile(filepath.Join(root, "assembly.ts"), assembly, 0o644)
 }

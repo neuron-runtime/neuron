@@ -25,16 +25,10 @@ export class AssemblyDefinition<TParams extends object = object> {
   private _nodes: CapabilityComposition[] = [];
   private _paramPorts: ReturnType<typeof schemaToManifest>["ports"] = [];
 
-  constructor(
-    readonly name: string,
-    readonly version?: string,
-    readonly description?: string
-  ) {}
-
   paramsSchema<T extends object>(): AssemblyDefinition<T>;
   paramsSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<InferSchema<S>>;
   paramsSchema(schema?: SchemaObject): AssemblyDefinition<object> {
-    const next = new AssemblyDefinition<object>(this.name, this.version, this.description);
+    const next = new AssemblyDefinition<object>();
     next._nodes = [...this._nodes];
     if (schema) {
       next._paramPorts = schemaToManifest(schema).ports;
@@ -58,11 +52,8 @@ export class AssemblyDefinition<TParams extends object = object> {
   }
 
   toManifest(): AssemblyManifest {
-    if (!this.version) {
-      throw new Error(`Assembly "${this.name}" is missing a version`);
-    }
     if (this._nodes.length === 0) {
-      throw new Error(`Assembly "${this.name}" has no definition`);
+      throw new Error("Assembly has no definition");
     }
 
     const capabilityDefs = new Map<string, CapabilityDefinition<object, object>>();
@@ -80,11 +71,6 @@ export class AssemblyDefinition<TParams extends object = object> {
     return {
       apiVersion: "neuron/v1",
       kind: "Assembly",
-      metadata: {
-        name: this.name,
-        version: this.version,
-        description: this.description,
-      },
       capabilities,
       bindings,
     };
@@ -95,8 +81,8 @@ export class AssemblyDefinition<TParams extends object = object> {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function Assembly(config: { name: string; version?: string; description?: string }): AssemblyDefinition {
-  return new AssemblyDefinition(config.name, config.version, config.description);
+export function Assembly(): AssemblyDefinition {
+  return new AssemblyDefinition();
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +170,7 @@ function collectMissingRefs(
     if (!capabilityDefs.has(ref)) {
       throw new Error(
         `Capability "${ref}" is referenced in the assembly definition but not defined. ` +
-        `Ensure the capability was created with Capability({ name: "${ref}", ... }) and used via .withParams(), .connect(), or .bind().`
+        `Ensure the capability was created with Capability("${ref}") and used via .withParams(), .connect(), or .bind().`
       );
     }
   }

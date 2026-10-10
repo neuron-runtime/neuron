@@ -152,8 +152,6 @@ export interface CapabilityComposition {
 
 type CapabilityState = {
   runtime: CapabilityRuntimeManifest;
-  version?: string;
-  description?: string;
   paramPorts: PortManifest[];
   resultPorts: PortManifest[];
   paramRules: Record<string, FieldRules>;
@@ -260,8 +258,6 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
     this.ref = ref;
     this._state = {
       runtime: state?.runtime ?? { name: "neuron:core:set", version: "latest", registry: "local" },
-      version: state?.version,
-      description: state?.description,
       paramPorts: state?.paramPorts ?? [],
       resultPorts: state?.resultPorts ?? [],
       paramRules: state?.paramRules ?? {},
@@ -355,8 +351,6 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
   toManifest(): CapabilityManifest {
     return {
       name: this.ref,
-      version: this._state.version,
-      description: this._state.description,
       capabilityRuntime: this.manifestRuntime(),
       params: this._state.paramPorts,
       results: this._state.resultPorts,
@@ -430,11 +424,9 @@ function resolveRuntimeDeclaration(declaration: RuntimeDeclaration): CapabilityR
 // ---------------------------------------------------------------------------
 
 export function Capability<TParams extends object = object, TResult extends object = object>(
-  config: { name: string; version?: string; description?: string }
+  name: string
 ): CapabilityDefinition<TParams, TResult> {
-  return new CapabilityDefinition<TParams, TResult>(config.name, {
-    version: config.version,
-    description: config.description,
+  return new CapabilityDefinition<TParams, TResult>(name, {
     runtime: { name: "neuron:core:set", version: "latest", registry: "local" },
   });
 }

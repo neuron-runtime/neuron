@@ -1,9 +1,7 @@
 import {Capability} from "@/capability";
 import {string} from "@/schema";
 
-export const delay = Capability({
-    name: "neuron:core:delay",
-}).paramsSchema({
+export const delay = Capability("neuron:core:delay").paramsSchema({
     duration: string(),
 }).resultSchema({
     delayed_for: string()

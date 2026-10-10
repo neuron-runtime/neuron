@@ -19,7 +19,7 @@ describe("typed expression proxies", () => {
   });
 
   it("capability.result produces source.result.field", () => {
-    const svc = Capability({ name: "github.read" }).resultSchema({
+    const svc = Capability("github.read").resultSchema({
       content: string(),
       sha: string(),
     });
@@ -76,7 +76,7 @@ describe("comparison methods", () => {
 
 describe("capability reference identity", () => {
   it("carries capability identity on result references", () => {
-    const svc = Capability({ name: "github.read" }).resultSchema({
+    const svc = Capability("github.read").resultSchema({
       content: string(),
       valid: boolean(),
     });

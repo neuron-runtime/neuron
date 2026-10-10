@@ -4,7 +4,6 @@ kind: Assembly
 metadata:
   name: order-processing
   version: 1.0.0
-  description: Order processing pipeline
 
 capabilities:
   - ref: validate-order

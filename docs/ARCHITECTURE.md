@@ -196,19 +196,14 @@ The TypeScript SDK (`@neuron/sdk`) is the same capability: a typed, always-autoc
 // assembly.ts
 import { Capability, Assembly } from "@neuron/sdk";
 
-const validate = Capability({
-  name: "validate-order",
-  version: "1.0.0",
-  description: "Validate an incoming order",
-})
+const validate = Capability("validate-order")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: object }>()
   .resultSchema<{ order: object; valid: boolean }>();
 
-export default Assembly({
-  name: "order-processing",
-  version: "1.0.0",
-})
+// The Assembly authors no identity: neuron.config.* owns name/version and
+// `neuron build` injects them into the canonical manifest.
+export default Assembly()
   .paramsSchema<{ order: object }>()
   .withParams((data) => validate.withParams({ order: data.order }))
   .toManifest();

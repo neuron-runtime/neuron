@@ -5,49 +5,29 @@ import { createExecutionContext, createSourceContext } from "../src/expression.j
 
 describe("Capability", () => {
   it("defaults the capability runtime to the built-in neuron:core:set", () => {
-    const svc = Capability({ name: "validate-order" });
+    const svc = Capability("validate-order");
     expect(svc.ref).toBe("validate-order");
     expect(svc.toManifest()).toEqual({
       name: "validate-order",
-      version: undefined,
-      description: undefined,
       capabilityRuntime: { name: "neuron:core:set", version: "latest", registry: "local" },
       params: [],
       results: [],
     });
   });
 
-  it("sets version and description from the config object", () => {
-    const svc = Capability({
-      name: "my-capability",
-      version: "2.0.0",
-      description: "A test capability",
-    });
-
-    expect(svc.toManifest().name).toBe("my-capability");
-    expect(svc.toManifest().version).toBe("2.0.0");
-    expect(svc.toManifest().description).toBe("A test capability");
-  });
-
   it("defaults the capability runtime version to latest", () => {
-    const svc = Capability({ name: "my-capability", version: "1.5.0" });
+    const svc = Capability("my-capability");
     expect(svc.toManifest().capabilityRuntime).toEqual({
       name: "neuron:core:set",
       version: "latest",
       registry: "local",
     });
   });
-
-  it("cannot set version/description via chain methods", () => {
-    const svc = Capability({ name: "my-capability" });
-    expect(typeof (svc as any).version).toBe("undefined");
-    expect(typeof (svc as any).description).toBe("undefined");
-  });
 });
 
 describe("Capability.runtime()", () => {
   it("sets explicit runtime name, version, registry", () => {
-    const svc = Capability({ name: "http-call" }).runtime({
+    const svc = Capability("http-call").runtime({
       name: "http.get",
       version: "2.0.0",
       registry: "github",
@@ -61,7 +41,7 @@ describe("Capability.runtime()", () => {
   });
 
   it("defaults missing runtime version to latest and registry to local", () => {
-    const svc = Capability({ name: "http-call" }).runtime({ name: "http.get" });
+    const svc = Capability("http-call").runtime({ name: "http.get" });
     expect(svc.toManifest().capabilityRuntime).toEqual({
       name: "http.get",
       version: "latest",
@@ -72,7 +52,7 @@ describe("Capability.runtime()", () => {
   it("emits no runtimeConfig key when none is declared", () => {
     // An author who declares nothing must produce no key at all, so N.O.R.E.
     // supplies every default rather than the SDK manufacturing an empty one.
-    const svc = Capability({ name: "http-call" }).runtime({ name: "http.get" });
+    const svc = Capability("http-call").runtime({ name: "http.get" });
     expect("runtimeConfig" in svc.toManifest().capabilityRuntime).toBe(false);
     expect(Object.keys(svc.toManifest().capabilityRuntime)).toEqual([
       "name",
@@ -82,7 +62,7 @@ describe("Capability.runtime()", () => {
   });
 
   it("carries a grouped runtimeConfig into the manifest runtime declaration", () => {
-    const svc = Capability({ name: "http-call" }).runtime({
+    const svc = Capability("http-call").runtime({
       name: "http.get",
       runtimeConfig: {
         execution: { mode: "detach", timeout: "5s" },
@@ -103,7 +83,7 @@ describe("Capability.runtime()", () => {
 
   it("keeps runtimeConfig out of the capability's params and results", () => {
     // runtimeConfig instructs N.O.R.E.; it is never capability input.
-    const svc = Capability({ name: "http-call" })
+    const svc = Capability("http-call")
       .runtime({
         name: "http.get",
         runtimeConfig: { execution: { mode: "detach", timeout: "5s" } },
@@ -121,11 +101,11 @@ describe("Capability.runtime()", () => {
 
   it("gives two capabilities on the same runtime their own runtimeConfig", () => {
     const shared = { name: "http.get", version: "1.0.0", registry: "github" };
-    const wait = Capability({ name: "wait-call" }).runtime({
+    const wait = Capability("wait-call").runtime({
       ...shared,
       runtimeConfig: { execution: { mode: "wait" } },
     });
-    const detach = Capability({ name: "detach-call" }).runtime({
+    const detach = Capability("detach-call").runtime({
       ...shared,
       runtimeConfig: { execution: { mode: "detach" } },
     });
@@ -140,7 +120,7 @@ describe("Capability.runtime()", () => {
 
   it("does not let one capability's runtimeConfig leak through a shared object", () => {
     const runtimeConfig = { execution: { mode: "wait" as const, timeout: "5s" } };
-    const svc = Capability({ name: "a" }).runtime({ name: "http.get", runtimeConfig });
+    const svc = Capability("a").runtime({ name: "http.get", runtimeConfig });
     runtimeConfig.execution.timeout = "99s";
 
     expect(svc.toManifest().capabilityRuntime.runtimeConfig).toEqual({
@@ -151,7 +131,7 @@ describe("Capability.runtime()", () => {
 
 describe("Capability schemas", () => {
   it("declares input schema with runtime validation rules", () => {
-    const svc = Capability({ name: "my-capability" }).paramsSchema({
+    const svc = Capability("my-capability").paramsSchema({
       email: string().email().required(),
       age: number().min(18).max(120),
     });
@@ -174,7 +154,7 @@ describe("Capability schemas", () => {
   });
 
   it("declares output schema with runtime validation rules", () => {
-    const svc = Capability({ name: "my-capability" }).resultSchema({
+    const svc = Capability("my-capability").resultSchema({
       verified: boolean(),
       tier: string(),
       items: list(),
@@ -191,7 +171,7 @@ describe("Capability schemas", () => {
   });
 
   it("supports the type-only schema overload (no runtime rules)", () => {
-    const svc = Capability({ name: "my-capability" }).paramsSchema().resultSchema();
+    const svc = Capability("my-capability").paramsSchema().resultSchema();
     const manifest = svc.toManifest();
     expect(manifest.params).toEqual([]);
     expect(manifest.results).toEqual([]);
@@ -200,7 +180,7 @@ describe("Capability schemas", () => {
 
 describe("Capability.withParams()", () => {
   it("returns an immutable composition node with bindings", () => {
-    const svc = Capability({ name: "github.read" })
+    const svc = Capability("github.read")
       .paramsSchema({
         owner: string().required(),
         repository: string().required(),
@@ -224,7 +204,7 @@ describe("Capability.withParams()", () => {
   });
 
   it("converts expressions to expression strings", () => {
-    const svc = Capability({ name: "a" }).paramsSchema({
+    const svc = Capability("a").paramsSchema({
       customerId: string().required(),
       email: string().required(),
     });
@@ -241,14 +221,14 @@ describe("Capability.withParams()", () => {
   });
 
   it("does not mutate the original capability definition", () => {
-    const svc = Capability({ name: "a" }).resultSchema({ out: string() });
+    const svc = Capability("a").resultSchema({ out: string() });
     const before = JSON.stringify(svc.toManifest());
     svc.withParams({});
     expect(JSON.stringify(svc.toManifest())).toBe(before);
   });
 
   it("produces typed result expressions", () => {
-    const svc = Capability({ name: "a" }).resultSchema({ content: string(), sha: string() });
+    const svc = Capability("a").resultSchema({ content: string(), sha: string() });
     expect(String(svc.result.content)).toBe("source.result.content");
     expect(String(svc.result.sha)).toBe("source.result.sha");
   });
@@ -256,8 +236,8 @@ describe("Capability.withParams()", () => {
 
 describe("Capability.bind()", () => {
   it("collects capability invocations into a flat composition", () => {
-    const a = Capability({ name: "a" });
-    const b = Capability({ name: "b" });
+    const a = Capability("a");
+    const b = Capability("b");
 
     const composition = a.bind(b.withParams({}));
     expect(composition._nodes).toHaveLength(2);
@@ -266,9 +246,9 @@ describe("Capability.bind()", () => {
   });
 
   it("chains three capabilities via .bind().bind()", () => {
-    const a = Capability({ name: "a" });
-    const b = Capability({ name: "b" });
-    const c = Capability({ name: "c" });
+    const a = Capability("a");
+    const b = Capability("b");
+    const c = Capability("c");
 
     const composition = a.bind(b.withParams({})).bind(c.withParams({}));
     expect(composition._nodes).toHaveLength(3);
@@ -278,8 +258,8 @@ describe("Capability.bind()", () => {
   });
 
   it("derives the source from a result reference instead of the positional anchor", () => {
-    const a = Capability({ name: "a" }).resultSchema({ data: string() });
-    const b = Capability({ name: "b" }).paramsSchema({ data: string().required() });
+    const a = Capability("a").resultSchema({ data: string() });
+    const b = Capability("b").paramsSchema({ data: string().required() });
 
     const composition = a.bind(b.withParams({ data: a.result.data }));
     expect(composition._nodes[1]!.sources).toEqual(["a"]);
@@ -287,8 +267,8 @@ describe("Capability.bind()", () => {
   });
 
   it("attaches conditions via the second argument", () => {
-    const a = Capability({ name: "a" }).resultSchema({ valid: boolean() });
-    const b = Capability({ name: "b" });
+    const a = Capability("a").resultSchema({ valid: boolean() });
+    const b = Capability("b");
 
     const composition = a.bind(b.withParams({}), {
       when: a.result.valid.equals(true),
@@ -305,10 +285,7 @@ describe("Capability.bind()", () => {
 
 describe("installable capability package pattern", () => {
   it("exports a reusable typed capability definition", () => {
-    const githubRead = Capability({
-      name: "github.read",
-      version: "1.0.0",
-    })
+    const githubRead = Capability("github.read")
       .paramsSchema({
         owner: string().required(),
         repository: string().required(),

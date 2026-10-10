@@ -200,7 +200,7 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Reject internal storage, PID, socket, daemon, and other engine plumbing from normal project configuration. **Implemented.** `validateConfigFile(path, projectScope)` denies `storage`, `capabilityRuntimes.storeDir`, and the whole `daemon` subtree in project files; the machine-level global file keeps `daemon.*` until Phase 8 removes the global model (confirmed decision), and CLI overrides (`--remote`, `--nore-path`) bypass file validation.
 - [x] Define strict validation for unknown configuration keys. **Implemented.** `checkUnknownKeys` walks the raw file against the `Config` struct's mapstructure tags (recursing into struct-typed nodes only; `variables` and registry list items stay free-form), reports the first unknown key in sorted order with its dotted path, and fails the load. Verified live: a typo key and `daemon.*` both abort `neuron build` with the offending path.
 - [x] Update the existing YAML/JSON config loader and merge precedence rules. **Implemented/verified.** One validation gate (`validateConfigFile`) now serves both file formats before merge; precedence stays defaults < global < project < env < CLI, with `runtime.port` normalized after env/CLI so the union collapses at the right seam. The precedence list is now documented correctly (P2-2).
-- [x] Update `neuron init` templates to generate the new configuration. **Implemented.** The scaffold emits `name`, `version`, `runtime.host`, `runtime.port` from one `scaffoldAssemblyVersion` constant shared with both authored-assembly templates, so config and authored metadata cannot drift; covered by `init_config_test.go`.
+- [x] Update `neuron init` templates to generate the new configuration. **Implemented.** The scaffold emits `name`, `version`, `runtime.host`, `runtime.port` from one `scaffoldAssemblyVersion` constant; the authored Assembly templates (TypeScript and YAML) author no identity at all, so config is the single source and cannot drift; covered by `init_config_test.go` (asserts both scaffolds authors no identity).
 - [x] Update configuration documentation and examples. **Implemented.** `application/README.md`, `docs/GETTING_STARTED.md`, `docs/MODULES.md`, `docs/ARCHITECTURE.md`, and all three example configs updated (P2-2 details).
 
 ### Findings during Phase 2 implementation
@@ -215,12 +215,12 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 7. Assembly Public API
 
-- [ ] Change the TypeScript Assembly constructor from `Assembly({ name, version, description })` to `Assembly()`.
-- [ ] Remove Assembly `description` from the executable/public Assembly model. **(Go half complete in Phase 3 unit 3: `description` is gone from the canonical manifest, the compiled core flow, and the content hash; YAML `metadata.description` no longer flows. The SDK `Assembly()` surface lands with §7.1.)**
+- [x] Change the TypeScript Assembly constructor from `Assembly({ name, version, description })` to `Assembly()`. **Implemented/verified.** The SDK factory is zero-argument; the compiled core, examples, scaffold, and docs use it; the workflow passes `neuron build` with identity injected from configuration.
+- [x] Remove Assembly `description` from the executable/public Assembly model. **Implemented/verified.** `description` is gone from the SDK surface, the canonical manifest, the compiled core flow, the YAML scaffold/output, and the content hash (see the appended §17 migration item for re-registration).
 - [x] Keep Assembly `name` and `version` in the canonical manifest, but source them from `neuron.config.*`. **Implemented/verified.** ApplyIdentity injects config identity for every language; YAML authored metadata is now optional (P2-6), so config is the true source.
 - [x] Update the project/compiler boundary so project configuration supplies Assembly metadata before canonicalization/hashing. **Implemented/verified.** `application/build.Build` injects config identity through `manifest.ApplyIdentity` before `Canonicalize` and before the compiler hashes the assembly, for every authoring language.
 - [x] Keep Assembly version in the canonical artifact because it currently participates in Assembly identity and hashing. **Implemented/verified.** version stays in core.Metadata and the normalized hash; description was removed from the model and the hash (see appended §17 migration item).
-- [ ] Ensure Assembly metadata is not duplicated between project configuration and authored TypeScript.
+- [x] Ensure Assembly metadata is not duplicated between project configuration and authored TypeScript. **Implemented/verified.** The SDK no longer authors any identity; `neuron.config.*` is the single source and `neuron build` injects it at the shared seam.
 - [ ] Keep the existing `Assembly.paramsSchema(...)` API.
 - [ ] Make Assembly params part of the canonical manifest rather than keeping `_inputPorts` only inside the TypeScript SDK. **(Go half complete: `manifest.Assembly.Params` and the compiled core carry the contract. The SDK must emit `params` instead of dropping `_paramPorts`.)**
 - [ ] Add `Assembly.resultSchema<T>()`.
@@ -234,15 +234,15 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 8. Capability Public API
 
-- [ ] Change `Capability({ name, version, description })` to `Capability(name)`.
-- [ ] Keep Capability `name` as the logical Capability reference used by composition.
-- [ ] Remove Capability `version` from the Assembly-facing Capability Definition.
-- [ ] Remove Capability `description` from the Assembly-facing Capability Definition.
-- [ ] Keep implementation/version/registry identity on the Capability Runtime/package side.
-- [ ] Ensure the Capability Runtime package remains the source of truth for implementation version and artifact identity.
+- [x] Change `Capability({ name, version, description })` to `Capability(name)`. **Implemented/verified.** The factory takes the logical name string; every SDK internal capability, example, scaffold, test, and doc uses it.
+- [x] Keep Capability `name` as the logical Capability reference used by composition. **Implemented/verified.** `name` is the `ref` every binding, source, and assembly reference resolves against; unchanged semantics.
+- [x] Remove Capability `version` from the Assembly-facing Capability Definition. **Implemented.** `version` is gone from the SDK capability state and `CapabilityManifest`; the Go YAML authoring surface keeps it (P1-6 deferral class) until the §17 migration decides its treatment.
+- [x] Remove Capability `description` from the Assembly-facing Capability Definition. **Implemented.** `description` is gone from the SDK capability state and `CapabilityManifest`; same YAML-surface deferral note as §8.239.
+- [x] Keep implementation/version/registry identity on the Capability Runtime/package side. **Implemented/verified.** `.runtime({ name, version, registry })` carries the implementation identity on the runtime declaration; the SDK test suite pins it.
+- [x] Ensure the Capability Runtime package remains the source of truth for implementation version and artifact identity. **Implemented.** Resolution/installation/freezing key off the runtime artifact (`name`/`version`/`registry`), unchanged by the capability-surface cleanup.
 - [ ] Keep `.runtime(...)`, `.paramsSchema(...)`, `.resultSchema(...)`, `.withParams(...)`, `.bind(...)`, `.connect(...)`, and `.result` semantics where they remain useful.
 - [ ] Update generated/imported Capability Packages so Assembly authors normally consume ready-to-use typed Capability Definitions rather than reconstructing runtime metadata.
-- [ ] Update TypeScript SDK types and all examples to remove the deprecated metadata fields.
+- [x] Update TypeScript SDK types and all examples to remove the deprecated metadata fields. **Implemented/verified.** SDK generics/types, all SDK tests and type-tests, `examples/hello`, `examples/ecommerce_order_ts`, and every user-facing doc sample were updated; `pnpm test`/`typecheck`/`build` are green.
 
 ## 9. Structured Expressions and Compilation Protocol
 
@@ -354,13 +354,13 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 16. Build / Runtime / Protocol Naming Cleanup
 
-- [ ] Replace public `input` terminology with `params` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation.
-- [ ] Replace public `output` terminology with `result` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation.
-- [ ] Use `params` for Capability invocation data.
-- [ ] Use `result` for Capability and Assembly returned data.
-- [ ] Use `Assembly.paramsSchema()` and `Assembly.resultSchema()`.
-- [ ] Use `Capability.paramsSchema()` and `Capability.resultSchema()`.
-- [ ] Rename TypeScript generic concepts toward `TParams` and `TResult`.
+- [x] Replace public `input` terminology with `params` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation. **Implemented.** Go/CLI/HTTP halves landed in Phase 1 (P1-3/4/5/7); the TypeScript SDK, examples, and user documentation halves landed in Phase 3 (commit `refactor(sdk): use params and result terminology...` + the docs sweep). The YAML authoring key `direction: input|output` remains deferred per P1-6.
+- [x] Replace public `output` terminology with `result` throughout the Assembly SDK, CLI, HTTP API, examples, and user documentation. **Implemented.** Same distribution as §16.1; the capability/assembly public types, method names, and manifest keys now read `params`/`result`.
+- [x] Use `params` for Capability invocation data. **Implemented/verified.** SDK `TParams`/`paramPorts`/`paramRules`, Go `Params` ports, and runtime payloads all use `params`.
+- [x] Use `result` for Capability and Assembly returned data. **Implemented/verified.** SDK `TResult`/`resultPorts`/`result`, Go `Results`, and runtime `Result` payloads all use `result`; the Assembly result mapping is structural (lands with §7.9 emission).
+- [ ] Use `Assembly.paramsSchema()` and `Assembly.resultSchema()`. **SDK half pending:** `paramsSchema` is retained and re-verified; `Assembly.resultSchema()` lands with §7.9 (Assembly result contract + emission).
+- [x] Use `Capability.paramsSchema()` and `Capability.resultSchema()`. **Implemented/verified.** Both long-standing capability methods keep their semantics (§8.243).
+- [x] Rename TypeScript generic concepts toward `TParams` and `TResult`. **Implemented/verified.** SDK generics, example types, and docs use `TParams`/`TResult`; example `*Input`/`*Output` types became `*Params`/`*Result`.
 - [ ] Remove new APIs that introduce arbitrary string-based result references.
 
 ### Findings during Phase 1 implementation
@@ -370,6 +370,10 @@ Confirmed by direct experiment, not by reading alone.
 - [x] **P1-5** **(Phase 1, §16 Go half)** — `application/project/types.go` `ValidationConfig{Input, Output}` is unused YAML configuration. Deleted rather than renamed, per AGENTS.md §21. Its unused `CapabilitySpec.Validation` field was removed with it.
 - [x] **P1-7** **(Phase 1, §16 Go half, found during P1-4)** — User-facing runtime error strings still used `input` terminology (`nore/internal/execution/scheduler/scheduler.go`, `validation.go`: "invalid entry input", "required input", "input %q is null/expected"). Renamed to `params`/`param`. The Go executor SDK `Handler.Execute` parameter and the application client `Execute`/`ExecuteByKeyOrTarget` parameter were also renamed from `input` to `params` for consistency; no public signature changed.
 - [ ] **P1-6** **(§17 migration)** — YAML authoring uses `direction: input|output` for port classification (`application/compiler/manifest/yaml.go`). §16's listed public surfaces are SDK/CLI/HTTP/docs; the YAML key is an authoring-language surface. Decide its treatment during migration rather than renaming mid-Phase-1 and breaking existing YAML projects.
+
+### Findings during Phase 3 implementation
+
+- [x] **P3-1** **(Phase 3, §8/§16)** — `packages/assembly-sdks/typescript/src/core/capabilities/set.ts` was dead code: `setCapability` was exported from no barrel (`core/capabilities/index.ts` exports only `http` and `delay`) and referenced nowhere in the SDK or examples, and it was already impossible under the `Capability(name)` API. Deleted per AGENTS.md §21.
 
 ## 17. Migration / Compatibility
 

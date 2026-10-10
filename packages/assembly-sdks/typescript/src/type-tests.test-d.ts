@@ -25,11 +25,11 @@ interface AnalyzeResult {
     summary: string;
 }
 
-const githubRead = Capability({ name: "github.read" })
+const githubRead = Capability("github.read")
     .paramsSchema<GitHubReadParams>()
     .resultSchema<GitHubReadResult>();
 
-const analyzeContent = Capability({ name: "analyze.content" })
+const analyzeContent = Capability("analyze.content")
     .paramsSchema<AnalyzeParams>()
     .resultSchema<AnalyzeResult>();
 
@@ -85,7 +85,7 @@ connect<GitHubReadResult, AnalyzeParams>((source) => ({
     path: source.result.path,
 }));
 
-const fromRuntimeSchema = Capability({ name: "runtime" })
+const fromRuntimeSchema = Capability("runtime")
     .paramsSchema({
         requiredName: string().required(),
         optionalName: string(),
@@ -96,7 +96,7 @@ fromRuntimeSchema.withParams({ requiredName: "ok" });
 // @ts-expect-error runtime schema inference preserves required fields.
 fromRuntimeSchema.withParams({ optionalName: "ok" });
 
-Assembly({ name: "repository-analysis" })
+Assembly()
     .paramsSchema<GitHubReadParams>()
     .withParams((data) =>
         githubRead.withParams({
@@ -109,9 +109,9 @@ Assembly({ name: "repository-analysis" })
 // Runtime declaration and runtime configuration
 // ---------------------------------------------------------------------------
 
-Capability({ name: "minimal" }).runtime({ name: "neuron:core:set" });
+Capability("minimal").runtime({ name: "neuron:core:set" });
 
-Capability({ name: "full" }).runtime({
+Capability("full").runtime({
     name: "acme:http",
     version: "^1.2.0",
     registry: "github",
@@ -122,28 +122,28 @@ Capability({ name: "full" }).runtime({
 });
 
 // Every runtimeConfig group is optional; declaring none is the normal case.
-Capability({ name: "no-groups" }).runtime({ name: "acme:http", runtimeConfig: {} });
+Capability("no-groups").runtime({ name: "acme:http", runtimeConfig: {} });
 
 // @ts-expect-error the runtime name is required.
-Capability({ name: "no-name" }).runtime({ version: "1.0.0" });
+Capability("no-name").runtime({ version: "1.0.0" });
 
 // @ts-expect-error execution mode is a closed set of wait and detach.
-Capability({ name: "bad-mode" }).runtime({ name: "acme:http", runtimeConfig: { execution: { mode: "detatch" } } });
+Capability("bad-mode").runtime({ name: "acme:http", runtimeConfig: { execution: { mode: "detatch" } } });
 
 // @ts-expect-error retry policy is a closed set.
-Capability({ name: "bad-policy" }).runtime({ name: "acme:http", runtimeConfig: { retry: { policy: "linear" } } });
+Capability("bad-policy").runtime({ name: "acme:http", runtimeConfig: { retry: { policy: "linear" } } });
 
 // @ts-expect-error runtimeConfig is grouped, not a flat config bag.
-Capability({ name: "flat" }).runtime({ name: "acme:http", runtimeConfig: { timeout: "5s", retries: 2 } });
+Capability("flat").runtime({ name: "acme:http", runtimeConfig: { timeout: "5s", retries: 2 } });
 
 // @ts-expect-error the removed capability-level builder is gone.
-Capability({ name: "legacy" }).runtimeConfig({ timeout: "5s" });
+Capability("legacy").runtimeConfig({ timeout: "5s" });
 
 // @ts-expect-error the runtime declaration builder replaced capabilityRuntime().
-Capability({ name: "legacy-decl" }).capabilityRuntime({ name: "acme:http" });
+Capability("legacy-decl").capabilityRuntime({ name: "acme:http" });
 
 // Two capabilities may declare the same runtime with different configurations.
 const sharedRuntime = { name: "acme:http", version: "1.2.0", registry: "github" } as const;
 
-Capability({ name: "sync-call" }).runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "wait" } } });
-Capability({ name: "fire-and-forget" }).runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "detach" } } });
+Capability("sync-call").runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "wait" } } });
+Capability("fire-and-forget").runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "detach" } } });

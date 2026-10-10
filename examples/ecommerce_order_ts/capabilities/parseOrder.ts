@@ -1,11 +1,7 @@
 import { Capability } from "@neuron/sdk";
 import type { ParseOrderParams, ParseOrderResult } from "../types";
 
-export const parseOrder = Capability({
-  name: "parse-order",
-  version: "1.0.0",
-  description: "Parse and normalize order data",
-})
+export const parseOrder = Capability("parse-order")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<ParseOrderParams>()
   .resultSchema<ParseOrderResult>();

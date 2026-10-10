@@ -53,8 +53,8 @@ describe("connect()", () => {
   });
 
   it("works with a capability's .withParams()", () => {
-    const verify = Capability({ name: "verify" }).resultSchema({ id: string() });
-    const save = Capability({ name: "save" }).paramsSchema({ id: string().required() });
+    const verify = Capability("verify").resultSchema({ id: string() });
+    const save = Capability("save").paramsSchema({ id: string().required() });
 
     const conn = connect((src) => ({ id: src.result.id }));
     const node = save.withParams(conn);

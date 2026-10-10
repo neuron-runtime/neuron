@@ -52,21 +52,13 @@ A `Capability` is a named unit of work. Every capability has an **identity**, a 
 ```ts
 import { Capability } from "@neuron/sdk";
 
-const validateOrder = Capability({
-  name: "order.validate",
-  version: "1.0.0",
-  description: "Validate an incoming order before processing",
-})
+const validateOrder = Capability("order.validate")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
 ```
 
-| Field | Purpose |
-| --- | --- |
-| `name` | Logical identity — the name capabilities, bindings, and the assembly reference |
-| `version` | Semver version — tracked in the manifest and frozen into registrations |
-| `description` | Human-readable purpose (optional, for documentation and registries) |
+`Capability(name)` takes the capability's logical identity — the string every binding, source reference, and the assembly uses to address it. The implementation version and registry identity live on the capability runtime declaration (`.runtime({ name, version, registry })`), not on the capability itself.
 
 > [!NOTE]
 > Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.runtime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.runtime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../../docs/MODULES.md).
@@ -76,10 +68,7 @@ const validateOrder = Capability({
 A capability runtime declares **what** runs a capability. A `runtimeConfig` declares **how N.O.R.E. should drive** it: execution mode, timeout, retry behavior, and (reserved) resource constraints.
 
 ```ts
-const callPartner = Capability({
-  name: "partner.call",
-  version: "1.0.0",
-})
+const callPartner = Capability("partner.call")
   .runtime({
     name: "acme:http",
     version: "^1.2.0",
@@ -108,8 +97,8 @@ A `runtimeConfig` is **per capability**, not per capability runtime: two capabil
 ```ts
 const artifact = { name: "acme:http", version: "1.2.0", registry: "github" } as const;
 
-Capability({ name: "partner.call" }).runtime({ ...artifact, runtimeConfig: { execution: { mode: "wait" } } });
-Capability({ name: "partner.notify" }).runtime({ ...artifact, runtimeConfig: { execution: { mode: "detach" } } });
+Capability("partner.call").runtime({ ...artifact, runtimeConfig: { execution: { mode: "wait" } } });
+Capability("partner.notify").runtime({ ...artifact, runtimeConfig: { execution: { mode: "detach" } } });
 ```
 
 > [!IMPORTANT]
@@ -138,10 +127,7 @@ type Order = {
   shippingAddress: { street: string; city: string; zip: string };
 };
 
-const validateOrder = Capability({
-  name: "order.validate",
-  version: "1.0.0",
-})
+const validateOrder = Capability("order.validate")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order }>();
@@ -156,10 +142,7 @@ For cases where runtime validation rules are needed — maximum lengths, require
 ```ts
 import { string, number, boolean } from "@neuron/sdk";
 
-const authorizePayment = Capability({
-  name: "payment.authorize",
-  version: "1.0.0",
-}).paramsSchema({
+const authorizePayment = Capability("payment.authorize").paramsSchema({
   orderId: string().required(),
   amountCents: number().min(1),
   currency: string().required(),
@@ -373,7 +356,7 @@ flowchart LR
 Independent entries (capabilities with no incoming references and no `.bind()` anchor) also run in parallel: pass an array to `.run()`:
 
 ```ts
-Assembly({ name: "audit", version: "1.0.0" })
+Assembly()
   .run([
     recordEvent.withParams({ level: "info" }),
     flushLogs.withParams({}),
@@ -386,16 +369,12 @@ A capability that reads from **multiple** capabilities is fan-in and is rejected
 
 ## The assembly — composing the full pipeline
 
-An `Assembly` ties everything together. It declares the assembly's identity, an optional typed input contract, and the capability composition:
+An `Assembly` ties everything together. It declares an optional typed input contract and the capability composition. The Assembly identity — `name` and `version` — is owned by `neuron.config.*`, and `neuron build` injects it into the canonical manifest; the SDK never authors it:
 
 ```ts
 import { Assembly } from "@neuron/sdk";
 
-const manifest = Assembly({
-  name: "order-fulfillment",
-  version: "1.0.0",
-  description: "Validate, authorize, and fulfill customer orders",
-})
+const manifest = Assembly()
   .paramsSchema<{ order: Order }>()
   .withParams((data) =>
     validateOrder

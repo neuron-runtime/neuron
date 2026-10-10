@@ -3,11 +3,6 @@ import type { RuntimeConfig } from "./capability.js";
 export interface AssemblyManifest {
   apiVersion: "neuron/v1";
   kind: "Assembly";
-  metadata: {
-    name: string;
-    version: string;
-    description?: string;
-  };
   variables?: Record<string, unknown>;
   capabilities: CapabilityManifest[];
   bindings: BindingManifest[];
@@ -15,8 +10,6 @@ export interface AssemblyManifest {
 
 export interface CapabilityManifest {
   name: string;
-  version?: string;
-  description?: string;
 
   capabilityRuntime: CapabilityRuntimeManifest;
 

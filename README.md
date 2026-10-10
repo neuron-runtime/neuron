@@ -86,38 +86,24 @@ type Order = {
   shippingAddress: Address;
 };
 
-const validateOrder = Capability({
-  name: "order.validate",
-  version: "1.0.0",
-  description: "Validate an incoming order",
-})
+const validateOrder = Capability("order.validate")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order; valid: boolean }>();
 
-const authorizePayment = Capability({
-  name: "payment.authorize",
-  version: "1.0.0",
-  description: "Authorize payment for an order",
-})
+const authorizePayment = Capability("payment.authorize")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order; amountCents: number; currency: string }>()
   .resultSchema<{ order: Order; amountCents: number }>();
 
-const createShipment = Capability({
-  name: "fulfillment.create-shipment",
-  version: "1.0.0",
-  description: "Create a shipment for a paid order",
-})
+const createShipment = Capability("fulfillment.create-shipment")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ order: Order }>()
   .resultSchema<{ order: Order; trackingId: string }>();
 
-const manifest = Assembly({
-  name: "order-fulfillment",
-  version: "1.0.0",
-  description: "Validate, authorize, and fulfill customer orders",
-})
+// The Assembly authors no identity: neuron.config.* owns the name and version
+// and `neuron build` injects them into the canonical manifest.
+const manifest = Assembly()
   .paramsSchema<{ order: Order }>()
   .withParams((data) =>
     validateOrder
