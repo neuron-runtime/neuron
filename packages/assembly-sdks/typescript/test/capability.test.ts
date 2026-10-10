@@ -198,12 +198,12 @@ describe("Capability.withParams()", () => {
     expect(node).toBeInstanceOf(Object);
     expect(node.capabilityRef).toBe("github.read");
     expect(node.bindings).toEqual({
-      owner: "'neuron-runtime'",
-      repository: "'neuron'",
+      owner: { kind: "literal", value: "neuron-runtime" },
+      repository: { kind: "literal", value: "neuron" },
     });
   });
 
-  it("converts expressions to expression strings", () => {
+  it("records structured reference sources", () => {
     const svc = Capability("a").paramsSchema({
       customerId: string().required(),
       email: string().required(),
@@ -216,8 +216,8 @@ describe("Capability.withParams()", () => {
       email: source.result.email,
     });
 
-    expect(node.bindings.customerId).toBe("execution.params.id");
-    expect(node.bindings.email).toBe("source.result.email");
+    expect(node.bindings.customerId).toEqual({ kind: "assemblyParams", path: ["id"] });
+    expect(node.bindings.email).toEqual({ kind: "capabilityResult", path: ["email"] });
   });
 
   it("does not mutate the original capability definition", () => {

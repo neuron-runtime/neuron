@@ -50,5 +50,6 @@ export type {
   BindingManifest,
   BindingMappingManifest,
   BindingValidationManifest,
+  ValueRefManifest,
   PortManifest,
 } from "./manifest.js";

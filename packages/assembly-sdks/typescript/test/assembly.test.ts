@@ -67,8 +67,8 @@ describe("Assembly", () => {
     const sys = Assembly().run(a.bind(b));
 
     expect(sys.toManifest().bindings[0].mappings).toEqual([
-      { target: "content", expression: "source.result.content" },
-      { target: "path", expression: "source.result.path" },
+      { target: "content", source: { kind: "capabilityResult", capability: "a", path: ["content"] } },
+      { target: "path", source: { kind: "capabilityResult", capability: "a", path: ["path"] } },
     ]);
   });
 
@@ -86,7 +86,7 @@ describe("Assembly", () => {
 
     const manifest = sys.toManifest();
     expect(manifest.bindings[0].mappings).toEqual([
-      { target: "data", expression: "source.result.data" },
+      { target: "data", source: { kind: "capabilityResult", capability: "a", path: ["data"] } },
     ]);
   });
 
@@ -185,7 +185,7 @@ describe("Assembly", () => {
     expect(manifest.bindings[0]).toEqual({
       from: "verify",
       to: "save",
-      mappings: [{ target: "id", expression: "source.result.id" }],
+      mappings: [{ target: "id", source: { kind: "capabilityResult", capability: "verify", path: ["id"] } }],
       validations: [
         { expression: "source.result.verified == true", message: "Not verified" },
       ],
@@ -315,5 +315,33 @@ describe("Assembly with full ecommerce pipeline", () => {
     expect(manifest.kind).toBe("Assembly");
     expect(manifest.capabilities).toHaveLength(8);
     expect(manifest.bindings).toHaveLength(7);
+
+    // Unqualified `source.result.*` references from the shared source context
+    // are qualified with the binding's source capability, exactly as the
+    // canonical compiler does.
+    expect(manifest.bindings[0]).toEqual({
+      from: "validate-order",
+      to: "parse-order",
+      mappings: [
+        {
+          target: "validationData",
+          source: { kind: "capabilityResult", capability: "validate-order", path: ["status"] },
+        },
+      ],
+      validations: [
+        { expression: "source.result.valid == true", message: "Order validation failed" },
+      ],
+    });
+    expect(manifest.bindings[1]!.mappings).toEqual([
+      {
+        target: "customerId",
+        source: { kind: "capabilityResult", capability: "parse-order", path: ["currency"] },
+      },
+    ]);
+    // Assembly params stay assembly-scoped regardless of the binding.
+    expect(manifest.bindings[2]!.mappings).toContainEqual({
+      target: "items",
+      source: { kind: "assemblyParams", path: ["order", "items"] },
+    });
   });
 });

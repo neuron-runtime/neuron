@@ -11,8 +11,8 @@ describe("connect()", () => {
     );
 
     expect(conn.__bindings).toEqual([
-      { target: "id", expression: "source.result.id" },
-      { target: "email", expression: "source.result.email" },
+      { target: "id", source: { kind: "capabilityResult", path: ["id"] } },
+      { target: "email", source: { kind: "capabilityResult", path: ["email"] } },
     ]);
   });
 
@@ -22,8 +22,8 @@ describe("connect()", () => {
     );
 
     expect(conn.__bindings).toEqual([
-      { target: "id", expression: "source.result.id" },
-      { target: "region", expression: "'us-east-1'" },
+      { target: "id", source: { kind: "capabilityResult", path: ["id"] } },
+      { target: "region", source: { kind: "literal", value: "us-east-1" } },
     ]);
   });
 
@@ -34,7 +34,7 @@ describe("connect()", () => {
     ).when(source.result.verified.equals(true), "Not verified");
 
     expect(conn.__bindings).toEqual([
-      { target: "id", expression: "source.result.id" },
+      { target: "id", source: { kind: "capabilityResult", path: ["id"] } },
     ]);
     expect(conn.__conditions).toEqual([
       { expression: "source.result.verified == true", message: "Not verified" },
@@ -59,6 +59,6 @@ describe("connect()", () => {
     const conn = connect((src) => ({ id: src.result.id }));
     const node = save.withParams(conn);
 
-    expect(node.bindings).toEqual({ id: "source.result.id" });
+    expect(node.bindings).toEqual({ id: { kind: "capabilityResult", path: ["id"] } });
   });
 });

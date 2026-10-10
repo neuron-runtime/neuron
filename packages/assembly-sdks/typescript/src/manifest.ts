@@ -59,9 +59,32 @@ export interface BindingManifest {
   validations: BindingValidationManifest[];
 }
 
+/**
+ * ValueRefManifest is the structured reference a mapping reads from, mirroring
+ * the canonical ValueRef contract: `kind` discriminates the source, `capability`
+ * names the Capability for capability-scoped references, `path` selects a field
+ * inside that source, and `value` carries an inline literal. A capability-scoped
+ * reference may be emitted without `capability` when it originates from a
+ * generic source context; the assembly qualifies it with the binding's source
+ * capability before emitting the manifest.
+ */
+export type ValueRefKind =
+  | "capabilityResult"
+  | "capabilityParams"
+  | "assemblyParams"
+  | "variable"
+  | "literal";
+
+export interface ValueRefManifest {
+  kind: ValueRefKind;
+  capability?: string;
+  path?: string[];
+  value?: unknown;
+}
+
 export interface BindingMappingManifest {
   target: string;
-  expression: string;
+  source: ValueRefManifest;
 }
 
 export interface BindingValidationManifest {

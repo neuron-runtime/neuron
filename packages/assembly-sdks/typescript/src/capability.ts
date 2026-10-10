@@ -1,9 +1,14 @@
-import type { PortManifest, CapabilityManifest, CapabilityRuntimeManifest } from "./manifest.js";
+import type {
+  PortManifest,
+  CapabilityManifest,
+  CapabilityRuntimeManifest,
+  ValueRefManifest,
+} from "./manifest.js";
 import {
   createExpressionProxy,
   createSourceContext,
   expressionRef,
-  expressionToString,
+  toValueRef,
   type Expression,
   type Expressionify,
   type SourceContext,
@@ -106,7 +111,7 @@ export type ParamBindings<T extends object> = {
 export interface Connection<TSource extends object = object, TTarget extends object = object> {
   readonly __kind: "connection";
   readonly __capabilityRef?: string;
-  readonly __bindings: Array<{ target: string; expression: string }>;
+  readonly __bindings: Array<{ target: string; source: ValueRefManifest }>;
   readonly __conditions: Array<{ expression: string; message: string }>;
   when(condition: Expression<boolean>, message: string): Connection<TSource, TTarget>;
 }
@@ -129,7 +134,7 @@ export interface CapabilityComposition {
   kind: "capability";
   capabilityRef: string;
   capabilityDef?: CapabilityDefinition<object, object>;
-  bindings: Record<string, string>;
+  bindings: Record<string, ValueRefManifest>;
   incomingConditions: Array<{ expression: string; message?: string }>;
   /**
    * Capability refs this node's bindings/conditions reference. Each distinct
@@ -182,12 +187,15 @@ export class CompositionNode<TParams extends object = object, TResult extends ob
     return this._composition.capabilityRef;
   }
 
-  get bindings(): Record<string, string> {
+  get bindings(): Record<string, ValueRefManifest> {
     return this._composition.bindings;
   }
 
   get result(): Expressionify<TResult> {
-    return createExpressionProxy<TResult>("source.result", this._composition.capabilityRef);
+    return createExpressionProxy<TResult>("source.result", this._composition.capabilityRef, [
+      "source",
+      "result",
+    ]);
   }
 
   bind<TNextParams extends object, TNextResult extends object>(
@@ -227,7 +235,7 @@ export class Composition<TResult extends object = object> {
 
   get result(): Expressionify<TResult> {
     const last = this._nodes[this._nodes.length - 1];
-    return createExpressionProxy<TResult>("source.result", last?.capabilityRef);
+    return createExpressionProxy<TResult>("source.result", last?.capabilityRef, ["source", "result"]);
   }
 
   bind<TNextParams extends object, TNextResult extends object>(
@@ -296,11 +304,11 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
   }
 
   get result(): Expressionify<TResult> {
-    return createExpressionProxy<TResult>("source.result", this.ref);
+    return createExpressionProxy<TResult>("source.result", this.ref, ["source", "result"]);
   }
 
   get params(): Expressionify<TParams> {
-    return createExpressionProxy<TParams>("source.params", this.ref);
+    return createExpressionProxy<TParams>("source.params", this.ref, ["source", "params"]);
   }
 
   withParams(bindings: ParamBindings<TParams>): CompositionNode<TParams, TResult>;
@@ -441,7 +449,7 @@ export function makeConnection<TSource extends object, TTarget extends object>(
   conditions: Array<{ expression: string; message: string }> = []
 ): Connection<TSource, TTarget> {
   const entries = Object.entries(bindings).flatMap(([target, value]) =>
-    value === undefined ? [] : [{ target, expression: expressionToString(value) }]
+    value === undefined ? [] : [{ target, source: toValueRef(value) }]
   );
   return {
     __kind: "connection",
@@ -524,22 +532,22 @@ function applyCondition(comp: CapabilityComposition, condition?: Condition): Cap
 }
 
 function bindingsFromObject<T extends object>(bindings: ParamBindings<T>): {
-  bindings: Record<string, string>;
+  bindings: Record<string, ValueRefManifest>;
   sources: string[];
 } {
-  const map: Record<string, string> = {};
+  const map: Record<string, ValueRefManifest> = {};
   const sources = new Set<string>();
   for (const [name, value] of Object.entries(bindings)) {
     if (value === undefined) continue;
     const ref = expressionRef(value);
     if (ref) sources.add(ref);
-    map[name] = expressionToString(value);
+    map[name] = toValueRef(value);
   }
   return { bindings: map, sources: [...sources] };
 }
 
-function bindingsFromConnection(connection: Connection<object, object>): Record<string, string> {
-  return Object.fromEntries(connection.__bindings.map((b) => [b.target, b.expression]));
+function bindingsFromConnection(connection: Connection<object, object>): Record<string, ValueRefManifest> {
+  return Object.fromEntries(connection.__bindings.map((b) => [b.target, b.source]));
 }
 
 function cloneComposition(node: CapabilityComposition): CapabilityComposition {

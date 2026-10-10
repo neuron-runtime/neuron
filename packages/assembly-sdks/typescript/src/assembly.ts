@@ -1,6 +1,7 @@
 import type {
   BindingManifest,
   AssemblyManifest,
+  ValueRefManifest,
 } from "./manifest.js";
 import { createExecutionContext, type Expressionify } from "./expression.js";
 import {
@@ -228,9 +229,9 @@ function bindingMappings(
   target: CapabilityTarget,
   capabilities: Map<string, CapabilityDefinition<object, object>>
 ): BindingManifest["mappings"] {
-  const explicit = Object.entries(target.bindings).map(([name, expression]) => ({
+  const explicit = Object.entries(target.bindings).map(([name, source]) => ({
     target: name,
-    expression,
+    source: qualifySource(source, fromRef, name, target.capabilityRef),
   }));
   if (explicit.length > 0) return explicit;
 
@@ -242,8 +243,36 @@ function bindingMappings(
   return to.params.flatMap((param) => {
     const result = results.get(param.name);
     if (!result || !compatiblePortTypes(result.type, param.type)) return [];
-    return [{ target: param.name, expression: `source.result.${param.name}` }];
+    return [
+      {
+        target: param.name,
+        source: { kind: "capabilityResult", capability: fromRef, path: [param.name] },
+      },
+    ];
   });
+}
+
+/**
+ * qualifySource gives a capability-scoped reference its source capability
+ * identity. References that originate from a named capability (`.result`,
+ * `.params`) already carry it; references from a generic source context do not,
+ * and are resolved against the binding's `from` capability — exactly how the
+ * canonical compiler qualifies `source.*` references.
+ */
+function qualifySource(
+  source: ValueRefManifest,
+  fromRef: string,
+  target: string,
+  toRef: string
+): ValueRefManifest {
+  if (source.kind !== "capabilityResult" && source.kind !== "capabilityParams") return source;
+  if (source.capability) return source;
+  if (!fromRef) {
+    throw new Error(
+      `Capability "${toRef}" maps target "${target}" from "source.*" but no source capability is known for the binding`
+    );
+  }
+  return { ...source, capability: fromRef };
 }
 
 function compatiblePortTypes(from: string, to: string): boolean {
@@ -252,6 +281,6 @@ function compatiblePortTypes(from: string, to: string): boolean {
 
 interface CapabilityTarget {
   capabilityRef: string;
-  bindings: Record<string, string>;
+  bindings: Record<string, ValueRefManifest>;
   incomingConditions: Array<{ expression: string; message?: string }>;
 }
