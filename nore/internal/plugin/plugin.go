@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	"github.com/neuron-runtime/neuron/nore/internal/backend"
 	"github.com/neuron-runtime/neuron/nore/internal/backend/process"
 	"github.com/neuron-runtime/neuron/nore/internal/backend/wasm"
@@ -104,6 +106,33 @@ func RegisterResolvedCapabilityRuntimes(reg contracts.CapabilityRuntimeRegistry,
 	return nil
 }
 
+// storeRoot is the capability runtime store directory, configured at daemon
+// startup via --capability-runtime-store. It is used to resolve the installed
+// artifact directory from a frozen record's artifact identity (type, version,
+// digest). The frozen record deliberately carries no host-specific paths.
+var storeRoot string
+
+// SetStoreRoot configures the capability runtime store directory used to
+// resolve installed artifact paths. It is called once at daemon startup.
+func SetStoreRoot(root string) {
+	storeRoot = root
+}
+
+// resolveInstalledDir returns the installed directory for a frozen capability
+// runtime record, deriving the path from the artifact identity and the
+// configured store root. Returns an empty string when the store root is not
+// configured or the type cannot be mapped to a store path.
+func resolveInstalledDir(resolved capabilityrt.ResolvedCapabilityRuntime) string {
+	if storeRoot == "" {
+		return ""
+	}
+	path, err := capabilityruntime.TypePath(resolved.Type)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(storeRoot, path, resolved.ResolvedVersion, resolved.Digest)
+}
+
 // NewAdapter builds the runtime adapter matching a frozen capability runtime's
 // runtime kind. It rejects kinds this build cannot host. An empty kind
 // defaults to the process backend (the original capability runtime model).
@@ -125,12 +154,20 @@ func NewAdapter(resolved capabilityrt.ResolvedCapabilityRuntime) (contracts.Capa
 		protocol = capabilityrt.ProtocolJSONV1
 	}
 
+	// Resolve the installed artifact directory from the frozen record's
+	// artifact identity and the configured store root.
+	installedDir := resolveInstalledDir(resolved)
+	entrypoint := resolved.Runtime.Entrypoint
+	if installedDir != "" && entrypoint != "" {
+		entrypoint = filepath.Join(installedDir, filepath.FromSlash(entrypoint))
+	}
+
 	spec := capabilityrt.BackendSpec{
 		Type:       resolved.Type,
 		Version:    resolved.ResolvedVersion,
 		Protocol:   protocol,
-		Entrypoint: resolved.EntrypointPath(),
-		RootDir:    resolved.RootDir,
+		Entrypoint: entrypoint,
+		RootDir:    installedDir,
 		MaxWorkers: resolved.Runtime.MaxWorkers,
 	}
 

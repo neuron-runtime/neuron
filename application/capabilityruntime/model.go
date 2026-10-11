@@ -143,8 +143,10 @@ func (i *Installed) Manifest() (*capabilityrt.Manifest, error) {
 
 // Frozen converts an installed capability runtime into the wire record a Deployment
 // persists. It records the requested constraint alongside the exact resolved
-// version, so restarting a Deployment reuses the pinned artifact rather than
-// whatever is latest tomorrow.
+// version and content digest, so restarting a Deployment reuses the pinned
+// artifact rather than whatever is latest tomorrow. The record deliberately
+// carries no host-specific paths: the installed artifact directory is derived
+// from the artifact identity and the store root configured on the daemon.
 func (i *Installed) Frozen(requestedVersion string) *capabilityrt.ResolvedCapabilityRuntime {
 	return &capabilityrt.ResolvedCapabilityRuntime{
 		Type:             i.Type,
@@ -160,7 +162,6 @@ func (i *Installed) Frozen(requestedVersion string) *capabilityrt.ResolvedCapabi
 		},
 		Capabilities: i.Capabilities,
 		Features:     i.Features,
-		RootDir:      i.RootDir,
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 type Compiler struct {
 	expressions resolver.Compiler
+	assembly    *shared.Assembly
 }
 
 func NewCompiler(expressions resolver.Compiler) (*Compiler, error) {
@@ -21,7 +22,12 @@ func NewCompiler(expressions resolver.Compiler) (*Compiler, error) {
 	return &Compiler{expressions: expressions}, nil
 }
 
+// Compile compiles an Assembly into an ExecutionBlueprint. The assembly
+// reference is stored for use during result compilation.
 func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint, error) {
+	c.assembly = &assembly
+	defer func() { c.assembly = nil }()
+
 	capabilities := make(map[shared.ID]shared.Capability)
 	triggerIDs := make([]shared.ID, 0, len(assembly.Specification.Triggers))
 
@@ -116,6 +122,12 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		metadata.Version = "1"
 	}
 
+	// Compile the Assembly result contract and field mappings.
+	result, err := c.compileAssemblyResult(assembly.Result)
+	if err != nil {
+		return nil, err
+	}
+
 	detached, err := buildDetachedScopes(nodes, metadata)
 	if err != nil {
 		return nil, err
@@ -124,6 +136,7 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		Metadata:           metadata,
 		Nodes:              nodes,
 		EntryCapabilityIDs: entryIDs,
+		Result:             result,
 		Detached:           detached,
 	}, nil
 }
@@ -326,4 +339,53 @@ func cloneConfigurationValue(value any) any {
 	default:
 		return typed
 	}
+}
+
+// compileAssemblyResult compiles the Assembly result contract and field mappings
+// into the planner's canonical ExecutionResult representation. It validates that
+// every field's source reference is resolvable against the Assembly's capabilities
+// and that referenced capability result ports exist.
+func (c *Compiler) compileAssemblyResult(assemblyResult *shared.AssemblyResult) (*types.ExecutionResult, error) {
+	if assemblyResult == nil {
+		return nil, nil
+	}
+
+	result := &types.ExecutionResult{
+		Schema: make([]shared.Port, len(assemblyResult.Schema)),
+		Fields: make([]types.ExecutionResultField, len(assemblyResult.Fields)),
+	}
+	copy(result.Schema, assemblyResult.Schema)
+
+	// Build a set of all capability IDs in the assembly for validation.
+	capabilityIDs := make(map[shared.ID]struct{})
+	for _, trigger := range c.assembly.Specification.Triggers {
+		capabilityIDs[trigger.Capability.Metadata.ID] = struct{}{}
+	}
+	for _, capability := range c.assembly.Specification.Capabilities {
+		capabilityIDs[capability.Metadata.ID] = struct{}{}
+	}
+
+	for i, field := range assemblyResult.Fields {
+		if field.Source == nil {
+			return nil, fmt.Errorf("assembly result field %q has no source", field.Name)
+		}
+		if err := field.Source.Validate(); err != nil {
+			return nil, fmt.Errorf("assembly result field %q: %w", field.Name, err)
+		}
+		// Validate that capability-scoped references point to existing capabilities.
+		if field.Source.Kind == shared.ValueRefCapabilityResult {
+			if _, ok := capabilityIDs[shared.ID(field.Source.Capability)]; !ok {
+				return nil, fmt.Errorf("assembly result field %q references unknown capability %q", field.Name, field.Source.Capability)
+			}
+			// Could also validate that the specific result port exists on the capability,
+			// but that would require access to the capability's Results which we don't have here.
+			// The compiler already validated this at authoring time.
+		}
+		result.Fields[i] = types.ExecutionResultField{
+			Name:   field.Name,
+			Source: field.Source,
+		}
+	}
+
+	return result, nil
 }

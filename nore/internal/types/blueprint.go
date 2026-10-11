@@ -13,6 +13,11 @@ type ExecutionBlueprint struct {
 
 	EntryCapabilityIDs []shared.ID
 
+	// Result is the compiled Assembly result contract and field mappings.
+	// It is derived from assembly.Result during compilation and used by the
+	// scheduler to produce the final Assembly result object at completion.
+	Result *ExecutionResult
+
 	// Detached holds the execution scope each detached capability owns,
 	// compiled once when the assembly was compiled.
 	//
@@ -27,6 +32,22 @@ type ExecutionBlueprint struct {
 	// itself. Nesting is expressed by a scope's own Detached map, so a detached
 	// capability inside another detached scope owns a further scope of its own.
 	Detached map[shared.ID]*ExecutionBlueprint
+}
+
+// ExecutionResult is the compiled Assembly result contract and field mappings.
+// It mirrors core.AssemblyResult but is defined here to avoid circular imports
+// and to be the planner's canonical representation.
+type ExecutionResult struct {
+	Schema []shared.Port
+	Fields []ExecutionResultField
+}
+
+// ExecutionResultField maps one declared Assembly result field to the value
+// that must produce it at execution time. The Source is a structured ValueRef
+// resolved at plan time.
+type ExecutionResultField struct {
+	Name   string
+	Source *shared.ValueRef
 }
 
 type ExecutionNode struct {

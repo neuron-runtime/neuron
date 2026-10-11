@@ -39,6 +39,7 @@ func main() {
 		dataDir              string
 		tokenArg             string
 		detachedDrainTimeout time.Duration
+		capabilityStore      string
 		showVer              bool
 	)
 
@@ -48,6 +49,7 @@ func main() {
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "persistent data directory")
 	flag.StringVar(&tokenArg, "token", "", "API token for authenticating requests; empty loads the token from the socket's token file")
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
+	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
 	flag.BoolVar(&showVer, "version", false, "print the N.O.R.E. version and exit")
 	flag.Parse()
 
@@ -73,6 +75,8 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	plugin.SetStoreRoot(capabilityStore)
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatalf("create data directory %s: %v", dataDir, err)
@@ -258,4 +262,15 @@ func defaultDataDir() string {
 		return "/tmp/neuron/data"
 	}
 	return filepath.Join(home, ".neuron", "nore")
+}
+
+func defaultCapabilityRuntimeStore() string {
+	if value := os.Getenv("NEURON_CAPABILITY_RUNTIME_STORE"); value != "" {
+		return value
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".neuron/capabilityRuntimes"
+	}
+	return filepath.Join(home, ".neuron", "capabilityRuntimes")
 }

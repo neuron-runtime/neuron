@@ -1,7 +1,5 @@
 package capabilityruntime
 
-import "path/filepath"
-
 // ResolvedCapabilityRuntimesKey is the wire key under which the frozen
 // capability runtime set travels in a registered assembly's execution
 // configurations.
@@ -33,11 +31,13 @@ type RuntimeInfo struct {
 // ResolvedCapabilityRuntime is the frozen dependency record produced when an
 // Assembly is compiled into a Deployment. Authoring an Assembly only declares
 // requirements (type + constraint); this record pins the exact resolved
-// version, registry, checksum, and installed artifact so a Deployment is
-// reproducible.
+// version, registry, and content digest so a Deployment is reproducible.
 //
 // N.O.R.E. consumes this record to execute capabilities without ever
-// performing dependency resolution or installation.
+// performing dependency resolution or installation. The record deliberately
+// carries no host-specific paths: the installed artifact directory is derived
+// from the artifact identity (type, version, digest) and the capability
+// runtime store root configured on the daemon.
 type ResolvedCapabilityRuntime struct {
 	// Type is the logical capability runtime name (e.g. "github:read").
 	Type string `json:"type"`
@@ -64,20 +64,4 @@ type ResolvedCapabilityRuntime struct {
 
 	// Capabilities the capability runtime can execute.
 	Capabilities []string `json:"capabilities,omitempty"`
-
-	// RootDir is the absolute path of the installed capability runtime
-	// directory. The runtime backend resolves the entrypoint relative to it.
-	// It points into the local runtime store (~/.neuron/runtimes/...) and is
-	// only meaningful on the host that created the deployment.
-	RootDir string `json:"rootDir,omitempty"`
-}
-
-// EntrypointPath returns the absolute path to the capability runtime's
-// entrypoint.
-func (r *ResolvedCapabilityRuntime) EntrypointPath() string {
-	if r.RootDir == "" || r.Runtime.Entrypoint == "" {
-		return r.Runtime.Entrypoint
-	}
-	// Entrypoint is manifest-relative and stored with forward slashes.
-	return filepath.Join(r.RootDir, filepath.FromSlash(r.Runtime.Entrypoint))
 }

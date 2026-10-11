@@ -31,6 +31,11 @@ var (
 	// already installed. Strict installs may treat it as an error; idempotent
 	// installs may treat it as success.
 	ErrAlreadyInstalled = errors.New("capability runtime already installed")
+
+	// ErrIntegrityConflict is returned when an install is attempted for a
+	// (type, version) that is already committed with a different content
+	// digest. The store never replaces a committed artifact in place.
+	ErrIntegrityConflict = errors.New("capability runtime integrity conflict")
 )
 
 // NotFoundError wraps a concrete "not found" with context.

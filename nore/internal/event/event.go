@@ -38,10 +38,10 @@ func New(eventType Type, executionID, correlationID, capabilityID core.ID, paylo
 
 type ExecutionStartedPayload struct{ Params map[string]any }
 type ExecutionCompletedPayload struct {
-	// Results carries the aggregate capability results at completion, keyed by
-	// capability ID. It is populated at the terminal event so clients rendering
-	// the final result of a run do not need a second round-trip.
-	Results map[string]map[string]any
+	// Result is the Assembly result object produced from the blueprint's result
+	// contract. It contains only the fields declared in the Assembly result
+	// mapping, not the full capability result map.
+	Result map[string]any
 }
 type ExecutionFailedPayload struct{ Message string }
 

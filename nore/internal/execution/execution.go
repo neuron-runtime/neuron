@@ -3,6 +3,7 @@ package execution
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -368,4 +369,83 @@ func (e *Execution) InitialParams() map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return data.CanonicalMap(e.initialParams)
+}
+
+// ResolveAssemblyResult resolves the Assembly result fields from the blueprint's
+// result contract. It builds an environment from all capability results and the
+// initial params, then evaluates each result field's source reference.
+// Returns the assembled result object, or an error if any field cannot be resolved.
+func (e *Execution) ResolveAssemblyResult() (map[string]any, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if e.Blueprint == nil || e.Blueprint.Result == nil {
+		return nil, nil // No result contract defined
+	}
+
+	result := make(map[string]any, len(e.Blueprint.Result.Fields))
+	for _, field := range e.Blueprint.Result.Fields {
+		if field.Source == nil {
+			return nil, fmt.Errorf("assembly result field %q has no source", field.Name)
+		}
+		value, err := resolveAssemblyResultField(e, field.Source)
+		if err != nil {
+			return nil, fmt.Errorf("assembly result field %q: %w", field.Name, err)
+		}
+		result[field.Name] = value
+	}
+	return result, nil
+}
+
+// resolveAssemblyResultField resolves a single Assembly result field's source
+// reference against the execution's capability results and initial params.
+func resolveAssemblyResultField(e *Execution, source *shared.ValueRef) (any, error) {
+	switch source.Kind {
+	case shared.ValueRefCapabilityResult:
+		// Look up the capability's result
+		capResult, ok := e.results[shared.ID(source.Capability)]
+		if !ok {
+			return nil, fmt.Errorf("capability %q result not found", source.Capability)
+		}
+		return pathValue(capResult, source.Path, source)
+	case shared.ValueRefCapabilityParams:
+		capParams, ok := e.params[shared.ID(source.Capability)]
+		if !ok {
+			return nil, fmt.Errorf("capability %q params not found", source.Capability)
+		}
+		return pathValue(capParams, source.Path, source)
+	case shared.ValueRefAssemblyParams:
+		return pathValue(e.initialParams, source.Path, source)
+	case shared.ValueRefLiteral:
+		return source.Value, nil
+	case shared.ValueRefVariable:
+		return nil, fmt.Errorf("%s references are not resolvable: no variable provider is registered", source.Kind)
+	default:
+		return nil, fmt.Errorf("unknown reference kind %q", source.Kind)
+	}
+}
+
+// pathValue walks a ValueRef path into a payload map. A missing key or a
+// non-object intermediate reports an error with the reference rendered, so a
+// failed binding names the exact field that was absent.
+func pathValue(payload any, path []string, source *shared.ValueRef) (any, error) {
+	if len(path) == 0 {
+		return payload, nil
+	}
+	current := payload
+	for i, segment := range path {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s reference path %q: expected object at %q, got %T", source.Kind, strings.Join(path[:i+1], "."), segment, current)
+		}
+		next, ok := m[segment]
+		if !ok {
+			return nil, fmt.Errorf("%s reference path %q: key %q not found", source.Kind, strings.Join(path[:i+1], "."), segment)
+		}
+		if i == len(path)-1 {
+			return next, nil
+		}
+		current = next
+	}
+	return nil, fmt.Errorf("%s reference path %q: unexpected end", source.Kind, strings.Join(path, "."))
 }

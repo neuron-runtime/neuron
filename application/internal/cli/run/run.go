@@ -282,26 +282,43 @@ func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.Instanc
 		return protocol.InstanceKey{}, fmt.Errorf("get current directory: %w", err)
 	}
 
-	var record project.BuildRecord
-	err = project.LoadBuildRecord(root, &record)
-
-	switch {
-	case errors.Is(err, project.ErrNotBuilt):
-		if !rebuild {
-			return protocol.InstanceKey{}, fmt.Errorf(
-				"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
-			)
+	// Read the current build pointer.
+	fingerprint, err := project.LoadCurrentPointer(root)
+	if err != nil {
+		if errors.Is(err, project.ErrNotBuilt) {
+			if !rebuild {
+				return protocol.InstanceKey{}, fmt.Errorf(
+					"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
+				)
+			}
+		} else {
+			return protocol.InstanceKey{}, fmt.Errorf("load current pointer: %w", err)
 		}
-	case err != nil:
-		return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
-	case !rebuild:
-		// A build record exists; only rebuild when the authoring inputs changed
-		// since it was recorded.
-		inputs, ferr := utils.AuthoringInputs(filepath.Clean(root), cfg)
-		if ferr == nil {
-			fp, cerr := project.ComputeFingerprint(inputs)
-			if cerr == nil && fp == record.Fingerprint {
-				return record.Key, nil
+	}
+
+	var record project.BuildRecord
+	if fingerprint != "" {
+		// Load the immutable build record.
+		err = project.LoadBuildRecord(root, fingerprint, &record)
+
+		switch {
+		case errors.Is(err, project.ErrNotBuilt):
+			if !rebuild {
+				return protocol.InstanceKey{}, fmt.Errorf(
+					"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
+				)
+			}
+		case err != nil:
+			return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
+		case !rebuild:
+			// A build record exists; only rebuild when the authoring inputs changed
+			// since it was recorded.
+			inputs, ferr := utils.AuthoringInputs(filepath.Clean(root), cfg)
+			if ferr == nil {
+				fp, cerr := project.ComputeFingerprint(inputs)
+				if cerr == nil && fp == record.Fingerprint {
+					return record.Key, nil
+				}
 			}
 		}
 	}
@@ -315,8 +332,13 @@ func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.Instanc
 		return protocol.InstanceKey{}, fmt.Errorf("rebuild project: %w", err)
 	}
 
+	// After rebuild, read the new current pointer and load its record.
+	fingerprint, err = project.LoadCurrentPointer(root)
+	if err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("load current pointer after rebuild: %w", err)
+	}
 	var fresh project.BuildRecord
-	if err := project.LoadBuildRecord(root, &fresh); err != nil {
+	if err := project.LoadBuildRecord(root, fingerprint, &fresh); err != nil {
 		return protocol.InstanceKey{}, fmt.Errorf("load build record after rebuild: %w", err)
 	}
 	return fresh.Key, nil

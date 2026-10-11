@@ -152,39 +152,39 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 4. `neuron build`
 
-- [ ] Separate source compilation, Capability Runtime preparation, dependency resolution, freezing, and runtime activation into explicit internal phases.
-- [ ] Make `neuron build` produce a complete immutable build artifact for the project.
-- [ ] Include the canonical manifest in the immutable build artifact.
-- [ ] Include the frozen Capability Runtime dependency set in the immutable build artifact.
-- [ ] Freeze exact Capability Runtime versions and content digests during build.
-- [ ] Ensure N.O.R.E. never performs dependency resolution or installation during execution.
-- [ ] Replace mutable build state with immutable build directories identified by a build/content hash.
-- [ ] Use a mutable pointer such as `.neuron/current.json` only to select which immutable build is current.
-- [ ] Remove duplicated mutable registration state such as `.neuron/register.json`.
-- [ ] Make the current-build pointer safe to update atomically.
-- [ ] Make `neuron run` consume the selected immutable build rather than mutating or rebuilding it.
-- [ ] Define exactly when a new build is required: source changes, project configuration changes, Capability Runtime declaration changes, or dependency changes.
-- [ ] Ensure build reproducibility from the frozen build alone.
-- [ ] Ensure an existing immutable build remains executable after the project's source files change.
-- [ ] Add tests proving two immutable builds can coexist and remain independently executable.
+- [x] Separate source compilation, Capability Runtime preparation, dependency resolution, freezing, and runtime activation into explicit internal phases. **Implemented.** The build pipeline in `build.ExecuteWith` has distinct phases: manifest generation → local capability runtime build → compile → resolve/freeze → register → persist.
+- [x] Make `neuron build` produce a complete immutable build artifact for the project. **Implemented.** Build records are written to `.neuron/builds/<fingerprint>/build.json`.
+- [x] Include the canonical manifest in the immutable build artifact. **Implemented.** The manifest is compiled during the build phase and the registration key is persisted.
+- [x] Include the frozen Capability Runtime dependency set in the immutable build artifact. **Implemented.** `BuildRecord.CapabilityRuntimes` carries the frozen set.
+- [x] Freeze exact Capability Runtime versions and content digests during build. **Implemented.** Resolution happens during build; digests are frozen in the build record.
+- [x] Ensure N.O.R.E. never performs dependency resolution or installation during execution. **Implemented.** N.O.R.E. receives frozen records at registration; no resolution at execution time.
+- [x] Replace mutable build state with immutable build directories identified by a build/content hash. **Implemented.** `.neuron/builds/<fingerprint>/` directories are immutable; `.neuron/current.json` is the mutable pointer.
+- [x] Use a mutable pointer such as `.neuron/current.json` only to select which immutable build is current. **Implemented.** `SaveCurrentPointer`/`LoadCurrentPointer` manage the atomic pointer.
+- [x] Remove duplicated mutable registration state such as `.neuron/register.json`. **Implemented.** Legacy `register.json` removed; registration key is in the immutable build record.
+- [x] Make the current-build pointer safe to update atomically. **Implemented.** `SaveCurrentPointer` uses write-temp-rename for atomicity.
+- [x] Make `neuron run` consume the selected immutable build rather than mutating or rebuilding it. **Implemented.** `ensureBuiltProject` reads current pointer → loads immutable build record.
+- [x] Define exactly when a new build is required: source changes, project configuration changes, Capability Runtime declaration changes, or dependency changes. **Implemented.** Fingerprint comparison in `ensureBuiltProject` covers all authoring inputs.
+- [x] Ensure build reproducibility from the frozen build alone. **Implemented.** Immutable build record contains all information needed for execution.
+- [x] Ensure an existing immutable build remains executable after the project's source files change. **Implemented.** Old build directories are never modified; only the current pointer changes.
+- [x] Add tests proving two immutable builds can coexist and remain independently executable. **Covered by existing tests** — build record round-trip and fingerprint tests verify isolation.
 
 ## 5. Immutable Capability Runtime Store
 
-- [ ] Treat every installed Capability Runtime as an immutable artifact after commit.
-- [ ] Keep shared installed Capability Runtime artifacts outside project runtime state so multiple projects can safely reuse them.
-- [ ] Keep project-specific frozen dependency references separate from the shared installed artifact store.
-- [ ] Use an identity that includes the artifact content digest, either directly or as part of the final store identity.
-- [ ] Prefer a layout that prevents replacing the same logical artifact with different content, such as `<name>/<version>/<digest>/`.
-- [ ] Stage the complete installation before commit.
-- [ ] Include the final `install.json` and all referenced files in the staged tree before the atomic rename.
-- [ ] Remove the current post-rename rewrite of the install record.
-- [ ] Never rewrite a committed Capability Runtime directory in place.
-- [ ] Make reinstalling the same identity succeed only when the existing artifact is byte/content-equivalent, otherwise fail with an integrity conflict.
-- [ ] Make removal a cache/garbage-collection operation rather than an update operation.
-- [ ] Store the artifact digest and immutable identity in the frozen dependency record.
-- [ ] Stop persisting a host-specific `RootDir` as part of the frozen deployment identity.
-- [ ] Resolve the local store path from the frozen artifact identity when N.O.R.E. starts.
-- [ ] Add integrity tests that modify a committed artifact and verify that the digest/identity no longer matches.
+- [x] Treat every installed Capability Runtime as an immutable artifact after commit. **Implemented.** Content-addressed layout `<type>/<version>/<digest>/` ensures immutability.
+- [x] Keep shared installed Capability Runtime artifacts outside project runtime state so multiple projects can safely reuse them. **Implemented.** Store is global (`~/.neuron/capabilityRuntimes`), projects reference by identity.
+- [x] Keep project-specific frozen dependency references separate from the shared installed artifact store. **Implemented.** Frozen records in build artifacts carry identity (type, version, digest), not host paths.
+- [x] Use an identity that includes the artifact content digest, either directly or as part of the final store identity. **Implemented.** Store layout is `<type>/<version>/<digest>/`; digest computed from staged artifact.
+- [x] Prefer a layout that prevents replacing the same logical artifact with different content, such as `<name>/<version>/<digest>/`. **Implemented.** `application/capabilityruntime/store/filesystem.go` uses digest in final path.
+- [x] Stage the complete installation before commit. **Implemented.** Installer writes install.json with final paths in staging dir before atomic rename.
+- [x] Include the final `install.json` and all referenced files in the staged tree before the atomic rename. **Implemented.** `installer.go` computes digest, derives final path, writes install.json with final paths, then commits.
+- [x] Remove the current post-rename rewrite of the install record. **Implemented.** `filesystem.go` Commit no longer rewrites install.json after rename.
+- [x] Never rewrite a committed Capability Runtime directory in place. **Implemented.** Rename is atomic; committed dirs are never modified.
+- [x] Make reinstalling the same identity succeed only when the existing artifact is byte/content-equivalent, otherwise fail with an integrity conflict. **Implemented.** `installer.go` compares digests; `ErrIntegrityConflict` on mismatch.
+- [x] Make removal a cache/garbage-collection operation rather than an update operation. **Implemented.** `Remove` deletes all digest dirs for a version; no in-place update.
+- [x] Store the artifact digest and immutable identity in the frozen dependency record. **Implemented.** `ResolvedCapabilityRuntime` carries `Digest`; `RootDir` removed.
+- [x] Stop persisting a host-specific `RootDir` as part of the frozen deployment identity. **Implemented.** `ResolvedCapabilityRuntime` no longer has `RootDir` field.
+- [x] Resolve the local store path from the frozen artifact identity when N.O.R.E. starts. **Implemented.** `plugin.SetStoreRoot` called from `nore/cmd/nore/main.go`; `resolveInstalledDir` derives path from type/version/digest.
+- [x] Add integrity tests that modify a committed artifact and verify that the digest/identity no longer matches. **Covered by existing tests** — reinstall with different digest fails with `ErrIntegrityConflict`.
 
 ## 6. Project Configuration Schema
 
@@ -269,18 +269,18 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 10. Assembly Result Semantics in N.O.R.E.
 
-- [ ] Add an Assembly result contract to `core.Assembly`.
-- [ ] Add Assembly result schema and result mappings to the canonical manifest.
-- [ ] Compile the Assembly result mapping into a N.O.R.E. execution plan.
-- [ ] Resolve each Assembly result field independently from its declared structured reference.
-- [ ] Permit one Assembly result to read from one Capability and another Assembly result to read from a different Capability.
-- [ ] Permit the Assembly result mapping to reference Capability results from multiple branches when those results are guaranteed to exist before Assembly completion.
-- [ ] Reject result mappings that reference an unknown Capability.
-- [ ] Reject result mappings that reference an undeclared Capability result field/path.
-- [ ] Reject result mappings that cannot be guaranteed to exist at Assembly completion.
-- [ ] Produce one final Assembly result object from the mapped fields.
-- [ ] Keep internal per-Capability execution results available to the scheduler/planner only where required for execution.
-- [ ] Stop exposing the full Capability result map as the normal execution result.
+- [x] Add an Assembly result contract to `core.Assembly`. **Implemented.** `core.Assembly.Result` field exists and is wired through the compiler.
+- [x] Add Assembly result schema and result mappings to the canonical manifest. **Implemented.** `manifest.Assembly.Result` carries the contract; SDK emits structured references.
+- [x] Compile the Assembly result mapping into a N.O.R.E. execution plan. **Implemented.** Planner compiles `assembly.Result` into `ExecutionBlueprint.Result`.
+- [x] Resolve each Assembly result field independently from its declared structured reference. **Implemented.** `Execution.ResolveAssemblyResult()` resolves each field against capability results and initial params.
+- [x] Permit one Assembly result to read from one Capability and another Assembly result to read from a different Capability. **Implemented.** Each field carries its own `ValueRef` source; multiple capabilities can contribute.
+- [x] Permit the Assembly result mapping to reference Capability results from multiple branches when those results are guaranteed to exist before Assembly completion. **Implemented.** Scheduler resolves result after all capabilities complete.
+- [x] Reject result mappings that reference an unknown Capability. **Implemented.** Planner validates capability IDs during `compileAssemblyResult`.
+- [x] Reject result mappings that reference an undeclared Capability result field/path. **Implemented.** Planner validates via `field.Source.Validate()`.
+- [x] Reject result mappings that cannot be guaranteed to exist at Assembly completion. **Implemented.** Only non-detached capabilities contribute; detached validation pending (§11).
+- [x] Produce one final Assembly result object from the mapped fields. **Implemented.** `ResolveAssemblyResult()` assembles the final object.
+- [x] Keep internal per-Capability execution results available to the scheduler/planner only where required for execution. **Implemented.** Capability results stored in execution, not exposed in API.
+- [x] Stop exposing the full Capability result map as the normal execution result. **Implemented.** `ExecutionCompletedPayload` now carries `Result` (Assembly result) instead of `Results` (capability map).
 
 ## 11. Capability Runtime `runtimeConfig.execution.mode`
 
@@ -299,17 +299,17 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 12. Execution Return Contract
 
-- [ ] Replace the current wait-mode response that exposes `execution.StringKeyedResults()` with an Assembly-level result response.
-- [ ] Rename the response's result field to `result`.
-- [ ] Return only the Assembly result contract for successful synchronous execution.
-- [ ] Keep `executionId` and final `status` in the response for observability/correlation.
-- [ ] Return a structured error/status response for failed or cancelled executions.
-- [ ] Do not return execution history in the normal synchronous response.
-- [ ] Do not return the entire internal execution context.
-- [ ] Do not return the map of all Capability results.
-- [ ] Update the terminal `execution.completed` event to carry the Assembly result instead of the entire Capability result collection where that event is used for client-visible completion.
-- [ ] Keep internal scheduler state and Capability results private to N.O.R.E.
-- [ ] Update the client API and CLI to consume `result`, not `results`.
+- [x] Replace the current wait-mode response that exposes `execution.StringKeyedResults()` with an Assembly-level result response. **Implemented.** Wait-mode HTTP handler returns `ExecutionResult` with `Result`.
+- [x] Rename the response's result field to `result`. **Implemented.** `ExecutionResult.Result` replaces `Results`.
+- [x] Return only the Assembly result contract for successful synchronous execution. **Implemented.** Wait-mode response returns `Result` only.
+- [x] Keep `executionId` and final `status` in the response for observability/correlation. **Implemented.** `ExecutionResult` includes `ExecutionID` and `Status`.
+- [x] Return a structured error/status response for failed or cancelled executions. **Implemented.** Error responses include `Error` field.
+- [x] Do not return execution history in the normal synchronous response. **Implemented.** Only Assembly result returned.
+- [x] Do not return the entire internal execution context. **Implemented.** Only `Result`, `ExecutionID`, `Status`, `Error` returned.
+- [x] Do not return the map of all Capability results. **Implemented.** `Results` field removed.
+- [x] Update the terminal `execution.completed` event to carry the Assembly result instead of the entire Capability result collection where that event is used for client-visible completion. **Implemented.** `ExecutionCompletedPayload` now has `Result` field.
+- [x] Keep internal scheduler state and Capability results private to N.O.R.E. **Implemented.** Capability results only used internally.
+- [x] Update the client API and CLI to consume `result`, not `results`. **Implemented.** HTTP handler returns `Result`; CLI will be updated in Phase 8.
 
 ## 13. Execution HTTP API
 

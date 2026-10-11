@@ -3,11 +3,14 @@ package capabilityruntime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -45,10 +48,14 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	}
 
 	if existing, err := i.Store.Get(ctx, pkg.Type, pkg.Version); err == nil && existing != nil {
-		notify(i.Observer, func(o Observer) {
-			o.Installed(InstallResult{Installed: existing, AlreadyPresent: true})
-		})
-		return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
+		if existing.Digest == pkg.Digest {
+			notify(i.Observer, func(o Observer) {
+				o.Installed(InstallResult{Installed: existing, AlreadyPresent: true})
+			})
+			return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
+		}
+		return nil, fmt.Errorf("%w: %s@%s already installed with digest %s, refusing to replace with %s",
+			ErrIntegrityConflict, pkg.Type, pkg.Version, existing.Digest, pkg.Digest)
 	}
 
 	notify(i.Observer, func(o Observer) { o.Installing(*pkg) })
@@ -62,6 +69,15 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	// 1. Materialize the artifact into the staging directory.
 	if err := i.materialize(ctx, pkg, stage); err != nil {
 		return nil, fmt.Errorf("install capability runtime %s@%s: %w", pkg.Type, pkg.Version, err)
+	}
+
+	// Ensure we have a content digest. For single-file artifacts, materialize
+	// already computed it. For directory payloads, compute it from the staged
+	// artifact directory now.
+	if pkg.Digest == "" {
+		if err := computeStagedDigest(pkg, stage); err != nil {
+			return nil, fmt.Errorf("compute digest for %s@%s: %w", pkg.Type, pkg.Version, err)
+		}
 	}
 
 	// 2. runtime.json must be present and authoritative.
@@ -114,16 +130,24 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
-	// 4. Persist the install record.
+	// 4. Derive the final installed directory from the content digest and
+	// write the install record with final paths. The record is complete
+	// before the rename, so the committed directory is never rewritten in
+	// place.
+	finalDir, err := i.Store.InstalledDir(pkg.Type, pkg.Version, pkg.Digest)
+	if err != nil {
+		return nil, err
+	}
+
 	rec := RecordFor(&Installed{
 		Type:         pkg.Type,
 		Version:      pkg.Version,
 		Digest:       pkg.Digest,
 		Registry:     pkg.Registry,
 		Platform:     PlatformForRuntime(m.Runtime.Type),
-		RootDir:      stage,
-		ManifestPath: manifestPath,
-		ArtifactPath: stage,
+		RootDir:      finalDir,
+		ManifestPath: filepath.Join(finalDir, ManifestFile),
+		ArtifactPath: finalDir,
 		Runtime: RuntimeSpec{
 			Type:       m.Runtime.Type,
 			Entrypoint: entrypoint,
@@ -137,8 +161,10 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
-	// 5. Atomic commit.
-	installed, err := i.Store.Commit(ctx, stage, pkg.Type, pkg.Version)
+	// 5. Atomic commit: rename the staging directory into its final
+	// content-addressed location. The install record already carries the
+	// final paths, so no post-rename rewrite is needed.
+	installed, err := i.Store.Commit(ctx, stage, pkg.Type, pkg.Version, pkg.Digest)
 	if err != nil {
 		return nil, err
 	}
@@ -212,14 +238,101 @@ func (i *Installer) materialize(ctx context.Context, pkg *Package, stage string)
 				return fmt.Errorf("extract artifact archive: %w", err)
 			}
 			return nil
+		} else {
+			// Single binary: place it next to the manifest.
+			return placeBinary(dst, stage, fileNameOf(pkg))
 		}
-
-		// Single binary: place it next to the manifest.
-		return placeBinary(dst, stage, fileNameOf(pkg))
 	}
-
 	// Directory payload: copy its contents into the staging root.
 	return copyDirStage(dst, stage)
+}
+
+// computeStagedDigest computes a SHA-256 digest of the staged artifact
+// directory. It creates a deterministic tar archive of the staged directory
+// (excluding the install record and manifest which are generated) and returns
+// its SHA-256 hash in the format "sha256:...".
+func computeStagedDigest(pkg *Package, stage string) error {
+	// Create a temporary file for the tar archive.
+	tmp, err := os.CreateTemp("", "staged-digest-*.tar")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	tmp.Close()
+
+	// Create a deterministic tar of the stage directory.
+	// We use a fixed timestamp and sorted file order for reproducibility.
+	tarFile, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer tarFile.Close()
+
+	// Walk the stage directory and add files to the tar archive.
+	// We skip the install.json and runtime.json as they are generated.
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		return err
+	}
+
+	// Sort entries for deterministic order
+	var names []string
+	for _, e := range entries {
+		if e.Name() == InstallFile || e.Name() == capabilityrt.ManifestFile {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+
+	// Simple deterministic tar - in production we'd use a proper tar library
+	// but for digest computation, we can use a simple approach.
+	// For now, compute a hash of all file contents in sorted order.
+	hasher := sha256.New()
+	for _, name := range names {
+		path := filepath.Join(stage, name)
+		if err := hashPath(hasher, path); err != nil {
+			return err
+		}
+	}
+
+	pkg.Digest = "sha256:" + hex.EncodeToString(hasher.Sum(nil))
+	return nil
+}
+
+// hashPath recursively adds file contents to the hasher in a deterministic way.
+func hashPath(hasher io.Writer, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		// Sort entries for deterministic order
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := hashPath(hasher, filepath.Join(path, name)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// Regular file: hash its contents
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if _, err := hasher.Write(data); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (i *Installer) resolveEntrypoint(pkg *Package, stage, manifestEntrypoint string) (string, error) {

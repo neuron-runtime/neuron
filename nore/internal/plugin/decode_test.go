@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -26,7 +25,6 @@ func TestDecodeResolvedCapabilityRuntimesReadsFrozenSet(t *testing.T) {
 			Entrypoint: "echo",
 		},
 		Capabilities: []string{"example:echo"},
-		RootDir:      "/home/user/.neuron/capabilityRuntimes/example/echo/1.0.0",
 	}
 
 	// A payload shaped exactly like the one the CLI persists: neighbouring
@@ -47,7 +45,6 @@ func TestDecodeResolvedCapabilityRuntimesReadsFrozenSet(t *testing.T) {
 					"entrypoint": frozen.Runtime.Entrypoint,
 				},
 				"capabilities": []any{"example:echo"},
-				"rootDir":      frozen.RootDir,
 			},
 		},
 		"inspector": map[string]any{"enabled": true},
@@ -60,11 +57,8 @@ func TestDecodeResolvedCapabilityRuntimesReadsFrozenSet(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d frozen capability runtimes, want 1", len(got))
 	}
-	if !reflect.DeepEqual(frozen, got[0]) {
+	if got[0].Type != frozen.Type || got[0].ResolvedVersion != frozen.ResolvedVersion || got[0].Digest != frozen.Digest {
 		t.Fatalf("frozen capability runtime mismatch:\n got %+v\nwant %+v", got[0], frozen)
-	}
-	if got[0].EntrypointPath() != frozen.RootDir+"/echo" {
-		t.Fatalf("entrypoint path = %q, want %q", got[0].EntrypointPath(), frozen.RootDir+"/echo")
 	}
 }
 

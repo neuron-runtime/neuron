@@ -44,6 +44,12 @@ func DefaultStoreDir() string {
 	return filepath.Join(home, ".neuron", "capabilityRuntimes")
 }
 
+// InstalledDir returns the final installed directory for an exact
+// (type, version, digest). The directory may not exist yet.
+func (s *FileassemblyStore) InstalledDir(typ, version, digest string) (string, error) {
+	return s.installedDir(typ, version, digest)
+}
+
 func (s *FileassemblyStore) Stage() (string, error) {
 	if err := os.MkdirAll(s.root, 0o755); err != nil {
 		return "", fmt.Errorf("create capability runtime store root: %w", err)
@@ -51,13 +57,12 @@ func (s *FileassemblyStore) Stage() (string, error) {
 	return os.MkdirTemp(s.root, ".tmp-*")
 }
 
-func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version string) (*capabilityruntime.Installed, error) {
-	rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(stage, capabilityruntime.InstallFile))
-	if err != nil {
-		return nil, fmt.Errorf("installed record missing in staging dir: %w", err)
-	}
-
-	final, err := s.installedDir(typ, version)
+// Commit atomically renames a fully-populated staging directory into its
+// final content-addressed location. The staging directory must already
+// contain a complete install.json with final paths; the committed directory
+// is never rewritten in place.
+func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version, digest string) (*capabilityruntime.Installed, error) {
+	final, err := s.installedDir(typ, version, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +71,7 @@ func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version stri
 		return nil, fmt.Errorf("staging dir missing: %w", err)
 	}
 	if _, err := os.Stat(final); err == nil {
-		return nil, fmt.Errorf("%w: %s@%s", capabilityruntime.ErrAlreadyInstalled, typ, version)
+		return nil, fmt.Errorf("%w: %s@%s@%s", capabilityruntime.ErrAlreadyInstalled, typ, version, digest)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
@@ -74,40 +79,49 @@ func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version stri
 	}
 
 	if err := os.Rename(stage, final); err != nil {
-		return nil, fmt.Errorf("commit capability runtime %s@%s: %w", typ, version, err)
+		return nil, fmt.Errorf("commit capability runtime %s@%s@%s: %w", typ, version, digest, err)
 	}
 
-	// The install record was written against the staging directory. Rewrite it
-	// in place with the final paths so later reads return a correct record.
-	installed := rec.Installed()
-	installed.RootDir = final
-	installed.ManifestPath = filepath.Join(final, capabilityruntime.ManifestFile)
-	installed.ArtifactPath = final
-
-	if err := capabilityruntime.WriteInstallRecord(filepath.Join(final, capabilityruntime.InstallFile), capabilityruntime.RecordFor(installed)); err != nil {
-		return nil, fmt.Errorf("rewrite install record: %w", err)
+	// Read the install record from the committed directory. The record was
+	// written with final paths before the rename, so no rewrite is needed.
+	rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(final, capabilityruntime.InstallFile))
+	if err != nil {
+		return nil, fmt.Errorf("read install record: %w", err)
 	}
-
-	return installed, nil
+	return rec.Installed(), nil
 }
 
+// Get returns the installed capability runtime for an exact version. The
+// store layout is content-addressed (<type>/<version>/<digest>/), so Get
+// scans the version directory for any committed install.json.
 func (s *FileassemblyStore) Get(ctx context.Context, typ, version string) (*capabilityruntime.Installed, error) {
-	dir, err := s.installedDir(typ, version)
+	base, err := s.typeDir(typ)
 	if err != nil {
 		return nil, err
 	}
-	recPath := filepath.Join(dir, capabilityruntime.InstallFile)
-	if _, err := os.Stat(recPath); err != nil {
+	versionDir := filepath.Join(base, strings.TrimSpace(version))
+	entries, err := os.ReadDir(versionDir)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s@%s", capabilityruntime.ErrNotFound, typ, version)
 		}
 		return nil, err
 	}
-	rec, err := capabilityruntime.ReadInstallRecord(recPath)
-	if err != nil {
-		return nil, err
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		recPath := filepath.Join(versionDir, e.Name(), capabilityruntime.InstallFile)
+		if _, err := os.Stat(recPath); err != nil {
+			continue
+		}
+		rec, err := capabilityruntime.ReadInstallRecord(recPath)
+		if err != nil {
+			continue
+		}
+		return rec.Installed(), nil
 	}
-	return rec.Installed(), nil
+	return nil, fmt.Errorf("%w: %s@%s", capabilityruntime.ErrNotFound, typ, version)
 }
 
 func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityruntime.Installed, error) {
@@ -129,12 +143,22 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 			return nil, err
 		}
 		for _, versionDir := range s.listVersionDirs(base) {
-			recPath := filepath.Join(versionDir, capabilityruntime.InstallFile)
-			rec, err := capabilityruntime.ReadInstallRecord(recPath)
+			entries, err := os.ReadDir(versionDir)
 			if err != nil {
 				continue
 			}
-			out = append(out, *rec.Installed())
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				recPath := filepath.Join(versionDir, e.Name(), capabilityruntime.InstallFile)
+				rec, err := capabilityruntime.ReadInstallRecord(recPath)
+				if err != nil {
+					continue
+				}
+				rec.Installed().RootDir = filepath.Join(versionDir, e.Name())
+				out = append(out, *rec.Installed())
+			}
 		}
 	}
 
@@ -145,7 +169,7 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 }
 
 // walkInstallDirs returns every directory below root that directly contains an
-// install.json record, flattening the <root>/owner/.../version tree.
+// install.json record, flattening the <root>/<owner>/.../<version>/<digest> tree.
 func (s *FileassemblyStore) walkInstallDirs(root string) []string {
 	var out []string
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -161,22 +185,37 @@ func (s *FileassemblyStore) walkInstallDirs(root string) []string {
 	return out
 }
 
+// Remove deletes every committed digest directory for an exact version,
+// making removal a cache/garbage-collection operation rather than an update.
 func (s *FileassemblyStore) Remove(ctx context.Context, typ, version string) error {
-	dir, err := s.installedDir(typ, version)
+	base, err := s.typeDir(typ)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(dir); err != nil {
+	versionDir := filepath.Join(base, strings.TrimSpace(version))
+	entries, err := os.ReadDir(versionDir)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s@%s", capabilityruntime.ErrNotFound, typ, version)
 		}
 		return err
 	}
-	return os.RemoveAll(dir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(versionDir, e.Name())); err != nil {
+			return err
+		}
+	}
+	// Remove the version directory itself if it is now empty.
+	_ = os.Remove(versionDir)
+	return nil
 }
 
-// installedDir returns the final directory for an exact (type, version).
-func (s *FileassemblyStore) installedDir(typ, version string) (string, error) {
+// installedDir returns the final content-addressed directory for an exact
+// (type, version, digest).
+func (s *FileassemblyStore) installedDir(typ, version, digest string) (string, error) {
 	base, err := s.typeDir(typ)
 	if err != nil {
 		return "", err
@@ -184,7 +223,10 @@ func (s *FileassemblyStore) installedDir(typ, version string) (string, error) {
 	if strings.TrimSpace(version) == "" {
 		return "", fmt.Errorf("capability runtime version is required")
 	}
-	return filepath.Join(base, strings.TrimSpace(version)), nil
+	if strings.TrimSpace(digest) == "" {
+		return "", fmt.Errorf("capability runtime digest is required")
+	}
+	return filepath.Join(base, strings.TrimSpace(version), strings.TrimSpace(digest)), nil
 }
 
 // typeDir maps a logical capability runtime name to its store branch:

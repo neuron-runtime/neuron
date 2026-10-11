@@ -162,14 +162,14 @@ type ExecuteResponse struct {
 }
 
 // ExecutionResult is returned by a wait-mode Execute request once the
-// execution has reached a terminal state. Results aggregates every capability
-// result keyed by capability ID.
+// execution has reached a terminal state. Result carries the Assembly result
+// object produced from the blueprint's result contract.
 type ExecutionResult struct {
-	ExecutionID core.ID                   `json:"execution_id"`
-	InstanceID  string                    `json:"instance_id"`
-	Status      string                    `json:"status"`
-	Error       string                    `json:"error,omitempty"`
-	Results     map[string]map[string]any `json:"results,omitempty"`
+	ExecutionID core.ID               `json:"execution_id"`
+	InstanceID  string                `json:"instance_id"`
+	Status      string                `json:"status"`
+	Error       string                `json:"error,omitempty"`
+	Result      map[string]any        `json:"result,omitempty"`
 }
 
 func HashBlueprint(value any) (string, error) {

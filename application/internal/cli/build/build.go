@@ -197,8 +197,9 @@ func buildLocalCapabilityRuntimes(ctx context.Context, cfg config.Config, root s
 }
 
 // saveBuildRecord persists the build outcome together with the authoring
-// fingerprint that produced it. The legacy registration key file is written
-// too so older tooling and docs keep working during the register→build rename.
+// fingerprint that produced it. The record is written immutably to
+// .neuron/builds/<fingerprint>/build.json and the current pointer is updated
+// atomically to point to the new build.
 func saveBuildRecord(root, fingerprint string, key protocol.InstanceKey, capabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime) error {
 	record := project.BuildRecord{
 		Fingerprint:        fingerprint,
@@ -206,14 +207,13 @@ func saveBuildRecord(root, fingerprint string, key protocol.InstanceKey, capabil
 		BuiltAt:            time.Now().UTC(),
 		CapabilityRuntimes: capabilityRuntimes,
 	}
-	if err := project.SaveBuildRecord(root, record); err != nil {
+	if err := project.SaveBuildRecord(root, fingerprint, record); err != nil {
 		return fmt.Errorf("save build record: %w", err)
 	}
 
-	// Migration window artifact: keep `neuron register` standalone consumers
-	// working until docs/tests are migrated to `neuron build`.
-	if err := project.SaveRegistrationKey(root, key); err != nil {
-		return fmt.Errorf("save registration key: %w", err)
+	// Update the current build pointer atomically.
+	if err := project.SaveCurrentPointer(root, fingerprint); err != nil {
+		return fmt.Errorf("save current pointer: %w", err)
 	}
 
 	return nil
@@ -269,10 +269,6 @@ func register(ctx context.Context, cfg config.Config, root string, verbose bool,
 
 	result, err := c.Register(ctx, request)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	if err := project.SaveRegistrationKey(root, result.Key); err != nil {
 		return nil, nil, err
 	}
 

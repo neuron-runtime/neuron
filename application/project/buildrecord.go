@@ -17,12 +17,17 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
-const buildRecordFile = "build.json"
+const (
+	neuronDirectory      = ".neuron"
+	buildRecordFile      = "build.json"
+	buildsDirectory      = "builds"
+	currentPointerFile   = "current.json"
+)
 
 // BuildRecord is the persisted outcome of a successful `neuron build`.
-// `neuron run` reads it to address the registered assembly and to detect
-// staleness: when the current authoring fingerprint differs from the recorded
-// one, the project must be rebuilt before it runs.
+// It is stored immutably under .neuron/builds/<fingerprint>/build.json.
+// `neuron run` reads the current build via .neuron/current.json which points
+// to the fingerprint of the active build.
 type BuildRecord struct {
 	// Fingerprint is the content hash of the authoring inputs at build time
 	// (config file, Assembly entry, project sources, local capability runtime roots).
@@ -39,18 +44,35 @@ type BuildRecord struct {
 	CapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes"`
 }
 
-// BuildRecordPath returns the path of the persisted build record inside the
-// project's .neuron directory.
-func BuildRecordPath(projectRoot string) string {
-	return filepath.Join(projectRoot, neuronDirectory, buildRecordFile)
+// CurrentPointer points to the currently active build fingerprint.
+type CurrentPointer struct {
+	Fingerprint string `json:"fingerprint"`
 }
 
-// SaveBuildRecord persists a build record for projectRoot.
-func SaveBuildRecord(projectRoot string, record BuildRecord) error {
-	path := BuildRecordPath(projectRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create .neuron directory: %w", err)
+// BuildDir returns the immutable build directory for a given fingerprint.
+func BuildDir(projectRoot, fingerprint string) string {
+	return filepath.Join(projectRoot, neuronDirectory, buildsDirectory, fingerprint)
+}
+
+// BuildRecordPath returns the path of the immutable build record for a fingerprint.
+func BuildRecordPath(projectRoot, fingerprint string) string {
+	return filepath.Join(BuildDir(projectRoot, fingerprint), buildRecordFile)
+}
+
+// CurrentPointerPath returns the path of the mutable current build pointer.
+func CurrentPointerPath(projectRoot string) string {
+	return filepath.Join(projectRoot, neuronDirectory, currentPointerFile)
+}
+
+// SaveBuildRecord persists an immutable build record for projectRoot at the
+// given fingerprint. The record is written to .neuron/builds/<fingerprint>/build.json.
+// The current pointer is NOT updated; call UpdateCurrentPointer separately.
+func SaveBuildRecord(projectRoot, fingerprint string, record BuildRecord) error {
+	dir := BuildDir(projectRoot, fingerprint)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create build directory: %w", err)
 	}
+	path := filepath.Join(dir, buildRecordFile)
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode build record: %w", err)
@@ -61,13 +83,13 @@ func SaveBuildRecord(projectRoot string, record BuildRecord) error {
 	return nil
 }
 
-// LoadBuildRecord reads the build record persisted by SaveBuildRecord. A
-// missing record is ErrNotBuilt.
-func LoadBuildRecord(projectRoot string, out *BuildRecord) error {
+// LoadBuildRecord reads the immutable build record for a fingerprint.
+func LoadBuildRecord(projectRoot, fingerprint string, out *BuildRecord) error {
 	if out == nil {
 		return fmt.Errorf("build record destination is nil")
 	}
-	data, err := os.ReadFile(BuildRecordPath(projectRoot))
+	path := BuildRecordPath(projectRoot, fingerprint)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return ErrNotBuilt
@@ -78,6 +100,47 @@ func LoadBuildRecord(projectRoot string, out *BuildRecord) error {
 		return fmt.Errorf("decode build record: %w", err)
 	}
 	return nil
+}
+
+// SaveCurrentPointer atomically updates the current build pointer.
+// Uses write-rename for atomicity.
+func SaveCurrentPointer(projectRoot, fingerprint string) error {
+	path := CurrentPointerPath(projectRoot)
+	ptr := CurrentPointer{Fingerprint: fingerprint}
+	data, err := json.MarshalIndent(ptr, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode current pointer: %w", err)
+	}
+	// Atomic write: write to temp file then rename
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write current pointer temp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename current pointer: %w", err)
+	}
+	return nil
+}
+
+// LoadCurrentPointer reads the current build fingerprint pointer.
+func LoadCurrentPointer(projectRoot string) (string, error) {
+	path := CurrentPointerPath(projectRoot)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotBuilt
+		}
+		return "", fmt.Errorf("read current pointer: %w", err)
+	}
+	var ptr CurrentPointer
+	if err := json.Unmarshal(data, &ptr); err != nil {
+		return "", fmt.Errorf("decode current pointer: %w", err)
+	}
+	if ptr.Fingerprint == "" {
+		return "", ErrNotBuilt
+	}
+	return ptr.Fingerprint, nil
 }
 
 // FingerprintInputs enumerates the authoring inputs a fingerprint covers. Every

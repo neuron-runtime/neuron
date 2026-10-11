@@ -22,8 +22,9 @@ func writeFile(t *testing.T, path, content string) {
 
 func TestBuildRecordRoundTrip(t *testing.T) {
 	root := t.TempDir()
+	fingerprint := "abc123"
 	rec := BuildRecord{
-		Fingerprint: "abc123",
+		Fingerprint: fingerprint,
 		Key: protocol.InstanceKey{
 			AssemblyID: "demo",
 			Version:    "1.0.0",
@@ -33,12 +34,12 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 		BuiltAt: time.Now().UTC(),
 	}
 
-	if err := SaveBuildRecord(root, rec); err != nil {
+	if err := SaveBuildRecord(root, fingerprint, rec); err != nil {
 		t.Fatal(err)
 	}
 
 	var got BuildRecord
-	if err := LoadBuildRecord(root, &got); err != nil {
+	if err := LoadBuildRecord(root, fingerprint, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Fingerprint != rec.Fingerprint {
@@ -54,7 +55,7 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 
 func TestLoadBuildRecordMissingIsErrNotBuilt(t *testing.T) {
 	var rec BuildRecord
-	err := LoadBuildRecord(t.TempDir(), &rec)
+	err := LoadBuildRecord(t.TempDir(), "nonexistent", &rec)
 	if !errors.Is(err, ErrNotBuilt) {
 		t.Fatalf("err = %v, want ErrNotBuilt", err)
 	}

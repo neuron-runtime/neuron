@@ -66,6 +66,34 @@ func TestMain(m *testing.M) {
 	fixtures.wasm = filepath.Join(dir, "echo.wasm")
 	fixtures.spin = filepath.Join(dir, "spin.wasm")
 
+	// Create a mock capability runtime store layout for tests.
+	// Layout: <storeRoot>/<type-path>/<version>/<digest>/<entrypoint>
+	const testDigest = "sha256:test"
+	storeRoot := filepath.Join(dir, "store")
+	// Process runtime: example:echo -> example/echo
+	processDir := filepath.Join(storeRoot, "example", "echo", "1.0.0", testDigest)
+	if err := os.MkdirAll(processDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := copyFile(fixtures.native, filepath.Join(processDir, "echo")); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	// WASM runtime: example:echo-wasm -> example/echo-wasm
+	wasmDir := filepath.Join(storeRoot, "example", "echo-wasm", "1.0.0", testDigest)
+	if err := os.MkdirAll(wasmDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := copyFile(fixtures.wasm, filepath.Join(wasmDir, "echo.wasm")); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	// Configure the plugin package to use our mock store.
+	SetStoreRoot(storeRoot)
+
 	code := m.Run()
 
 	// The backends keep process-global state -- the process backend's worker pools
@@ -77,33 +105,41 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o755)
+}
+
 // resolvedCapabilityRuntime builds a frozen ResolvedCapabilityRuntime whose runtime kind and
 // declared protocol reflect the transport the fixture actually speaks. The
 // echo/echo-wasm fixtures speak the legacy stdin/stdout JSON protocol, so they
 // declare neuron/capability-runtime-v1-json (see ProtocolJSONV1).
-func resolvedCapabilityRuntime(t *testing.T, typ, entrypoint, rootDir, runtimeKind string) capabilityrt.ResolvedCapabilityRuntime {
+func resolvedCapabilityRuntime(t *testing.T, typ, entrypoint, runtimeKind string) capabilityrt.ResolvedCapabilityRuntime {
 	t.Helper()
 	return capabilityrt.ResolvedCapabilityRuntime{
 		Type:             typ,
 		RequestedVersion: "1.0.0",
 		ResolvedVersion:  "1.0.0",
 		Registry:         "local",
+		Digest:           "sha256:test",
 		Runtime: capabilityrt.RuntimeInfo{
 			Type:       runtimeKind,
 			Protocol:   capabilityrt.ProtocolJSONV1,
 			Entrypoint: entrypoint,
 		},
-		RootDir: rootDir,
 	}
 }
 
 func echoResolved(t *testing.T, typ, kind string) capabilityrt.ResolvedCapabilityRuntime {
 	t.Helper()
-	entry, root := fixtures.wasm, filepath.Dir(fixtures.wasm)
-	if kind == capabilityrt.RuntimeKindProcess {
-		entry, root = fixtures.native, filepath.Dir(fixtures.native)
+	entry := fixtures.wasm
+	if kind == "" || kind == capabilityrt.RuntimeKindProcess {
+		entry = fixtures.native
 	}
-	return resolvedCapabilityRuntime(t, typ, filepath.Base(entry), root, kind)
+	return resolvedCapabilityRuntime(t, typ, filepath.Base(entry), kind)
 }
 
 func executionContext(input map[string]any) contracts.ExecutionContext {
@@ -242,7 +278,7 @@ func TestAdapterMissingEntrypoint(t *testing.T) {
 		{"wasm", capabilityrt.RuntimeKindWasm},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res := resolvedCapabilityRuntime(t, "example:echo", "does-not-exist", t.TempDir(), tc.kind)
+			res := resolvedCapabilityRuntime(t, "example:echo", "does-not-exist", tc.kind)
 			if _, err := NewAdapter(res); err == nil {
 				t.Fatal("expected error for missing entrypoint")
 			}
@@ -273,7 +309,6 @@ func TestDecodeResolvedCapabilityRuntimesRoundTrip(t *testing.T) {
 				"protocol":   res.Runtime.Protocol,
 				"entrypoint": res.Runtime.Entrypoint,
 			},
-			"rootDir": res.RootDir,
 		},
 	}}
 
@@ -284,7 +319,7 @@ func TestDecodeResolvedCapabilityRuntimesRoundTrip(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d capability runtimes, want 1", len(got))
 	}
-	if got[0].Type != res.Type || got[0].Runtime.Protocol != res.Runtime.Protocol || got[0].RootDir != res.RootDir {
+	if got[0].Type != res.Type || got[0].Runtime.Protocol != res.Runtime.Protocol {
 		t.Errorf("round-trip mismatch: %+v", got[0])
 	}
 }

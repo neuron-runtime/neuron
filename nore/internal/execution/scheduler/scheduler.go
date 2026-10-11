@@ -301,8 +301,15 @@ func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionm
 		return nil
 	}
 	s.scopes.Release(execution.ID)
+
+	// Resolve the Assembly result from the blueprint's result contract.
+	assemblyResult, err := execution.ResolveAssemblyResult()
+	if err != nil {
+		return fmt.Errorf("resolve assembly result: %w", err)
+	}
+
 	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{
-		Results: execution.StringKeyedResults(),
+		Result: assemblyResult,
 	}))
 }
 
