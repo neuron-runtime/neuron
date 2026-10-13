@@ -27,7 +27,7 @@ var wasmMagicHeader = []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
 func writeWasmCapabilityRuntimePackage(t *testing.T, root, typ, version string) string {
 	t.Helper()
 
-	split, err := capabilityruntime.ParseType(typ)
+	split, err := capabilityrt.ParseType(typ)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func writePackageArchiveCapabilityRuntime(t *testing.T, rootDir, typ, version, r
 		Capabilities: []string{"echo"},
 		Platforms: map[string]capabilityrt.Platform{
 			capabilityrt.PlatformWasm:        {Artifact: "echo.wasm"},
-			capabilityruntime.HostPlatform(): {Artifact: "capabilityruntime.sh"},
+			capabilityrt.HostPlatform(): {Artifact: "capabilityruntime.sh"},
 		},
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
@@ -180,7 +180,7 @@ func installViaLocal(t *testing.T, regRoot, storeRoot string, req capabilityrunt
 func writeCapabilityRuntimePackage(t *testing.T, root, typ, version string) string {
 	t.Helper()
 
-	split, err := capabilityruntime.ParseType(typ)
+	split, err := capabilityrt.ParseType(typ)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func writeCapabilityRuntimePackage(t *testing.T, root, typ, version string) stri
 		Capabilities: []string{"read"},
 		Features:     []string{"io.read"},
 		Platforms: map[string]capabilityrt.Platform{
-			capabilityruntime.HostPlatform(): {Artifact: entrypoint},
+			capabilityrt.HostPlatform(): {Artifact: entrypoint},
 		},
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
@@ -669,14 +669,14 @@ func TestInstallRejectsRuntimeArtifactMismatch(t *testing.T) {
 			runtime:    capabilityrt.RuntimeKindProcess,
 			entrypoint: "evil.wasm",
 			payload:    wasmMagicHeader,
-			platform:   capabilityruntime.HostPlatform(),
+			platform:   capabilityrt.HostPlatform(),
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			regRoot := t.TempDir()
-			split, err := capabilityruntime.ParseType("example:echo")
+			split, err := capabilityrt.ParseType("example:echo")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -734,8 +734,8 @@ func TestPackageArchiveResolveInstallProcess(t *testing.T) {
 	if installed.Runtime.Type != capabilityrt.RuntimeKindProcess {
 		t.Errorf("installed runtime type = %q, want %q", installed.Runtime.Type, capabilityrt.RuntimeKindProcess)
 	}
-	if installed.Platform != capabilityruntime.HostPlatform() {
-		t.Errorf("installed platform = %q, want %q", installed.Platform, capabilityruntime.HostPlatform())
+	if installed.Platform != capabilityrt.HostPlatform() {
+		t.Errorf("installed platform = %q, want %q", installed.Platform, capabilityrt.HostPlatform())
 	}
 	want := "capabilityruntime.sh"
 	if installed.Runtime.Entrypoint != want {

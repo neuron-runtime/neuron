@@ -35,11 +35,11 @@ func newCapabilityRuntimeCmd() *cobra.Command {
 		Use:   "capability-runtime <name>",
 		Short: "Generate a new capability runtime project",
 		Long: "Generate a new capability runtime project from a template.\n\n" +
-		"The generated capability runtime is dependency-free and uses the stdio JSON\n" +
-		"protocol (neuron/capability-runtime-v1-json). It can be built with `neuron build`\n" +
-		"and executed by N.O.R.E. without any external dependencies.\n\n" +
-		"Example:\n" +
-		"  neuron new capability-runtime my-runtime --lang go",
+			"The generated capability runtime is dependency-free and uses the stdio JSON\n" +
+			"protocol (neuron/capability-runtime-v1-json). It can be built with `neuron build`\n" +
+			"and executed by N.O.R.E. without any external dependencies.\n\n" +
+			"Example:\n" +
+			"  neuron new capability-runtime my-runtime --lang go",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

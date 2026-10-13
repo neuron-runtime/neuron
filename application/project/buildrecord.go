@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	neuronDirectory      = ".neuron"
-	buildRecordFile      = "build.json"
-	buildsDirectory      = "builds"
-	currentPointerFile   = "current.json"
+	neuronDirectory    = ".neuron"
+	buildRecordFile    = "build.json"
+	buildsDirectory    = "builds"
+	currentPointerFile = "current.json"
 )
 
 // BuildRecord is the persisted outcome of a successful `neuron build`.

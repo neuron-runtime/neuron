@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
@@ -84,7 +85,7 @@ func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version, dig
 
 	// Read the install record from the committed directory. The record was
 	// written with final paths before the rename, so no rewrite is needed.
-	rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(final, capabilityruntime.InstallFile))
+	rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(final, capabilityrt.InstallFile))
 	if err != nil {
 		return nil, fmt.Errorf("read install record: %w", err)
 	}
@@ -111,7 +112,7 @@ func (s *FileassemblyStore) Get(ctx context.Context, typ, version string) (*capa
 		if !e.IsDir() {
 			continue
 		}
-		recPath := filepath.Join(versionDir, e.Name(), capabilityruntime.InstallFile)
+		recPath := filepath.Join(versionDir, e.Name(), capabilityrt.InstallFile)
 		if _, err := os.Stat(recPath); err != nil {
 			continue
 		}
@@ -130,7 +131,7 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 	if strings.TrimSpace(typ) == "" {
 		// List everything: find every install.json under the store root.
 		for _, dir := range s.walkInstallDirs(s.root) {
-			rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(dir, capabilityruntime.InstallFile))
+			rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(dir, capabilityrt.InstallFile))
 			if err != nil {
 				continue
 			}
@@ -151,7 +152,7 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 				if !e.IsDir() {
 					continue
 				}
-				recPath := filepath.Join(versionDir, e.Name(), capabilityruntime.InstallFile)
+				recPath := filepath.Join(versionDir, e.Name(), capabilityrt.InstallFile)
 				rec, err := capabilityruntime.ReadInstallRecord(recPath)
 				if err != nil {
 					continue
@@ -176,7 +177,7 @@ func (s *FileassemblyStore) walkInstallDirs(root string) []string {
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() || info.Name() != capabilityruntime.InstallFile {
+		if info.IsDir() || info.Name() != capabilityrt.InstallFile {
 			return nil
 		}
 		out = append(out, filepath.Dir(path))
@@ -232,7 +233,7 @@ func (s *FileassemblyStore) installedDir(typ, version, digest string) (string, e
 // typeDir maps a logical capability runtime name to its store branch:
 // "github:read" -> <root>/github/read.
 func (s *FileassemblyStore) typeDir(typ string) (string, error) {
-	path, err := capabilityruntime.TypePath(typ)
+	path, err := capabilityrt.TypePath(typ)
 	if err != nil {
 		return "", err
 	}

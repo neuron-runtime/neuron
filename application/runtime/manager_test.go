@@ -25,7 +25,7 @@ func (s *stubConnection) Stream(ctx context.Context, method, path string, body a
 func (s *stubConnection) OpenWebSocket(ctx context.Context, requestPath string) (*connection.WebSocketStream, error) {
 	return nil, nil
 }
-func (s *stubConnection) Close() error { return nil }
+func (s *stubConnection) Close() error                    { return nil }
 func (s *stubConnection) Transport() connection.Transport { return nil }
 
 func TestEnsureHealthyDoesNotResolveBinary(t *testing.T) {

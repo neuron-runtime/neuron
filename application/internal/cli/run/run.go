@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	verbose     bool
-	params      string
-	paramsFile  string
-	remoteURL   string
+	verbose      bool
+	params       string
+	paramsFile   string
+	remoteURL    string
 	overridePort string
-	format      string
+	format       string
 )
 
 // New constructs and configures the Cobra command for executing Neuron assemblies.
@@ -193,10 +193,10 @@ func discoverLocalRuntime(cfg config.Config, overridePort string) (string, error
 				return "", fmt.Errorf("read discovery metadata: %w", err)
 			}
 			var meta struct {
-				Port      string `json:"port"`
-				Host      string `json:"host"`
+				Port        string `json:"port"`
+				Host        string `json:"host"`
 				ProjectRoot string `json:"projectRoot"`
-				PID       int    `json:"pid"`
+				PID         int    `json:"pid"`
 			}
 			if err := json.Unmarshal(data, &meta); err != nil {
 				return "", fmt.Errorf("parse discovery metadata: %w", err)

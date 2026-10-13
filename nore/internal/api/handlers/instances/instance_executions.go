@@ -113,52 +113,52 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-// Wait mode (the default) blocks until the execution terminates and
-// returns its final result, turning N.O.R.E. into a synchronous runtime
-// for API callers. The execution itself still runs asynchronously.
-if err := execution.Wait(r.Context()); err != nil {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return // the client went away; nothing can be written
+	// Wait mode (the default) blocks until the execution terminates and
+	// returns its final result, turning N.O.R.E. into a synchronous runtime
+	// for API callers. The execution itself still runs asynchronously.
+	if err := execution.Wait(r.Context()); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return // the client went away; nothing can be written
+		}
+		utils.WriteJSON(w, http.StatusOK, protocol.Response{
+			Message: "execution failed",
+			Status:  http.StatusOK,
+			Data: protocol.ExecutionResult{
+				ExecutionID: execution.ID,
+				InstanceID:  i.ID,
+				Status:      string(execution.Status()),
+				Error:       err.Error(),
+			},
+		})
+		return
 	}
+
+	// Resolve the Assembly result from the blueprint's result contract.
+	assemblyResult, err := execution.ResolveAssemblyResult()
+	if err != nil {
+		utils.WriteJSON(w, http.StatusOK, protocol.Response{
+			Message: "execution failed",
+			Status:  http.StatusOK,
+			Data: protocol.ExecutionResult{
+				ExecutionID: execution.ID,
+				InstanceID:  i.ID,
+				Status:      string(execution.Status()),
+				Error:       fmt.Sprintf("resolve assembly result: %v", err),
+			},
+		})
+		return
+	}
+
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
-		Message: "execution failed",
+		Message: "execution completed",
 		Status:  http.StatusOK,
 		Data: protocol.ExecutionResult{
 			ExecutionID: execution.ID,
 			InstanceID:  i.ID,
 			Status:      string(execution.Status()),
-			Error:       err.Error(),
+			Result:      assemblyResult,
 		},
 	})
-	return
-}
-
-// Resolve the Assembly result from the blueprint's result contract.
-assemblyResult, err := execution.ResolveAssemblyResult()
-if err != nil {
-	utils.WriteJSON(w, http.StatusOK, protocol.Response{
-		Message: "execution failed",
-		Status:  http.StatusOK,
-		Data: protocol.ExecutionResult{
-			ExecutionID: execution.ID,
-			InstanceID:  i.ID,
-			Status:      string(execution.Status()),
-			Error:       fmt.Sprintf("resolve assembly result: %v", err),
-		},
-	})
-	return
-}
-
-utils.WriteJSON(w, http.StatusOK, protocol.Response{
-	Message: "execution completed",
-	Status:  http.StatusOK,
-	Data: protocol.ExecutionResult{
-		ExecutionID: execution.ID,
-		InstanceID:  i.ID,
-		Status:      string(execution.Status()),
-		Result:      assemblyResult,
-	},
-})
 }
 
 func (h *Handler) GetExecutionState(w http.ResponseWriter, r *http.Request) {

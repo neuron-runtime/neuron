@@ -2,6 +2,8 @@ package capabilityruntime
 
 import (
 	"testing"
+
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 func TestParseType(t *testing.T) {
@@ -21,7 +23,7 @@ func TestParseType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		split, err := ParseType(c.in)
+		split, err := capabilityrt.ParseType(c.in)
 		if c.wantErr {
 			if err == nil {
 				t.Errorf("ParseType(%q): expected error, got %+v", c.in, split)
@@ -58,7 +60,7 @@ func TestToGitHubRepo(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		split, err := ParseType(c.in)
+		split, err := capabilityrt.ParseType(c.in)
 		if err != nil {
 			t.Fatalf("ParseType(%q): %v", c.in, err)
 		}
@@ -79,7 +81,7 @@ func TestToLocalPath(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		split, err := ParseType(c.in)
+		split, err := capabilityrt.ParseType(c.in)
 		if err != nil {
 			t.Fatalf("ParseType(%q): %v", c.in, err)
 		}
@@ -91,7 +93,7 @@ func TestToLocalPath(t *testing.T) {
 
 func TestNormalizeTypeRoundTrip(t *testing.T) {
 	in := "neuron-runtime:github:read"
-	got, err := NormalizeType(in)
+	got, err := capabilityrt.NormalizeType(in)
 	if err != nil {
 		t.Fatalf("NormalizeType: %v", err)
 	}
@@ -101,14 +103,14 @@ func TestNormalizeTypeRoundTrip(t *testing.T) {
 }
 
 func TestTypePath(t *testing.T) {
-	got, err := TypePath("neuron-runtime:github:read")
+	got, err := capabilityrt.TypePath("neuron-runtime:github:read")
 	if err != nil {
 		t.Fatalf("TypePath: %v", err)
 	}
 	if got != "neuron-runtime/github/read" {
 		t.Errorf("TypePath = %q", got)
 	}
-	if _, err := TypePath("nope"); err == nil {
+	if _, err := capabilityrt.TypePath("nope"); err == nil {
 		t.Error("TypePath with no ':' should error")
 	}
 }

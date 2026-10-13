@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
@@ -77,7 +78,7 @@ func (r *Registry) repoFor(typ string) (RepoRef, error) {
 		return ref, nil
 	}
 
-	split, err := capabilityruntime.ParseType(typ)
+	split, err := capabilityrt.ParseType(typ)
 	if err != nil {
 		return RepoRef{}, err
 	}

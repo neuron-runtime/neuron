@@ -65,14 +65,14 @@ func main() {
 		return
 	}
 
-// Project mode: run as a foreground project runtime with auto port allocation
-// and discovery metadata.
-if projectMode {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg)
-	return
-}
+	// Project mode: run as a foreground project runtime with auto port allocation
+	// and discovery metadata.
+	if projectMode {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg)
+		return
+	}
 
 	// Traditional daemon mode (global Unix socket or explicit TCP)
 	// A TCP listener is reachable by anything that can route to this host, so it

@@ -24,7 +24,7 @@ import (
 // simple build.command can `sh build.sh` to emit the artifact).
 func writePoweredLocalCapabilityRuntime(t *testing.T, root, typ, version, buildCmd, buildScript, artifactPath string) {
 	t.Helper()
-	typePath, err := capabilityruntime.TypePath(typ)
+	typePath, err := capabilityrt.TypePath(typ)
 	if err != nil {
 		t.Fatal(err)
 	}

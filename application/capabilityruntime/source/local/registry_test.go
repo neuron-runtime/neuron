@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime/source/local"
-	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // writeVersionDir lays out <type path>/<version>/runtime.json under root.
@@ -45,7 +45,7 @@ func writeVersionDir(t *testing.T, root, typ, version, renamed string) string {
 
 func mustTypePath(t *testing.T, typ string) string {
 	t.Helper()
-	p, err := capabilityruntime.TypePath(typ)
+	p, err := capabilityrt.TypePath(typ)
 	if err != nil {
 		t.Fatal(err)
 	}

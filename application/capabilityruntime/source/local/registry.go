@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 )
 
 // VersionSpec is a resolved view of one version directory under a local root.
@@ -287,7 +287,7 @@ func artifactOf(spec *VersionSpec) capabilityruntime.Artifact {
 }
 
 // archivePayload finds the canonical capability runtime package archive in dir,
-// preferring <type>-<version>-capabilityruntime.neuron.tar.gz then any asset carrying
+// preferring <type>-<version>-capabilityrt.neuron.tar.gz then any asset carrying
 // the canonical package archive suffix.
 func archivePayload(dir, typ, version string) (string, bool) {
 	exact := filepath.Join(dir, capabilityrt.PackageArchiveName(typ, version))
@@ -310,7 +310,7 @@ func archivePayload(dir, typ, version string) (string, bool) {
 }
 
 func typeDirFor(root, typ string) (string, error) {
-	path, err := capabilityruntime.TypePath(typ)
+	path, err := capabilityrt.TypePath(typ)
 	if err != nil {
 		return "", err
 	}

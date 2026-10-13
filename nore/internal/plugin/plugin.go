@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	"github.com/neuron-runtime/neuron/nore/internal/backend"
 	"github.com/neuron-runtime/neuron/nore/internal/backend/process"
 	"github.com/neuron-runtime/neuron/nore/internal/backend/wasm"
@@ -126,7 +125,7 @@ func resolveInstalledDir(resolved capabilityrt.ResolvedCapabilityRuntime) string
 	if storeRoot == "" {
 		return ""
 	}
-	path, err := capabilityruntime.TypePath(resolved.Type)
+	path, err := capabilityrt.TypePath(resolved.Type)
 	if err != nil {
 		return ""
 	}

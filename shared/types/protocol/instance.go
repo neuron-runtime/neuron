@@ -165,11 +165,11 @@ type ExecuteResponse struct {
 // execution has reached a terminal state. Result carries the Assembly result
 // object produced from the blueprint's result contract.
 type ExecutionResult struct {
-	ExecutionID core.ID               `json:"execution_id"`
-	InstanceID  string                `json:"instance_id"`
-	Status      string                `json:"status"`
-	Error       string                `json:"error,omitempty"`
-	Result      map[string]any        `json:"result,omitempty"`
+	ExecutionID core.ID        `json:"execution_id"`
+	InstanceID  string         `json:"instance_id"`
+	Status      string         `json:"status"`
+	Error       string         `json:"error,omitempty"`
+	Result      map[string]any `json:"result,omitempty"`
 }
 
 func HashBlueprint(value any) (string, error) {
