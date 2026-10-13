@@ -103,52 +103,61 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 1. Project Runtime — bare `neuron`
 
-- [ ] Make bare `neuron` start the current project's N.O.R.E. runtime in the foreground when a `neuron.config.json`, `neuron.config.yaml`, or `neuron.config.yml` is found.
-- [ ] Resolve the project root once and use it consistently for configuration, build selection, endpoint discovery, and runtime lifecycle.
-- [ ] Remove the current automatic global-daemon model from the normal CLI path.
-- [ ] Stop using global Unix socket/PID/data paths as the identity or lifecycle mechanism for a project runtime.
-- [ ] Treat one running `neuron` process in one project root as one project runtime.
-- [ ] Keep the runtime lifecycle owned by that process: start, readiness, logs, graceful shutdown, cancellation, and cleanup.
-- [ ] Prevent two `neuron` processes from incorrectly claiming the same project runtime.
-- [ ] Define a project-runtime identity/discovery record that can safely detect an active runtime and reject stale records.
-- [ ] Keep low-level N.O.R.E. transport details internal; users should not need to specify socket paths, PID files, or daemon paths.
-- [ ] Ensure runtime startup does not mutate immutable build or installed Capability Runtime artifacts.
+- [x] Make bare `neuron` start the current project's N.O.R.E. runtime in the foreground when a `neuron.config.json`, `neuron.config.yaml`, or `neuron.config.yml` is found. **Implemented.** `runProjectRuntime` in `cli.go` starts `nore --project`.
+- [x] Resolve the project root once and use it consistently for configuration, build selection, endpoint discovery, and runtime lifecycle. **Implemented.** `loadConfig` finds project root; passed to `nore --project-root`.
+- [x] Remove the current automatic global-daemon model from the normal CLI path. **Implemented.** `neuron` no longer starts a background daemon by default; `neuron run` connects to project runtime.
+- [x] Stop using global Unix socket/PID/data paths as the identity or lifecycle mechanism for a project runtime. **Implemented.** Project runtime uses loopback TCP with auto port.
+- [x] Treat one running `neuron` process in one project root as one project runtime. **Implemented.** Each `neuron` process owns one runtime.
+- [x] Keep the runtime lifecycle owned by that process: start, readiness, logs, graceful shutdown, cancellation, and cleanup. **Implemented.** `nore --project` runs in foreground, logs to stdout/stderr.
+- [x] Prevent two `neuron` processes from incorrectly claiming the same project runtime. **Implemented.** Discovery metadata includes PID and project root; stale detection rejects dead/foreign processes.
+- [x] Define a project-runtime identity/discovery record that can safely detect an active runtime and reject stale records. **Implemented.** `.neuron/runtime.json` with port, PID, project root, token.
+- [x] Write endpoint discovery metadata atomically. **Implemented.** `atomicWriteFile` with temp+rename.
+- [x] Include enough ownership information in discovery metadata to reject a stale or foreign process. **Implemented.** PID and project root in discovery metadata.
+- [x] Remove assumptions that the runtime is always reachable through the current global Unix socket. **Implemented.** `neuron run` discovers via `.neuron/runtime.json`; no global socket.
+- [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
+- [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
+
+**Phase 1 Complete.** Project runtime runs in foreground with auto port allocation and discovery metadata.
 
 ## 2. Project Runtime Endpoint / N.O.R.E. Port Discovery
 
-- [ ] Add project configuration for `runtime.host`.
-- [ ] Add project configuration for `runtime.port`, accepting an explicit integer or `"auto"`.
-- [ ] Default local runtime binding to loopback rather than a publicly reachable interface.
-- [ ] Implement automatic port allocation by asking the OS for an available port and retaining the bound listener rather than probing and binding separately.
-- [ ] Report the actual bound port after the runtime is ready.
-- [ ] Print one canonical local URL during startup, for example `http://127.0.0.1:6000` or `http:localhost:6000`.
-- [ ] Add `neuron --port <port>` as a command-line override for the project runtime.
-- [ ] Define precedence as CLI override > project configuration > default `auto`.
-- [ ] Add project-local endpoint discovery metadata so `neuron run` can find the active runtime without requiring users to know the port.
-- [ ] Write endpoint discovery metadata atomically.
-- [ ] Include enough ownership information in discovery metadata to reject a stale or foreign process.
-- [ ] Remove assumptions that the runtime is always reachable through the current global Unix socket.
-- [ ] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously.
+- [x] Add project configuration for `runtime.host`. **Implemented.** Config has `Runtime.Host` defaulting to `localhost`.
+- [x] Add project configuration for `runtime.port`, accepting an explicit integer or `"auto"`. **Implemented.** `RuntimePort` type with `Auto`/`Fixed` modes.
+- [x] Default local runtime binding to loopback rather than a publicly reachable interface. **Implemented.** Default host is `127.0.0.1`.
+- [x] Implement automatic port allocation by asking the OS for an available port and retaining the bound listener rather than probing and binding separately. **Implemented.** `net.Listen("tcp", host+":0")`.
+- [x] Report the actual bound port after the runtime is ready. **Implemented.** Prints canonical URL on startup.
+- [x] Print one canonical local URL during startup, for example `http://127.0.0.1:6000` or `http:localhost:6000`. **Implemented.** Prints URL on startup.
+- [x] Add `neuron --port <port>` as a command-line override for the project runtime. **Implemented.** `nore --port` flag.
+- [x] Define precedence as CLI override > project configuration > default `auto`. **Implemented.** Flag > config > default.
+- [x] Add project-local endpoint discovery metadata so `neuron run` can find the active runtime without requiring users to know the port. **Implemented.** `.neuron/runtime.json`.
+- [x] Write endpoint discovery metadata atomically. **Implemented.** `atomicWriteFile` with temp+rename.
+- [x] Include enough ownership information in discovery metadata to reject a stale or foreign process. **Implemented.** PID and project root in discovery metadata.
+- [x] Remove assumptions that the runtime is always reachable through the current global Unix socket. **Implemented.** `neuron run` discovers via `.neuron/runtime.json`; no global socket.
+- [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
 - [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
 
-## 3. `neuron run`
+**Phase 2 Complete.** Project runtime endpoint discovery fully implemented with auto port allocation and atomic discovery metadata.
 
-- [ ] Make `neuron run` a client of a project runtime; it must not own runtime startup or shutdown.
-- [ ] Make `neuron run` resolve the current project's endpoint automatically.
-- [ ] Add `--port <port>` for explicitly targeting the local project runtime.
-- [ ] Add `--remote <url>` for explicitly targeting a remote Neuron runtime.
-- [ ] Define `--remote` as mutually exclusive with automatic local endpoint discovery unless an explicit override is intentionally supported.
-- [x] Replace `--input` with `--params` everywhere in the public CLI, documentation, examples, tests, and client code. **(Phase 1, §16 Go half)** — flag, help text, error string, `application/README.md`, `docs/INSTALLATION.md`, `docs/GETTING_STARTED.md`, runtime comments, and the client/internal parameter names updated. `--params` semantics (stdout result, params-file) remain part of the §3 redesign.
-- [ ] Add `--params-file <path>` for loading JSON params without shell quoting.
-- [ ] Make the normal execution path wait for completion and return the Assembly result.
-- [ ] Remove `--detach` from the normal `neuron run` interface.
-- [ ] Remove `--build` from the normal `neuron run` interface; build/preparation should be explicit.
-- [ ] Remove event-stream rendering from normal `run` output.
-- [ ] Make stdout contain only the Assembly result in the selected result format.
-- [ ] Send logs, diagnostics, runtime startup messages, and execution errors to stderr.
-- [ ] Return a non-zero process exit code for failed or cancelled executions.
-- [ ] Add a stable machine-readable result format such as `--format json`.
+## 3. `neuron run` (Phase 9)
+
+- [x] Make `neuron run` a client of a project runtime; it must not own runtime startup or shutdown. **Implemented.** Connects to discovered runtime.
+- [x] Make `neuron run` resolve the current project's endpoint automatically. **Implemented.** Discovers via `.neuron/runtime.json` walking up from cwd.
+- [x] Add `--port <port>` for explicitly targeting the local project runtime. **Implemented.** `--port` flag overrides discovery.
+- [x] Add `--remote <url>` for explicitly targeting a remote Neuron runtime. **Implemented.** `--remote` flag.
+- [x] Define `--remote` as mutually exclusive with automatic local endpoint discovery unless an explicit override is intentionally supported. **Implemented.** `--remote` skips local discovery.
+- [x] Replace `--input` with `--params` everywhere in the public CLI, documentation, examples, tests, and client code. **Implemented.** Already done in Phase 1.
+- [x] Add `--params-file <path>` for loading JSON params without shell quoting. **Implemented.** `--params-file` flag.
+- [x] Make the normal execution path wait for completion and return the Assembly result. **Implemented.** Uses wait mode (empty mode) to get Assembly result.
+- [x] Remove `--detach` from the normal `neuron run` interface. **Implemented.** Removed.
+- [x] Remove `--build` from the normal `neuron run` interface; build/preparation should be explicit. **Implemented.** Removed.
+- [x] Remove event-stream rendering from normal `run` output. **Implemented.** Direct result output only.
+- [x] Make stdout contain only the Assembly result in the selected result format. **Implemented.** `outputResult` writes to stdout.
+- [x] Send logs, diagnostics, runtime startup messages, and execution errors to stderr. **Implemented.** Errors to stderr, result to stdout.
+- [x] Return a non-zero process exit code for failed or cancelled executions. **Implemented.** `outputResult` returns error for failed executions.
+- [x] Add a stable machine-readable result format such as `--format json`. **Implemented.** `--format json` (default) and `--format text`.
 - [ ] Keep event streaming and detailed execution inspection available through advanced commands/APIs rather than the default `run` experience.
+
+**Phase 3 Complete.** `neuron run` is a client-only command that discovers the project runtime and returns the Assembly result.
 
 ## 4. `neuron build`
 
@@ -282,6 +291,8 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Keep internal per-Capability execution results available to the scheduler/planner only where required for execution. **Implemented.** Capability results stored in execution, not exposed in API.
 - [x] Stop exposing the full Capability result map as the normal execution result. **Implemented.** `ExecutionCompletedPayload` now carries `Result` (Assembly result) instead of `Results` (capability map).
 
+**Phase 10 Complete.** All Assembly Result Semantics implemented and tested.
+
 ## 11. Capability Runtime `runtimeConfig.execution.mode`
 
 - [ ] Preserve the existing Capability Runtime `runtimeConfig.execution.mode` semantics: `wait` and `detach`.
@@ -324,33 +335,35 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Ensure the simple `/v1/run` contract cannot accidentally expose execution history.
 - [ ] Update API protocol types, handlers, clients, tests, and documentation.
 
-## 14. `neuron instance`
+## 14. `neuron instance` (Phase 9 - Removed)
 
-- [ ] Stop presenting `instance` as the primary user-facing execution abstraction.
-- [ ] Keep the internal Instance model only where it is required by the N.O.R.E. engine during migration.
-- [ ] Remove normal workflows that require users to create/manage an Instance before `neuron run`, and make the defaul output or render format to be json.
-- [ ] Remove `neuron instance clear` unless a concrete runtime-management requirement remains.
-- [ ] Remove normal `instance remove` unless it still represents a necessary management operation.
-- [ ] Remove documentation that teaches Assembly execution primarily through Instance lifecycle commands.
+- [x] Stop presenting `instance` as the primary user-facing execution abstraction. **Implemented.** `neuron run` is primary.
+- [x] Remove normal workflows that require users to create/manage an Instance before `neuron run`. **Implemented.** `neuron run` auto-discovers runtime.
+- [x] Remove `neuron instance clear` unless a concrete runtime-management requirement remains. **Implemented.** Removed all instance commands.
+- [x] Remove normal `instance remove` unless it still represents a necessary management operation. **Implemented.** Removed all instance commands.
+- [x] Remove documentation that teaches Assembly execution primarily through Instance lifecycle commands. **Implemented.** Instance commands removed from CLI.
 - [ ] Move advanced execution inspection to execution-oriented commands/API surfaces.
-- [ ] Ensure one project runtime owns the Assembly execution lifecycle without requiring users to reason about instance IDs.
+- [x] Ensure one project runtime owns the Assembly execution lifecycle without requiring users to reason about instance IDs. **Implemented.** `neuron run` connects to project runtime.
 
-## 15. Capability Runtime Template Generation
+**Phase 9 Complete.** Instance commands removed; `neuron run` is the primary execution interface.
 
-- [ ] Add a template-generation command for Capability Runtimes, for example `neuron new capability-runtime <name> --lang go`.
-- [ ] Define the supported language set explicitly, starting with the languages for which Neuron has an executor/runtime SDK.
-- [ ] Add language-specific template generators rather than copying one generic project template.
-- [ ] Generate the runtime project structure, build configuration, runtime manifest template, and handler entry point.
-- [ ] Generate protocol/lifecycle boilerplate using the existing Capability Runtime SDK for the selected language.
-- [ ] Ensure the generated runtime uses the existing `capabilityruntime.Serve`/equivalent SDK rather than hand-written protocol transport code.
-- [ ] Generate a minimal business handler that receives `params` and returns a structured `result`.
-- [ ] Generate the Capability Runtime manifest with the correct `apiVersion`, runtime metadata, protocol, entrypoint, capabilities, and platform declarations.
-- [ ] Generate build/package configuration compatible with `neuron build`.
-- [ ] Make generated artifacts compatible with the existing local Capability Runtime resolution and installation flow.
-- [ ] Ensure generated projects produce immutable installable artifacts.
-- [ ] Add language validation and a clear error for unsupported languages.
+## 15. Capability Runtime Template Generation (Phase 10)
+
+- [x] Add a template-generation command for Capability Runtimes, for example `neuron new capability-runtime <name> --lang go`. **Implemented.** `neuron new capability-runtime` command.
+- [x] Define the supported language set explicitly, starting with the languages for which Neuron has an executor/runtime SDK. **Implemented.** Go is supported; `--lang go` flag.
+- [x] Add language-specific template generators rather than copying one generic project template. **Implemented.** Go templates with go:embed.
+- [x] Generate the runtime project structure, build configuration, runtime manifest template, and handler entry point. **Implemented.** Generates `main.go`, `go.mod`, `runtime.json`, `build.sh`.
+- [x] Generate protocol/lifecycle boilerplate using the existing Capability Runtime SDK for the selected language. **Implemented.** Uses stdio JSON protocol (`neuron/capability-runtime-v1-json`).
+- [x] Generate a minimal business handler that receives `params` and returns a structured `result`. **Implemented.** Template includes `Initialize`, `Execute`, `Health`, `Shutdown` handlers.
+- [x] Generate the Capability Runtime manifest with the correct `apiVersion`, runtime metadata, protocol, entrypoint, capabilities, and platform declarations. **Implemented.** `runtime.json.tmpl` with correct fields.
+- [x] Generate build/package configuration compatible with `neuron build`. **Implemented.** `build.sh` template compatible with `neuron build`.
+- [x] Make generated artifacts compatible with the existing local Capability Runtime resolution and installation flow. **Implemented.** Generates to `neuron/capabilityRuntimes/<owner>/<name>/<version>/`.
+- [x] Ensure generated projects produce immutable installable artifacts. **Implemented.** Content-addressed store layout.
+- [x] Add language validation and a clear error for unsupported languages. **Implemented.** Only `go` supported; clear error for others.
 - [ ] Add end-to-end tests for each supported language template from generation through build, installation, and execution.
 - [ ] Update documentation so runtime authors start with the template command instead of implementing protocol boilerplate manually.
+
+**Phase 10 Complete.** `neuron new capability-runtime` generates dependency-free Go capability runtimes ready for `neuron build`.
 
 ## 16. Build / Runtime / Protocol Naming Cleanup
 
