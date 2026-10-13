@@ -5,33 +5,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"strings"
-	"time"
+	"syscall"
 
 	"github.com/neuron-runtime/neuron/application/client"
 	"github.com/neuron-runtime/neuron/application/config"
 	"github.com/neuron-runtime/neuron/application/connection"
-	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
-	"github.com/neuron-runtime/neuron/application/internal/cli/build"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
-	"github.com/neuron-runtime/neuron/application/internal/cli/output"
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
 	"github.com/neuron-runtime/neuron/application/project"
-	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
 )
 
 var (
-	verbose  bool
-	params   string
-	detach   bool
-	rebuild  bool
-	jsonMode bool
+	verbose     bool
+	params      string
+	paramsFile  string
+	remoteURL   string
+	overridePort string
+	format      string
 )
 
 // New constructs and configures the Cobra command for executing Neuron assemblies.
@@ -39,27 +33,22 @@ func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Run,
 		Short: "Run a Neuron Assembly",
-		Long:  "Run a Neuron Assembly using the internal N.O.R.E runtime execution engine.",
+		Long:  "Run a Neuron Assembly using the project runtime. Discovers the local runtime or connects to a remote endpoint.",
 		RunE:  runCmdHandler,
 	}
 
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output to display event payloads")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	cmd.Flags().StringVar(&params, "params", "", "JSON params payload for execution (e.g., '{\"key\":\"value\"}')")
-	cmd.Flags().BoolVar(&detach, "detach", false, "Return execution handles immediately without streaming live events")
-	cmd.Flags().BoolVar(&rebuild, "build", false, "Rebuild the project before running (project directory required)")
-	cmd.Flags().BoolVar(&jsonMode, "json", false, "Stream execution events as NDJSON (one JSON object per line)")
+	cmd.Flags().StringVar(&paramsFile, "params-file", "", "Path to JSON file with params payload")
+	cmd.Flags().StringVar(&remoteURL, "remote", "", "Remote N.O.R.E. endpoint (e.g., http://host:port)")
+	cmd.Flags().StringVar(&overridePort, "port", "", "Override local runtime port (default: auto-discover from project)")
+	cmd.Flags().StringVar(&format, "format", "json", "Output format for Assembly result (json, text)")
 
 	return cmd
 }
 
-// runCmdHandler addresses a registered assembly and triggers execution.
-//
-// With a target (`neuron run acme-api@1.0.0`) the command runs that assembly
-// from anywhere and never consults the project. Without a target it resolves
-// the key from the project's build record (.neuron/build.json): the project is
-// rebuilt automatically when its authoring fingerprint has changed, or when
-// --build forces it. A project that has never been built is an error naming
-// `neuron build`.
+// runCmdHandler runs an Assembly using the project runtime.
+// It discovers the local runtime or connects to a remote endpoint.
 func runCmdHandler(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
@@ -68,39 +57,30 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration not loaded")
 	}
 
-	if verbose {
-		fmt.Fprintln(cmd.ErrOrStderr(), "neuron: running in verbose mode")
-	}
-
-	var key protocol.InstanceKey
-
-	if len(args) == 0 {
-		args = []string{""}
-	}
-	target, err := utils.NormalizeInstanceTarget(args[0])
-	if err != nil {
-		return err
-	}
-
-	if target == "" {
-		// No target: the build record in the current project answers.
-		key, err = ensureBuiltProject(cmd, cfg)
+	// Resolve target assembly if provided
+	target := ""
+	if len(args) > 0 {
+		t, err := utils.NormalizeInstanceTarget(args[0])
 		if err != nil {
 			return err
 		}
+		target = t
 	}
 
-	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{
-		Config:  cfg,
-		Verbose: verbose,
-	})
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
+	// Load params from --params or --params-file
 	var execParams map[string]any
-	if params != "" {
+	if params != "" && paramsFile != "" {
+		return fmt.Errorf("--params and --params-file are mutually exclusive")
+	}
+	if paramsFile != "" {
+		data, err := os.ReadFile(paramsFile)
+		if err != nil {
+			return fmt.Errorf("read params file: %w", err)
+		}
+		if err := json.Unmarshal(data, &execParams); err != nil {
+			return fmt.Errorf("invalid params file JSON: %w", err)
+		}
+	} else if params != "" {
 		if err := json.Unmarshal([]byte(params), &execParams); err != nil {
 			return fmt.Errorf("invalid --params JSON: %w", err)
 		}
@@ -108,320 +88,198 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		execParams = map[string]any{}
 	}
 
-	// The run is always requested in detach mode so the CLI owns event
-	// rendering; `--detach` simply skips streaming and prints the handles.
-	execResult, err := c.ExecuteByKeyOrTarget(ctx, key, target, execParams, core.ExecutionModeDetach)
+	// Resolve the runtime endpoint
+	var endpoint string
+	var isRemote bool
+
+	if remoteURL != "" {
+		// Explicit remote endpoint
+		endpoint = remoteURL
+		isRemote = true
+	} else {
+		// Discover local project runtime
+		discovered, err := discoverLocalRuntime(cfg, overridePort)
+		if err != nil {
+			return fmt.Errorf("discover local runtime: %w", err)
+		}
+		if discovered == "" {
+			return fmt.Errorf("no project runtime found; start one with `neuron` in the project directory")
+		}
+		endpoint = discovered
+		isRemote = false
+	}
+
+	// Create client
+	conn := connection.NewRemote(endpoint)
+	c := client.New(conn)
+
+	// Load API token for local runtime from discovery metadata
+	if !isRemote {
+		// For local project runtime, the token is in the discovery metadata
+		// We need to read it again to get the token
+		root, err := os.Getwd()
+		if err == nil {
+			for {
+				discoveryPath := filepath.Join(root, ".neuron", "runtime.json")
+				if _, err := os.Stat(discoveryPath); err == nil {
+					data, err := os.ReadFile(discoveryPath)
+					if err == nil {
+						var meta struct {
+							Token string `json:"token"`
+						}
+						if err := json.Unmarshal(data, &meta); err == nil && meta.Token != "" {
+							// Apply token to the transport
+							if transport, ok := conn.Transport().(*connection.HTTPTransport); ok {
+								transport.WithToken(meta.Token)
+							}
+						}
+					}
+				}
+				parent := filepath.Dir(root)
+				if parent == root {
+					break
+				}
+				root = parent
+			}
+		}
+	}
+
+	// Determine target key
+	var key protocol.InstanceKey
+	if target != "" {
+		key, _ = protocol.ParseUserKey(target)
+	} else {
+		// Use current build from project
+		key, err := resolveCurrentBuildKey(cmd.Context(), cfg)
+		if err != nil {
+			return err
+		}
+		key = key
+	}
+
+	// Execute using wait mode (synchronous) to get Assembly result
+	result, err := c.ExecuteByKeyOrTarget(ctx, key, target, execParams, "")
 	if err != nil {
 		return err
 	}
 
-	if !detach {
-		renderer, err := output.New(output.Options{
-			Out:      cmd.OutOrStdout(),
-			Assembly: assemblyLabel(key.AssemblyID, target),
-			Mode:     presentationMode(),
-			Verbose:  verbose,
-		})
-		if err != nil {
-			return err
-		}
-		// Ctrl-C asks N.O.R.E. to stop the execution instead of abandoning it.
-		// The event stream keeps running afterwards so the cancellation is
-		// reported as a normal terminal outcome rather than the CLI exiting
-		// silently while the work continues.
-		stopWatching := cancelOnInterrupt(ctx, cmd, c, execResult.InstanceID, execResult.ExecutionID)
-		defer stopWatching()
-
-		terminal, err := streamEventsAndWait(ctx, c, execResult.InstanceID, execResult.ExecutionID, renderer)
-		if err != nil {
-			_ = renderer.Close()
-			return err
-		}
-		if err := renderer.Close(); err != nil {
-			return err
-		}
-		return terminalOutcome(terminal)
-	}
-
-	fmt.Printf("execution started\n")
-	fmt.Printf("  execution_id: %s\n", execResult.ExecutionID)
-	fmt.Printf("  instance_id:  %s\n", execResult.InstanceID)
-	fmt.Printf("  status:       %s\n", execResult.Status)
-	return nil
+	// Output the Assembly result
+	return outputResult(cmd, result, format)
 }
 
-// cancelRequestTimeout bounds the cancellation request. It is short because the
-// operator is waiting: if N.O.R.E. cannot acknowledge the stop promptly, the CLI
-// says so and leaves the execution running rather than appearing to hang.
-const cancelRequestTimeout = 10 * time.Second
-
-// cancelOnInterrupt arranges for Ctrl-C to cancel the execution being watched,
-// and returns a function that stops watching.
-//
-// The interrupt is a request to stop work, not to abandon the CLI: the execution
-// lives in N.O.R.E., so killing this process would leave it running with nobody
-// watching. Instead the CLI asks the runtime to stop it and keeps streaming until
-// the cancellation is reported.
-//
-// The request deliberately rides on a context detached from the interrupted one.
-// It is the thing that *implements* the interrupt, so it cannot itself be
-// cancelled by it.
-//
-// A second Ctrl-C falls through to the default disposition and terminates the
-// process. One signal must be able to rescue an unresponsive runtime, and a
-// cancellation that cannot complete must never be able to trap the operator.
-func cancelOnInterrupt(ctx context.Context, cmd *cobra.Command, c *client.Client, instanceID string, executionID core.ID) func() {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-	done := make(chan struct{})
-
-	go func() {
-		select {
-		case <-signals:
-		case <-done:
-			return
+// discoverLocalRuntime discovers the local project runtime from discovery metadata.
+func discoverLocalRuntime(cfg config.Config, overridePort string) (string, error) {
+	// If port is explicitly overridden, use it directly
+	if overridePort != "" {
+		host := cfg.Runtime.Host
+		if host == "" {
+			host = "127.0.0.1"
 		}
-
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nneuron: cancelling execution (press Ctrl-C again to force quit)")
-
-		requestCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelRequestTimeout)
-		defer cancel()
-		item, err := c.CancelExecution(requestCtx, instanceID, string(executionID), "cancelled from the neuron CLI")
-		reportCancellation(cmd, executionID, item, err)
-
-		// Restore the default disposition now that the request has been made, so
-		// the next Ctrl-C terminates the CLI instead of being swallowed here.
-		signal.Stop(signals)
-	}()
-
-	return func() {
-		signal.Stop(signals)
-		close(done)
+		return fmt.Sprintf("http://%s:%s", host, overridePort), nil
 	}
-}
 
-// reportCancellation explains the outcome of the cancellation request.
-//
-// The three outcomes are reported differently because they mean different things
-// to an operator: the work stopped, it had already finished on its own, or N.O.R.E.
-// could not be reached. Collapsing them into one message would leave an operator
-// unsure whether anything is still running.
-func reportCancellation(cmd *cobra.Command, executionID core.ID, item protocol.ExecutionItem, err error) {
-	stderr := cmd.ErrOrStderr()
-	switch {
-	case err == nil:
-		fmt.Fprintf(stderr, "neuron: execution %s is %s\n", executionID, item.Status)
-	case connection.StatusCode(err) == http.StatusConflict:
-		fmt.Fprintf(stderr, "neuron: execution %s had already finished\n", executionID)
-	case connection.StatusCode(err) == http.StatusNotFound:
-		fmt.Fprintf(stderr, "neuron: execution %s was not found; nothing to cancel\n", executionID)
-	default:
-		fmt.Fprintf(stderr, "neuron: could not cancel execution %s: %v\n", executionID, err)
+	// Find project root by walking up from cwd
+	root, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get current directory: %w", err)
 	}
-}
 
-// terminalOutcome turns the execution's final event into a command result.
-//
-// The renderer already presented the failure to a human, but a failed or
-// cancelled execution must also be observable by a script. Returning an error
-// here is what makes `neuron run` exit non-zero, so CI and shell pipelines can
-// tell a completed execution from a failed one.
-func terminalOutcome(terminal protocol.StreamEvent) error {
-	switch terminal.Type {
-	case "execution.failed":
-		var p struct {
-			Message string `json:"Message"`
+	// Walk up to find .neuron/runtime.json
+	for {
+		discoveryPath := filepath.Join(root, ".neuron", "runtime.json")
+		if _, err := os.Stat(discoveryPath); err == nil {
+			data, err := os.ReadFile(discoveryPath)
+			if err != nil {
+				return "", fmt.Errorf("read discovery metadata: %w", err)
+			}
+			var meta struct {
+				Port      string `json:"port"`
+				Host      string `json:"host"`
+				ProjectRoot string `json:"projectRoot"`
+				PID       int    `json:"pid"`
+			}
+			if err := json.Unmarshal(data, &meta); err != nil {
+				return "", fmt.Errorf("parse discovery metadata: %w", err)
+			}
+			// Verify the process is still alive and matches project root
+			if meta.PID > 0 {
+				if !isProcessAlive(meta.PID) {
+					return "", fmt.Errorf("runtime process %d is not alive", meta.PID)
+				}
+				if meta.ProjectRoot != "" && meta.ProjectRoot != filepath.Clean(root) {
+					return "", fmt.Errorf("discovery metadata project root mismatch")
+				}
+			}
+			host := meta.Host
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			return fmt.Sprintf("http://%s:%s", host, meta.Port), nil
 		}
-		if err := json.Unmarshal(terminal.Payload, &p); err == nil && p.Message != "" {
-			return fmt.Errorf("execution failed: %s", p.Message)
+		parent := filepath.Dir(root)
+		if parent == root {
+			break // Reached filesystem root
 		}
-		return errors.New("execution failed")
-	case "execution.cancelled":
-		return errors.New("execution cancelled")
-	default:
-		return nil
+		root = parent
 	}
+
+	return "", nil // Not found
 }
 
-// presentationMode maps CLI flags to an output mode. JSON wins over verbose so
-// machine output is never contaminated by diagnostics.
-func presentationMode() output.Mode {
-	switch {
-	case jsonMode:
-		return output.ModeJSON
-	case verbose:
-		return output.ModeVerbose
-	default:
-		return output.ModeAuto
+func isProcessAlive(pid int) bool {
+	// On Unix, signal 0 checks if process exists without sending a signal
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
 	}
+	// Signal 0 doesn't actually send a signal, just checks existence
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// assemblyLabel derives a human-readable label for the executed assembly from the
-// resolved key, falling back to the addressing target.
-func assemblyLabel(assemblyID, target string) string {
-	label := assemblyID
-	if label == "" {
-		label = target
-	}
-	if strings.HasPrefix(label, "inst_") {
-		return "instance " + label
-	}
-	if i := strings.IndexByte(label, '@'); i >= 0 {
-		return label[:i]
-	}
-	return label
-}
-
-// ensureBuiltProject resolves the registered assembly key for the current
-// project, rebuilding it when the authoring inputs changed since the last
-// build (or when --build forces a rebuild). A missing build record is an error
-// pointing at `neuron build`.
-func ensureBuiltProject(cmd *cobra.Command, cfg config.Config) (protocol.InstanceKey, error) {
+// resolveCurrentBuildKey resolves the InstanceKey from the current build.
+func resolveCurrentBuildKey(ctx context.Context, cfg config.Config) (protocol.InstanceKey, error) {
 	root, err := os.Getwd()
 	if err != nil {
 		return protocol.InstanceKey{}, fmt.Errorf("get current directory: %w", err)
 	}
 
-	// Read the current build pointer.
 	fingerprint, err := project.LoadCurrentPointer(root)
 	if err != nil {
 		if errors.Is(err, project.ErrNotBuilt) {
-			if !rebuild {
-				return protocol.InstanceKey{}, fmt.Errorf(
-					"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
-				)
-			}
-		} else {
-			return protocol.InstanceKey{}, fmt.Errorf("load current pointer: %w", err)
+			return protocol.InstanceKey{}, fmt.Errorf("project has not been built; run `neuron build` first")
 		}
+		return protocol.InstanceKey{}, fmt.Errorf("load current pointer: %w", err)
 	}
 
 	var record project.BuildRecord
-	if fingerprint != "" {
-		// Load the immutable build record.
-		err = project.LoadBuildRecord(root, fingerprint, &record)
-
-		switch {
-		case errors.Is(err, project.ErrNotBuilt):
-			if !rebuild {
-				return protocol.InstanceKey{}, fmt.Errorf(
-					"project has not been built; run `neuron build` first (or use `neuron run --build` from the project)",
-				)
-			}
-		case err != nil:
-			return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
-		case !rebuild:
-			// A build record exists; only rebuild when the authoring inputs changed
-			// since it was recorded.
-			inputs, ferr := utils.AuthoringInputs(filepath.Clean(root), cfg)
-			if ferr == nil {
-				fp, cerr := project.ComputeFingerprint(inputs)
-				if cerr == nil && fp == record.Fingerprint {
-					return record.Key, nil
-				}
-			}
-		}
+	if err := project.LoadBuildRecord(root, fingerprint, &record); err != nil {
+		return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
 	}
-
-	fmt.Fprintf(cmd.ErrOrStderr(), "neuron: project changed since the last build; rebuilding\n")
-	bopts := build.Options{Root: root}
-	if force, _ := cmd.Flags().GetBool("force"); force {
-		bopts.Force = true
-	}
-	if err := build.ExecuteWith(cmd, bopts); err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("rebuild project: %w", err)
-	}
-
-	// After rebuild, read the new current pointer and load its record.
-	fingerprint, err = project.LoadCurrentPointer(root)
-	if err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("load current pointer after rebuild: %w", err)
-	}
-	var fresh project.BuildRecord
-	if err := project.LoadBuildRecord(root, fingerprint, &fresh); err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("load build record after rebuild: %w", err)
-	}
-	return fresh.Key, nil
+	return record.Key, nil
 }
 
-// streamEventsAndWait streams execution events in real time until the
-// execution reaches a terminal state, feeding each event to the renderer. It
-// prefers the WebSocket transport and falls back to Server-Sent Events for
-// transports that cannot open a WebSocket session.
-func streamEventsAndWait(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) (protocol.StreamEvent, error) {
-	// sawTerminal guards against reporting success for a stream that simply
-	// stopped. The daemon closes the connection when a client falls behind, and
-	// a transport failure looks identical to a clean end-of-stream from here.
-	// Without this, a truncated stream is indistinguishable from a completed
-	// run and `neuron run` waits on a terminal event that will never arrive.
-	var terminal protocol.StreamEvent
-	sawTerminal := false
+// outputResult writes the Assembly result to stdout in the specified format.
+func outputResult(cmd *cobra.Command, result protocol.ExecutionResult, format string) error {
+	if result.Error != "" {
+		// Execution failed - output error to stderr and exit non-zero
+		fmt.Fprintf(cmd.ErrOrStderr(), "execution failed: %s\n", result.Error)
+		return errors.New("execution failed")
+	}
 
-	err := c.StreamExecutionEventsWS(ctx, instanceID, executionID, func(evt protocol.StreamEvent) error {
-		if herr := renderer.Handle(ctx, evt); herr != nil {
-			return herr
+	// Output the Assembly result to stdout
+	switch format {
+	case "json":
+		data, err := json.MarshalIndent(result.Result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal result: %w", err)
 		}
-		if output.IsTerminalEvent(evt) {
-			terminal, sawTerminal = evt, true
-			return errExecutionTerminal
+		fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	case "text":
+		for k, v := range result.Result {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: %v\n", k, v)
 		}
-		return nil
-	})
-
-	switch {
-	case errors.Is(err, connection.ErrWebSocketUnavailable):
-		return streamEventsAndWaitSSE(ctx, c, instanceID, executionID, renderer)
-	case err == nil, errors.Is(err, errExecutionTerminal),
-		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// Clean end of stream, or the caller stopped watching.
 	default:
-		return terminal, fmt.Errorf("execution stream ended before completion: %w", err)
+		return fmt.Errorf("unknown format: %s", format)
 	}
-
-	// A stream that ended without a terminal event is truncated, not
-	// successful. Report it rather than exiting zero for an unknown outcome.
-	if !sawTerminal {
-		return terminal, errors.New("execution stream ended before the execution reported a final state")
-	}
-	return terminal, nil
-}
-
-// errExecutionTerminal is sent by the streaming callback when the execution
-// reaches a terminal state and the stream can be closed.
-var errExecutionTerminal = errors.New("execution reached terminal state")
-
-// streamEventsAndWaitSSE is the legacy Server-Sent Events streaming path, kept
-// as a fallback for transports without WebSocket support.
-func streamEventsAndWaitSSE(ctx context.Context, c *client.Client, instanceID string, executionID core.ID, renderer output.Renderer) (protocol.StreamEvent, error) {
-	eventCh := make(chan protocol.StreamEvent, 64)
-	errCh := make(chan error, 1)
-
-	go func() {
-		errCh <- c.StreamExecutionEvents(ctx, instanceID, executionID, func(evt protocol.StreamEvent) error {
-			eventCh <- evt
-			return nil
-		})
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return protocol.StreamEvent{}, ctx.Err()
-		case err := <-errCh:
-			if err != nil && !strings.Contains(err.Error(), "context canceled") {
-				return protocol.StreamEvent{}, err
-			}
-			return protocol.StreamEvent{}, nil
-		case evt, ok := <-eventCh:
-			if !ok {
-				return protocol.StreamEvent{}, nil
-			}
-			if herr := renderer.Handle(ctx, evt); herr != nil {
-				return evt, herr
-			}
-			if output.IsTerminalEvent(evt) {
-				return evt, nil
-			}
-		}
-	}
+	return nil
 }

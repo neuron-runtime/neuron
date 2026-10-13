@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -41,6 +42,9 @@ func main() {
 		detachedDrainTimeout time.Duration
 		capabilityStore      string
 		showVer              bool
+		projectMode          bool
+		projectRoot          string
+		host                 string
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
@@ -51,6 +55,9 @@ func main() {
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
 	flag.BoolVar(&showVer, "version", false, "print the N.O.R.E. version and exit")
+	flag.BoolVar(&projectMode, "project", false, "run in project runtime mode (foreground, loopback TCP, auto port)")
+	flag.StringVar(&projectRoot, "project-root", "", "project root directory (required with --project)")
+	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
 	flag.Parse()
 
 	if showVer {
@@ -58,6 +65,16 @@ func main() {
 		return
 	}
 
+// Project mode: run as a foreground project runtime with auto port allocation
+// and discovery metadata.
+if projectMode {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg)
+	return
+}
+
+	// Traditional daemon mode (global Unix socket or explicit TCP)
 	// A TCP listener is reachable by anything that can route to this host, so it
 	// is refused outright unless an API token is in force. Serving the assembly
 	// registration, instance, and execution API without a credential over TCP
@@ -273,4 +290,144 @@ func defaultCapabilityRuntimeStore() string {
 		return ".neuron/capabilityRuntimes"
 	}
 	return filepath.Join(home, ".neuron", "capabilityRuntimes")
+}
+
+// runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
+// allocation and discovery metadata.
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string) {
+	if projectRoot == "" {
+		log.Fatal("--project-root is required when --project is set")
+	}
+
+	// Resolve the absolute project root
+	absRoot, err := filepath.Abs(projectRoot)
+	if err != nil {
+		log.Fatalf("resolve project root: %v", err)
+	}
+
+	// Generate an API token for this project runtime
+	token, err := generateProjectToken()
+	if err != nil {
+		log.Fatalf("generate api token: %v", err)
+	}
+
+	// Create a listener on loopback with auto port if not specified
+	var listener net.Listener
+	if port == "" {
+		// Ask OS for an available port on loopback
+		listener, err = net.Listen("tcp", host+":0")
+		if err != nil {
+			log.Fatalf("listen on %s:0: %v", host, err)
+		}
+	} else {
+		listener, err = net.Listen("tcp", host+":"+port)
+		if err != nil {
+			log.Fatalf("listen on %s:%s: %v", host, port, err)
+		}
+	}
+	defer listener.Close()
+
+	// Get the actual bound address
+	addr := listener.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Fatalf("parse bound address: %v", err)
+	}
+
+	// Create data directory
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		log.Fatalf("create data directory %s: %v", dataDir, err)
+	}
+
+	// Create project root .neuron directory for discovery metadata
+	projectNeuronDir := filepath.Join(absRoot, ".neuron")
+	if err := os.MkdirAll(projectNeuronDir, 0o755); err != nil {
+		log.Fatalf("create project .neuron directory: %v", err)
+	}
+
+	// Write discovery metadata atomically
+	discoveryPath := filepath.Join(projectNeuronDir, "runtime.json")
+	discovery := map[string]any{
+		"port":        portStr,
+		"host":        host,
+		"pid":         os.Getpid(),
+		"projectRoot": absRoot,
+		"startedAt":   time.Now().UTC().Format(time.RFC3339),
+		"token":       token,
+	}
+	discoveryData, err := json.MarshalIndent(discovery, "", "  ")
+	if err != nil {
+		log.Fatalf("marshal discovery metadata: %v", err)
+	}
+	if err := atomicWriteFile(discoveryPath, discoveryData); err != nil {
+		log.Fatalf("write discovery metadata: %v", err)
+	}
+
+	// Print the canonical URL for the user
+	fmt.Printf("N.O.R.E. project runtime started on http://%s:%s\n", host, portStr)
+	fmt.Printf("Project root: %s\n", absRoot)
+	fmt.Printf("Press Ctrl-C to stop\n")
+
+	plugin.SetStoreRoot(capabilityStore)
+
+	store, err := sqlite.New(storage.Config{DataDir: dataDir})
+	if err != nil {
+		log.Fatalf("init storage: %v", err)
+	}
+	defer store.Close()
+
+	assemblies := assembly.NewRepository(store)
+
+	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
+	if err != nil {
+		log.Fatalf("init cel compiler: %v", err)
+	}
+	compiler, err := planner.NewCompiler(celCompiler)
+	if err != nil {
+		log.Fatalf("init planner: %v", err)
+	}
+
+	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
+	srv := api.NewServer(inst, assemblies, compiler, token)
+
+	// Serve on the listener
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ctx, listener); err != nil && ctx.Err() == nil {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownRuntimes(srv)
+		// Clean up discovery metadata
+		_ = os.Remove(discoveryPath)
+	case err := <-errCh:
+		shutdownRuntimes(srv)
+		_ = os.Remove(discoveryPath)
+		log.Fatal(err)
+	}
+}
+
+// generateProjectToken generates a secure API token for a project runtime.
+func generateProjectToken() (string, error) {
+	token, err := apitoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// atomicWriteFile writes data to a temporary file and then atomically renames it.
+func atomicWriteFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }

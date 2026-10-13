@@ -1,0 +1,141 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+)
+
+// Request is the stdio JSON protocol request.
+type Request struct {
+	Params map[string]any `json:"params,omitempty"`
+}
+
+// Response is the stdio JSON protocol response.
+type Response struct {
+	Result map[string]any `json:"result,omitempty"`
+	Error  string         `json:"error,omitempty"`
+}
+
+// CapabilityRuntime implements the {{.Name}} capability runtime.
+type CapabilityRuntime struct{}
+
+// Initialize implements the capability runtime initialize hook.
+func (r *CapabilityRuntime) Initialize(ctx context.Context, protocol string, metadata map[string]string) (InitializeResult, error) {
+	log.Printf("Initializing {{.Name}} capability runtime")
+	return InitializeResult{
+		ProtocolVersion: "neuron/capability-runtime-v1-json",
+		Features:        []string{},
+		Metadata:        map[string]string{},
+	}, nil
+}
+
+// Execute runs the capability.
+func (r *CapabilityRuntime) Execute(ctx context.Context, params map[string]any) (map[string]any, error) {
+	name := ""
+	if v, ok := params["name"]; ok {
+		if s, ok := v.(string); ok {
+			name = s
+		}
+	}
+	if name == "" {
+		name = "world"
+	}
+
+	return map[string]any{
+		"message": fmt.Sprintf("Hello, %s!", name),
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// Health checks the capability runtime health.
+func (r *CapabilityRuntime) Health(ctx context.Context) error {
+	return nil
+}
+
+// Shutdown gracefully shuts down the capability runtime.
+func (r *CapabilityRuntime) Shutdown(ctx context.Context) error {
+	log.Println("Shutting down {{.Name}} capability runtime")
+	return nil
+}
+
+// InitializeResult is the result of Initialize.
+type InitializeResult struct {
+	ProtocolVersion string            `json:"protocol_version"`
+	Features        []string          `json:"features,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	runtime := &CapabilityRuntime{}
+
+	// Initialize
+	initResult, err := runtime.Initialize(ctx, "neuron/capability-runtime-v1-json", nil)
+	if err != nil {
+		log.Fatalf("initialize: %v", err)
+	}
+	log.Printf("Initialized: protocol=%s", initResult.ProtocolVersion)
+
+	// Decode stdin line by line
+	scanner := bufio.NewScanner(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			if err := runtime.Shutdown(context.Background()); err != nil {
+				log.Printf("shutdown error: %v", err)
+			}
+			return
+		default:
+		}
+
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var req Request
+		if err := json.Unmarshal(line, &req); err != nil {
+			log.Printf("unmarshal request: %v", err)
+			resp := Response{Error: "invalid request"}
+			if err := encoder.Encode(resp); err != nil {
+				log.Printf("encode response: %v", err)
+			}
+			continue
+		}
+
+		result, err := runtime.Execute(ctx, req.Params)
+		if err != nil {
+			log.Printf("execute: %v", err)
+			resp := Response{Error: err.Error()}
+			if err := encoder.Encode(resp); err != nil {
+				log.Printf("encode response: %v", err)
+			}
+			continue
+		}
+
+		resp := Response{Result: result}
+		if err := encoder.Encode(resp); err != nil {
+			log.Printf("encode response: %v", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("scanner error: %v", err)
+	}
+
+	if err := runtime.Shutdown(context.Background()); err != nil {
+		log.Printf("shutdown error: %v", err)
+	}
+}

@@ -28,4 +28,6 @@ var (
 
 	Add    = "add [name@version]"
 	Remove = "remove [name@version]"
+
+	New = "new"
 )

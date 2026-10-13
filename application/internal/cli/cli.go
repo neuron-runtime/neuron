@@ -3,15 +3,17 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
 	"github.com/neuron-runtime/neuron/application/internal/cli/build"
 	"github.com/neuron-runtime/neuron/application/internal/cli/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/daemon"
 	"github.com/neuron-runtime/neuron/application/internal/cli/initcmd"
-	"github.com/neuron-runtime/neuron/application/internal/cli/instance"
+	"github.com/neuron-runtime/neuron/application/internal/cli/newcmd"
 	"github.com/neuron-runtime/neuron/application/internal/cli/register"
 	"github.com/neuron-runtime/neuron/application/internal/cli/run"
 	versioncmd "github.com/neuron-runtime/neuron/application/internal/cli/version"
@@ -25,9 +27,7 @@ var RootCmd = &cobra.Command{
 	Use:     command.Neuron,
 	Short:   "Neuron CLI",
 	Version: buildversion.String(),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
-	},
+	RunE:    runProjectRuntime,
 }
 
 // Execute is called by main.go to start the CLI.
@@ -62,7 +62,6 @@ func init() {
 
 	RootCmd.AddCommand(
 		run.New(),
-		instance.New(),
 		daemon.New(),
 		initcmd.New(),
 		build.New(),
@@ -70,6 +69,7 @@ func init() {
 		capabilityruntime.New(),
 		capabilityruntime.NewAddCmd(),
 		capabilityruntime.NewRemoveCmd(),
+		newcmd.New(),
 		versioncmd.New(),
 	)
 }
@@ -114,4 +114,85 @@ func loadConfig(cmd *cobra.Command) (config.Config, error) {
 	}
 
 	return config.Load(opts)
+}
+
+// runProjectRuntime is the entry point for bare `neuron` command.
+// It starts the project runtime in the foreground (like `npm run dev`).
+func runProjectRuntime(cmd *cobra.Command, args []string) error {
+	// Load config to get project root
+	cfg, err := loadConfig(cmd)
+	if err != nil {
+		return err
+	}
+
+	// Check if we're in a project directory with neuron.config.*
+	if cfg.ProjectDir == "" {
+		return fmt.Errorf("no Neuron project found in current directory or ancestors; run `neuron init` first")
+	}
+
+	// Build the nore command
+	noreBin, err := bootstrap.NoreBinaryPath(cfg)
+	if err != nil {
+		return fmt.Errorf("find nore binary: %w", err)
+	}
+
+	// Prepare arguments for nore --project
+	noreArgs := []string{
+		"--project",
+		"--project-root", cfg.ProjectDir,
+		"--host", cfg.Runtime.Host,
+	}
+
+	// Add port if configured
+	if !cfg.Runtime.Port.IsAuto() {
+		noreArgs = append(noreArgs, "--port", fmt.Sprintf("%d", cfg.Runtime.Port.Number))
+	}
+
+	// Add capability runtime store if configured
+	if store := cfg.CapabilityRuntimes.StoreDir; store != "" {
+		noreArgs = append(noreArgs, "--capability-runtime-store", store)
+	}
+
+	// Add detached drain timeout if configured
+	if cfg.Runtime.DetachedDrainTimeout != "" {
+		noreArgs = append(noreArgs, "--detached-drain-timeout", cfg.Runtime.DetachedDrainTimeout)
+	}
+
+	// Add workers
+	noreArgs = append(noreArgs, "--workers", fmt.Sprintf("%d", cfg.Runtime.Workers.Max))
+
+	// Add data dir
+	if cfg.Storage.Directory != "" {
+		noreArgs = append(noreArgs, "--data-dir", cfg.Storage.Directory)
+	}
+
+	// Execute nore with the project's stdout/stderr so the user sees the logs
+	noreCmd := exec.CommandContext(cmd.Context(), noreBin, noreArgs...)
+	noreCmd.Stdout = cmd.OutOrStdout()
+	noreCmd.Stderr = cmd.ErrOrStderr()
+
+	// Forward environment
+	noreCmd.Env = os.Environ()
+
+	// Add NEURON_API_TOKEN if set
+	if token := os.Getenv("NEURON_API_TOKEN"); token != "" {
+		noreCmd.Env = append(noreCmd.Env, "NEURON_API_TOKEN="+token)
+	}
+
+	// Run and wait
+	if err := noreCmd.Run(); err != nil {
+		// Check if it was a signal interrupt
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if ws := exitErr.Sys(); ws != nil {
+				if signum, ok := ws.(interface{ Signal() os.Signal }); ok {
+					if signum.Signal() == os.Interrupt {
+						return nil // Clean shutdown on Ctrl-C
+					}
+				}
+			}
+		}
+		return fmt.Errorf("project runtime stopped: %w", err)
+	}
+
+	return nil
 }

@@ -22,6 +22,7 @@ type Connection interface {
 	OpenWebSocket(ctx context.Context, requestPath string) (*WebSocketStream, error)
 	Health(ctx context.Context) error
 	Close() error
+	Transport() Transport
 }
 
 type Transport interface {
@@ -64,6 +65,10 @@ func (c *connection) Health(ctx context.Context) error {
 
 func (c *connection) Close() error {
 	return c.transport.Close()
+}
+
+func (c *connection) Transport() Transport {
+	return c.transport
 }
 
 // HTTPTransport is the common protocol implementation used by both

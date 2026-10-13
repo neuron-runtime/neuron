@@ -1,0 +1,30 @@
+{
+  "apiVersion": "neuron/v1",
+  "kind": "CapabilityRuntime",
+  "metadata": {
+    "name": "{{.Type}}",
+    "version": "{{.Version}}",
+    "description": "{{.Description}}"
+  },
+  "runtime": {
+    "type": "process",
+    "entrypoint": "{{.BinaryName}}",
+    "protocol": "neuron/capability-runtime-v1-json",
+    "maxWorkers": 4
+  },
+  "capabilities": [
+    "{{.CapabilityName}}"
+  ],
+  "features": [],
+  "platforms": {
+    "linux-amd64": {
+      "artifact": "{{.BinaryName}}"
+    },
+    "darwin-amd64": {
+      "artifact": "{{.BinaryName}}"
+    },
+    "darwin-arm64": {
+      "artifact": "{{.BinaryName}}"
+    }
+  }
+}

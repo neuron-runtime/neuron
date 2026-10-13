@@ -1,0 +1,13 @@
+#!/bin/sh
+# Build script for {{.Name}} capability runtime
+# This script is invoked by `neuron build` via the runtime.json build.command
+
+set -e
+
+# The version directory is the working directory
+cd "$(dirname "$0")"
+
+# Build the binary
+go build -o {{.BinaryName}} .
+
+echo "Built {{.BinaryName}}"
