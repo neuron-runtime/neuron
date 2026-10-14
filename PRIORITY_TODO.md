@@ -1,4 +1,4 @@
-# Neuron Project Runtime + Execution Result Refactor — TODO
+# Neuron Implementation Priorities — TODO
 
 > Ignore the repository's existing `TODO.md`. This document defines the work for the new project-scoped runtime model and the related public API changes.
 
@@ -12,6 +12,7 @@ Rules that apply to every change:
 - Never move on to the next item while the current one is unchecked.
 - Never leave dead code, obsolete abstractions, or commented-out experiments behind. Removing them is part of the item that revealed them, not a follow-up.
 - Findings that emerge while implementing are appended to the relevant phase section as new checklist items rather than being silently fixed or silently dropped.
+- Keep completed `[x]` items as historical implementation records. Add new work to the owning phase or a clearly grouped phase; do not duplicate the same task across sections.
 - Each phase is one branch and one or more coherent commits (`feat(scope):`, `fix(scope):`, `refactor(scope):`, `test(scope):`, `docs(scope):`).
 
 ### Implementation order
@@ -19,18 +20,23 @@ Rules that apply to every change:
 The order below is forced by dependency, not by convenience.
 
 ```text
-Phase 0   correctness + dead code      (no dependencies)
-Phase 1   structured references        §9, §16 (Go half)
-Phase 2   project config schema        §6
-Phase 3   Assembly + Capability API    §7, §8, §16 (TS half)
-Phase 4   immutable runtime store      §5
-Phase 5   immutable builds             §4
-Phase 6   Assembly result semantics    §10, §11
-Phase 7   execution return + API       §12, §13
-Phase 8   project runtime + run        §1, §2, §3
-Phase 9   instance surface             §14
-Phase 10  runtime templates            §15
-Phase 11  migration + acceptance       §17, §18
+Phase 0   correctness + dead code                 §0
+Phase 1   structured references                    §9, §16 (Go half)
+Phase 2   project config schema                   §6
+Phase 3   Assembly + Capability API               §7, §8, §16 (TS half)
+Phase 4   immutable Capability Runtime store      §5
+Phase 5   immutable builds                        §4
+Phase 6   Assembly result semantics               §10, §11
+Phase 7   execution return + HTTP facade          §12, §13
+Phase 8   project runtime + existing run flow     §1, §2, §3
+Phase 9   instance surface                        §14
+Phase 10  runtime templates                       §15
+Phase 11  multi-Assembly project model            §19
+Phase 12  provider contract and registry          §20
+Phase 13  provider artifacts and installation     §21
+Phase 14  direct Capability Runtime invocation    §22
+Phase 15  public surface and documentation        §23
+Phase 16  migration + end-to-end acceptance       §17, §18, §24
 ```
 
 Why this order:
@@ -40,6 +46,11 @@ Why this order:
 - **Phases 1, 2, 3, and 5 precede Phase 8.** The project runtime hosts a build that already has a result contract and an artifact-addressed dependency set.
 - **Phase 10 is independent** and may proceed in parallel from Phase 2 onward.
 - **Phase 0 is first** because the refactor must land on a correct base, and because dead code must not survive into it.
+- **Phase 11 precedes the provider and direct-invocation work.** Multiple Assemblies must have a stable project/build model before they are exposed through the runtime.
+- **Phase 12 precedes Phase 13.** Provider artifacts cannot be installed or invoked safely until the provider protocol, compatibility rules, and lifecycle contract are defined.
+- **Phase 13 precedes Phase 14.** Direct `neuron run -c` must resolve already-installed runtime and provider artifacts; invocation must not become an implicit installation path.
+- **Phase 15 is a focused cleanup pass.** Public docs and examples should describe the user-facing Neuron concepts, prefer JSON over YAML, and avoid exposing internal implementation names.
+- **Migration and acceptance stay last.** Remove compatibility paths only after the replacement paths are covered end to end.
 
 ### Locked architectural decisions
 
@@ -117,7 +128,7 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
 - [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
 
-**Phase 1 Complete.** Project runtime runs in foreground with auto port allocation and discovery metadata.
+**Existing project-runtime work implemented.** The remaining startup/concurrency tests are tracked above; multi-session discovery isolation is tracked in §19 and §24.
 
 ## 2. Project Runtime Endpoint / N.O.R.E. Port Discovery
 
@@ -136,7 +147,7 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
 - [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
 
-**Phase 2 Complete.** Project runtime endpoint discovery fully implemented with auto port allocation and atomic discovery metadata.
+**Existing endpoint configuration implemented.** Remaining startup tests are tracked above and in §24.
 
 ## 3. `neuron run` (Phase 9)
 
@@ -430,3 +441,152 @@ Confirmed by direct experiment, not by reading alone.
 - [ ] Verify an immutable installed Capability Runtime cannot be silently replaced by different content under the same identity.
 - [ ] Verify N.O.R.E. can execute from a frozen build without performing dependency resolution or installation.
 - [ ] Verify generated Capability Runtime templates can build, install, and execute successfully for every supported language.
+## 19. Multiple Assemblies per Project
+
+A project may define and serve multiple named Assemblies from one foreground project runtime. This replaces the assumption that a project has one top-level `entry` Assembly. Keep the project configuration explicit; do not infer Assemblies from directory names or filesystem scanning.
+
+- [ ] Add `assemblies` to the project configuration as an ordered list of Assembly declarations.
+- [ ] Define each declaration with `name` and `entry`, with optional `default: true`.
+- [ ] Require unique Assembly names and valid project-relative entry paths; report duplicate names and invalid paths before compilation.
+- [ ] Require at most one Assembly to be marked `default`; define the fallback when none is marked, or require an explicit default if that is safer for the CLI contract.
+- [ ] Migrate the current singular `entry` configuration to the new `assemblies` list with a clear compatibility rule; do not silently drop an existing entry.
+- [ ] Update strict JSON and YAML config validation, config merging, environment/CLI overrides where relevant, scaffolding, and examples for the multi-Assembly schema.
+- [ ] Prefer JSON in READMEs, user-facing docs, and primary examples. Keep YAML examples only where they explain YAML authoring or YAML config support specifically.
+- [ ] Update build orchestration to discover and compile every declared Assembly by default.
+- [ ] Support building one selected Assembly without rebuilding unrelated Assemblies when their inputs and dependencies are unchanged.
+- [ ] Give each Assembly a stable artifact/build identity, while keeping one project build record that references the complete set of Assembly artifacts and frozen dependencies.
+- [ ] Ensure changing one Assembly does not invalidate unrelated Assembly artifacts unless a shared project input or dependency actually changed.
+- [ ] Register all Assemblies from the selected immutable project build with the same project runtime.
+- [ ] Add explicit Assembly discovery/metadata routes and a named run route, such as `POST /v1/assemblies/{name}/run`.
+- [ ] Define the default-Assembly route/alias and return a clear error when a request omits the Assembly name and no default exists.
+- [ ] Extend `neuron run` to support the default Assembly and an explicit Assembly name without confusing the name with direct Capability Runtime selection.
+- [ ] Keep Assembly result contracts isolated by Assembly; never return an internal map of all Capability results as the public Assembly result.
+- [ ] Make project-runtime discovery and cleanup safe when multiple foreground sessions for the same project are running; a session must not overwrite or delete another session's metadata.
+- [ ] Add tests for multiple Assemblies, default selection, duplicate names, independent rebuilds, per-Assembly routing, and concurrent sessions.
+
+Example project configuration (JSON is the primary documented form):
+
+```json
+{
+  "name": "order-platform",
+  "version": "0.1.0",
+  "lang": "typescript",
+  "assemblies": [
+    {
+      "name": "orders",
+      "entry": "src/assemblies/orders.ts",
+      "default": true
+    },
+    {
+      "name": "fraud",
+      "entry": "src/assemblies/fraud.ts"
+    },
+    {
+      "name": "documents",
+      "entry": "src/assemblies/documents.ts"
+    }
+  ],
+  "runtime": {
+    "host": "127.0.0.1",
+    "port": "auto"
+  }
+}
+```
+
+The equivalent YAML form may be documented as a secondary example when useful.
+
+## 20. Capability Runtime Provider Contract and Registry
+
+A provider is the host/engine that runs a Capability Runtime artifact. The Capability Runtime package contract remains independent of the provider used to host it. Process and WASM should use this same provider boundary rather than being privileged backend concepts.
+
+- [ ] Define and document a versioned Provider protocol contract separate from the Capability Runtime invocation protocol.
+- [ ] Specify provider identity and metadata: name, version, protocol version, supported runtime kinds/protocols, platform constraints, and compatibility requirements.
+- [ ] Define the minimum provider lifecycle contract: identify/validate, prepare, start, execute, health/readiness, cancel, and close; remove lifecycle methods that prove unnecessary during implementation rather than maintaining unused abstractions.
+- [ ] Define normalized success, failure, cancellation, timeout, and provider-unavailable responses at the Neuron/N.O.R.E. boundary.
+- [ ] Define how provider requirements are matched to a Capability Runtime manifest and how incompatibility is reported.
+- [ ] Refactor the current backend registry and `Backend`/`BackendInstance` boundary into the provider registry/contract without introducing a second competing registry.
+- [ ] Register Process and WASM as first-party providers behind the same contract.
+- [ ] Keep container, remote, and other provider kinds unregistered until implemented; do not document reserved providers as available.
+- [ ] Ensure the provider protocol is not presented as a public Neuron control-plane API.
+- [ ] Keep provider implementation code out of the N.O.R.E. process unless it is a trusted built-in; define an isolated/out-of-process contract for independently installed third-party providers.
+- [ ] Ensure providers cannot redefine the Capability Runtime protocol or change the meaning of `params`, `result`, lifecycle, or structured errors.
+- [ ] Make provider cleanup correct for shared process pools, WASM engines/module caches, and multiple concurrent project-runtime sessions.
+- [ ] Return actionable errors for missing providers, unsupported protocol versions, unsupported runtime kinds, platform mismatches, and unavailable required resources.
+- [ ] Add protocol compatibility tests and provider conformance tests for Process and WASM.
+
+## 21. Provider Artifact Build, Store, and Installation
+
+Provider installation should follow the same general resolution and immutable-artifact principles as Capability Runtime installation, while keeping provider artifacts and runtime artifacts distinct. For now, development must be able to build first-party providers into the artifact path to simulate installed providers; production provider installation/resolution can then consume the same artifact format.
+
+- [ ] Define a provider artifact manifest and immutable identity, including provider name/version, protocol compatibility, supported runtime kinds, platform/build metadata, entrypoint, and content digest.
+- [ ] Define provider registry/reference syntax and version-resolution behavior consistently with Capability Runtime references; resolve mutable tags to an exact version and digest before execution.
+- [ ] Reuse the Capability Runtime installer/store patterns where appropriate, without merging provider artifacts into the Capability Runtime namespace or confusing their identities.
+- [ ] Install providers through an explicit command such as `neuron install --provider <provider-ref>`.
+- [ ] Resolve, validate, stage, verify, and atomically commit provider artifacts before they become visible as installed.
+- [ ] Store provider artifacts immutably by identity and content digest; reject conflicting content under an already committed identity.
+- [ ] Support multiple installed versions of one provider without overwriting an artifact that an existing build or session uses.
+- [ ] Record the resolved provider identity/digest in frozen build or runtime resolution metadata where needed for reproducibility; do not persist host-specific absolute paths as artifact identity.
+- [ ] Ensure normal invocation never downloads, installs, compiles, or silently updates a provider.
+- [ ] Add a development command/script that builds the Process and WASM provider artifacts and places them in the same artifact/store layout used by the installed-provider resolver.
+- [ ] Make the development command deterministic and repeatable; rebuilding identical provider inputs should produce the same identity where the build is reproducible.
+- [ ] Make the development command clearly a local development/bootstrap mechanism, not a claim that registry installation has occurred.
+- [ ] Make missing development artifacts fail with a clear instruction to run the provider build/bootstrap command or install the provider.
+- [ ] Verify that project builds and direct invocations can resolve the locally built Process and WASM provider artifacts as if they were installed.
+- [ ] Add tests for staging/atomic commit, digest integrity, version coexistence, missing artifacts, and provider resolution from a frozen identity.
+- [ ] Document provider installation separately from Capability Runtime installation and explain that they install different artifact types.
+
+## 22. Direct Capability Runtime Invocation: `neuron run -c`
+
+Direct invocation lets a caller run an installed Capability Runtime without a project config, Assembly, or running project runtime. It must use the same Capability Runtime protocol and provider resolution path as Assembly execution.
+
+- [ ] Add `-c` as the shorthand for `--capability-runtime` on `neuron run`.
+- [ ] Support the form `neuron run -c neuron-runtime:http --params '{"url":"https://example.com"}'`.
+- [ ] Define and validate the Capability Runtime reference syntax, including explicit versions; resolve mutable tags such as `latest` to an exact installed identity before invocation.
+- [ ] Require the referenced Capability Runtime artifact to already be installed; do not make `neuron run -c` install packages or dependencies implicitly.
+- [ ] Resolve the compatible installed provider from the Capability Runtime manifest and provider registry; do not require callers to specify the provider during normal invocation.
+- [ ] Fail with an actionable error when the Capability Runtime is not installed, its provider is missing, or no compatible provider is available.
+- [ ] Invoke the Capability Runtime through the common versioned protocol, regardless of whether the selected provider is Process or WASM.
+- [ ] Define the direct invocation request/response contract using `params`, `result`, structured errors, and a stable exit-code policy.
+- [ ] Write the successful `result` to stdout only; write diagnostics and logs to stderr; return a non-zero exit code on failure or cancellation.
+- [ ] Support `--params-file` and the existing machine-readable result format in direct mode.
+- [ ] Ensure direct mode does not load `neuron.config.*`, require an Assembly, discover a project runtime, or start a project runtime.
+- [ ] Reject conflicting selectors, such as a named Assembly and `-c`, instead of guessing which invocation mode was intended.
+- [ ] Keep project Assembly execution and direct Capability Runtime invocation as two explicit modes of `neuron run`, sharing lower-level resolution and protocol code.
+- [ ] Add a direct invocation HTTP endpoint only if it is needed for remote callers, using the same protocol semantics; define it separately from Assembly routes and the advanced execution-management API.
+- [ ] If a direct HTTP endpoint is added, use a small contract such as `POST /v1/capabilities/run` with a runtime reference and `params`, and return `result` plus structured status/error metadata.
+- [ ] Add end-to-end tests for direct invocation from outside a Neuron project, Process and WASM provider selection, params/result handling, missing artifacts/providers, and stdout/stderr/exit-code behavior.
+
+## 23. Public Concepts, Naming, and Documentation
+
+Keep the public product model small and consistent. Neuron is the public product name; N.O.R.E. is an internal implementation name and should not be required knowledge for users.
+
+- [ ] Audit README files, CLI help, generated messages, examples, and user-facing docs for internal names such as `N.O.R.E.`; replace them with `Neuron runtime` or simply `Neuron` where the implementation detail is irrelevant.
+- [ ] Keep internal package/process names where they are technically useful; do not perform a broad internal rename solely for aesthetics.
+- [ ] Describe Neuron as a platform for composable software, not primarily as a workflow engine.
+- [ ] Use consistent public terms: Assembly, Capability, Capability Runtime, provider, `params`, and `result`; explain each once and avoid introducing unnecessary public abstractions.
+- [ ] Explain that an Assembly can be packaged as a Capability Runtime only when it is packaged with the required runtime manifest, invocation contract, and dependencies; do not imply every source Assembly is automatically installable.
+- [ ] Prefer JSON over YAML in READMEs, getting-started material, primary configuration examples, and CLI examples. Keep YAML secondary where it demonstrates supported YAML syntax or YAML-authored Assemblies.
+- [ ] Ensure examples use current command forms, including `neuron run`, `--params`, `--params-file`, `-c`/`--capability-runtime`, and explicit Assembly selection where supported.
+- [ ] Remove stale daemon/global-instance instructions from public docs unless a specific advanced use case still requires them.
+- [ ] Keep provider protocol documentation focused on provider authors; keep the Capability Runtime protocol documentation focused on runtime authors.
+- [ ] Update CLI help and error messages to distinguish project Assembly execution from direct Capability Runtime invocation.
+- [ ] Remove duplicated explanations, stale examples, dead documentation, and terminology that no longer maps to a real implementation.
+- [ ] Add documentation checks or targeted tests for key public command/config examples where practical.
+
+## 24. Migration and Acceptance Additions
+
+These items extend §17 and §18; they do not replace the existing migration and acceptance checklist. Preserve the existing checked items and complete the unchecked items only after implementation, validation, and commit on the phase branch.
+
+- [ ] Define migration from singular `entry` to `assemblies`, including the behavior for projects with no explicit default Assembly.
+- [ ] Define migration and compatibility rules for existing one-Assembly build records and runtime registrations.
+- [ ] Define provider artifact migration/bootstrap behavior without treating Capability Runtime packages as providers.
+- [ ] Define migration for existing Process/WASM backend references to the provider identity/contract.
+- [ ] Define behavior for projects whose frozen build requires a provider that is no longer installed or compatible.
+- [ ] Verify a project with multiple Assemblies builds and serves all declared Assemblies through one foreground runtime process and endpoint.
+- [ ] Verify two foreground runtime sessions for the same project cannot overwrite or remove each other's discovery metadata.
+- [ ] Verify `neuron install --provider ...` resolves and installs a provider artifact immutably, and that the development bootstrap command produces artifacts the same resolver can consume.
+- [ ] Verify Process and WASM are resolved as providers through the common provider registry rather than through special invocation paths.
+- [ ] Verify `neuron run -c neuron-runtime:http --params ...` works without project configuration or a running project runtime.
+- [ ] Verify direct Capability Runtime invocation does not install or compile missing dependencies as a side effect.
+- [ ] Verify project Assembly invocation and direct Capability Runtime invocation reject conflicting selectors and return consistent structured errors.
+- [ ] Verify public documentation uses Neuron-facing language, prefers JSON in primary examples, and does not require users to understand N.O.R.E.
