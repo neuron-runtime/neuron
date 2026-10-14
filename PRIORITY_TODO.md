@@ -306,18 +306,24 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 11. Capability Runtime `runtimeConfig.execution.mode`
 
-- [ ] Preserve the existing Capability Runtime `runtimeConfig.execution.mode` semantics: `wait` and `detach`.
-- [ ] Treat `detach` as a lifecycle boundary where the parent Assembly execution does not wait for that Capability branch.
-- [ ] Define an Assembly-result rule that only values guaranteed to be completed inside the root execution may contribute to the final Assembly result.
-- [ ] Reject an Assembly `.result({...})` reference that directly references a Capability whose effective `runtimeConfig.execution.mode` is `detach`.
-- [ ] Reject an Assembly result reference to any descendant Capability whose execution is downstream of a detached Capability and therefore belongs to the detached branch.
-- [ ] Perform this validation during compilation/build, not only at runtime.
-- [ ] Make the validation understand the actual dependency graph rather than checking only the immediate Capability.
-- [ ] Produce a clear compiler error identifying the Assembly result field, detached Capability, and offending result reference.
-- [ ] Do not silently convert `detach` to `wait` to satisfy an Assembly result reference.
-- [ ] Do not silently omit a detached result from the Assembly result.
-- [ ] Keep detached Capability tasks independently observable through advanced execution APIs.
-- [ ] Add tests covering direct detached references, detached descendants, mixed detached/non-detached branches, and valid independent Assembly result mappings.
+- [x] Preserve the existing Capability Runtime `runtimeConfig.execution.mode` semantics: `wait` and `detach`. **Preserved.** `core.RuntimeConfig.Execution.Mode` is unchanged (`shared/types/core/runtimeconfig.go`); `nore/internal/runtimeconfig` still resolves the default (`wait`).
+- [x] Treat `detach` as a lifecycle boundary where the parent Assembly execution does not wait for that Capability branch. **Preserved.** The scheduler still hands the detached branch to a separately tracked execution (`scheduler.go` `onCapabilityDetached`, `buildDetachedScopes`).
+- [x] Define an Assembly-result rule that only values guaranteed to be completed inside the root execution may contribute to the final Assembly result. **Implemented.** `validateResultDetachment` (`nore/internal/planner/result_detach.go`).
+- [x] Reject an Assembly `.result({...})` reference that directly references a Capability whose effective `runtimeConfig.execution.mode` is `detach`. **Implemented**, via the detached-branch owner map.
+- [x] Reject an Assembly result reference to any descendant Capability whose execution is downstream of a detached Capability and therefore belongs to the detached branch. **Implemented** using `reachableFrom`, so the check follows the real dependency graph, not just the immediate capability.
+- [x] Perform this validation during compilation/build, not only at runtime. **Implemented in the planner**, which compiles at registration (part of `neuron build`) and at instance creation; it is the only layer where the effective execution mode and the graph are available together. (`application/compiler` cannot reach `nore/internal/runtimeconfig` and sees only declared modes.)
+- [x] Make the validation understand the actual dependency graph rather than checking only the immediate Capability. **Implemented** via `detachedBranchOwners`, built from `detachedRoots` + `reachableFrom`.
+- [x] Produce a clear compiler error identifying the Assembly result field, detached Capability, and offending result reference. **Implemented.** The error names the field, the offending capability, and the detached branch owner.
+- [x] Do not silently convert `detach` to `wait` to satisfy an Assembly result reference. **Preserved.** The validation fails the compile instead.
+- [x] Do not silently omit a detached result from the Assembly result. **Preserved.** No filtering is introduced; an invalid reference is a hard error.
+- [x] Keep detached Capability tasks independently observable through advanced execution APIs. **Preserved.** The validation does not touch detached task tracking (`DetachedCapabilityIDs`, `ParentExecutionID`).
+- [x] Add tests covering direct detached references, detached descendants, mixed detached/non-detached branches, and valid independent Assembly result mappings. **Added** in `nore/internal/planner/result_detach_test.go` (direct, descendant, nested-owner naming, params reference, upstream-valid, non-detached-valid, mixed branches, deterministic error).
+
+**Phase 6 complete.** Detached branches can no longer be referenced by the Assembly result; the rule is enforced at compile time from the dependency graph.
+
+### Findings during Phase 6 implementation
+
+- [x] **P6-1** — The planner's `compileAssemblyResult` carried a comment claiming it could not validate result ports "without access to the capability's Results". It does have that access via the held `c.assembly`, but port existence is deliberately validated once in the build compiler (`application/compiler/compileAssemblyResult`) to avoid a second authority for the same rule. The misleading comment was corrected rather than left to imply a limitation that does not exist.
 
 ## 12. Execution Return Contract
 
