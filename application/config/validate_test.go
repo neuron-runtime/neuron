@@ -95,19 +95,14 @@ func TestUnknownKeysRejected(t *testing.T) {
 	}
 }
 
-func TestFreeFormContainersNotFlagged(t *testing.T) {
+func TestVariablesRemainFreeForm(t *testing.T) {
 	cfg, err := loadProjectConfig(t, "neuron.config.yaml", `
 variables:
   anything:
     nested: [1, 2]
-capabilityRuntimes:
-  registries:
-    - name: x
-      url: y
-      mirror: z
 `)
 	if err != nil {
-		t.Fatalf("Load failed: %v (variables and registry contents must be free-form)", err)
+		t.Fatalf("Load failed: %v (variables must be free-form)", err)
 	}
 
 	anything, ok := cfg.Variables["anything"].(map[string]any)
@@ -121,15 +116,43 @@ capabilityRuntimes:
 	if len(nested) != 2 || fmt.Sprint(nested[0]) != "1" || fmt.Sprint(nested[1]) != "2" {
 		t.Errorf("variables.anything.nested = %v, want [1 2]", nested)
 	}
+}
 
-	// Registry items are slice contents, not configuration keys: an extra
-	// key on an item must be tolerated rather than flagged as unknown.
-	if len(cfg.CapabilityRuntimes.Registries) != 1 {
-		t.Fatalf("registries = %d, want 1", len(cfg.CapabilityRuntimes.Registries))
+// TestTypedRecordListsValidated pins that a list of typed configuration records
+// (registries, assemblies) is validated element by element. These are records,
+// not free-form value containers, so an unknown key inside one is a typo and
+// must fail the load rather than be silently dropped.
+func TestTypedRecordListsValidated(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "registry item typo",
+			content: "capabilityRuntimes:\n  registries:\n    - name: x\n      url: y\n      mirror: z\n",
+			want:    "capabilityRuntimes.registries[0].mirror",
+		},
+		{
+			name:    "assembly item typo",
+			content: "assemblies:\n  - name: orders\n    entry: a.ts\n    defualt: true\n",
+			want:    "assemblies[0].defualt",
+		},
 	}
-	reg := cfg.CapabilityRuntimes.Registries[0]
-	if reg.Name != "x" || reg.URL != "y" {
-		t.Errorf("registries[0] = %#v, want name x url y", reg)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadProjectConfig(t, "neuron.config.yaml", tt.content)
+			if err == nil {
+				t.Fatalf("Load succeeded, want unknown key %q rejected", tt.want)
+			}
+			if !strings.Contains(err.Error(), "unknown key") {
+				t.Errorf("error = %v, want it to say `unknown key`", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want it to contain the dotted path %q", err, tt.want)
+			}
+		})
 	}
 }
 

@@ -25,12 +25,15 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	fingerprint := "abc123"
 	rec := BuildRecord{
 		Fingerprint: fingerprint,
-		Key: protocol.InstanceKey{
-			AssemblyID: "demo",
-			Version:    "1.0.0",
-			Hash:       "h1",
-			Env:        "default",
-		},
+		Assemblies: []AssemblyBuild{{
+			Name: "demo",
+			Key: protocol.InstanceKey{
+				AssemblyID: "demo",
+				Version:    "1.0.0",
+				Hash:       "h1",
+				Env:        "default",
+			},
+		}},
 		BuiltAt: time.Now().UTC(),
 	}
 
@@ -45,11 +48,46 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	if got.Fingerprint != rec.Fingerprint {
 		t.Errorf("fingerprint = %q, want %q", got.Fingerprint, rec.Fingerprint)
 	}
-	if got.Key.ColonString() != rec.Key.ColonString() {
-		t.Errorf("key = %q, want %q", got.Key.ColonString(), rec.Key.ColonString())
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("got %d assemblies, want 1", len(got.Assemblies))
+	}
+	if got.Assemblies[0].Key.ColonString() != rec.Assemblies[0].Key.ColonString() {
+		t.Errorf("key = %q, want %q", got.Assemblies[0].Key.ColonString(), rec.Assemblies[0].Key.ColonString())
 	}
 	if !got.BuiltAt.Equal(rec.BuiltAt) {
 		t.Errorf("builtAt = %v, want %v", got.BuiltAt, rec.BuiltAt)
+	}
+}
+
+func TestLoadBuildRecordMigratesLegacyRecord(t *testing.T) {
+	root := t.TempDir()
+	fingerprint := "legacy1"
+
+	// A pre-multi-Assembly record: a single key and capability runtime set, no
+	// `assemblies` list.
+	legacy := `{
+  "fingerprint": "legacy1",
+  "builtAt": "2026-01-01T00:00:00Z",
+  "key": {"assembly_id": "demo", "version": "1.0.0", "hash": "h1", "env": "default"},
+  "capabilityRuntimes": []
+}`
+	writeFile(t, filepath.Join(root, neuronDirectory, buildsDirectory, fingerprint, buildRecordFile), legacy)
+
+	var got BuildRecord
+	if err := LoadBuildRecord(root, fingerprint, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("migrated assemblies = %d, want 1", len(got.Assemblies))
+	}
+	if got.Assemblies[0].Name != "demo" {
+		t.Errorf("migrated name = %q, want demo", got.Assemblies[0].Name)
+	}
+	if got.Assemblies[0].Key.AssemblyID != "demo" {
+		t.Errorf("migrated key = %+v, want demo", got.Assemblies[0].Key)
+	}
+	if got.LegacyKey != nil {
+		t.Errorf("legacy key was not cleared after migration")
 	}
 }
 

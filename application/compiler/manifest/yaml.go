@@ -10,7 +10,7 @@ import (
 // (project/) and the source-language-neutral manifest boundary.
 //
 // Project variables (neuron.config.*) are deliberately not applied here:
-// application/build.Build writes them into the manifest exactly once, for
+// build.BuildAssembly writes them into the manifest exactly once, for
 // every authoring language, so the YAML frontend cannot diverge from the
 // TypeScript frontend.
 func FromResolvedProject(rp *project.ResolvedProject) *Assembly {

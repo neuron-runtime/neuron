@@ -463,21 +463,21 @@ Confirmed by direct experiment, not by reading alone.
 
 A project may define and serve multiple named Assemblies from one foreground project runtime. This replaces the assumption that a project has one top-level `entry` Assembly. Keep the project configuration explicit; do not infer Assemblies from directory names or filesystem scanning.
 
-- [ ] Add `assemblies` to the project configuration as an ordered list of Assembly declarations.
-- [ ] Define each declaration with `name` and `entry`, with optional `default: true`.
-- [ ] Require unique Assembly names and valid project-relative entry paths; report duplicate names and invalid paths before compilation.
-- [ ] Require at most one Assembly to be marked `default`; define the fallback when none is marked, or require an explicit default if that is safer for the CLI contract.
-- [ ] Migrate the current singular `entry` configuration to the new `assemblies` list with a clear compatibility rule; do not silently drop an existing entry.
-- [ ] Update strict JSON and YAML config validation, config merging, environment/CLI overrides where relevant, scaffolding, and examples for the multi-Assembly schema.
+- [x] Add `assemblies` to the project configuration as an ordered list of Assembly declarations.
+- [x] Define each declaration with `name` and `entry`, with optional `default: true`.
+- [x] Require unique Assembly names and valid project-relative entry paths; report duplicate names and invalid paths before compilation. (config validation reports duplicate/invalid names; build resolves and stats every entry before compiling any)
+- [x] Require at most one Assembly to be marked `default`; define the fallback when none is marked, or require an explicit default if that is safer for the CLI contract. (single Assembly is implicitly the default; several with none marked require an explicit name)
+- [x] Migrate the current singular `entry` configuration to the new `assemblies` list with a clear compatibility rule; do not silently drop an existing entry. (legacy `entry` is synthesized into one declaration named after the project; declaring both forms is rejected)
+- [x] Update strict JSON and YAML config validation, config merging, environment/CLI overrides where relevant, scaffolding, and examples for the multi-Assembly schema.
 - [ ] Prefer JSON in READMEs, user-facing docs, and primary examples. Keep YAML examples only where they explain YAML authoring or YAML config support specifically.
-- [ ] Update build orchestration to discover and compile every declared Assembly by default.
-- [ ] Support building one selected Assembly without rebuilding unrelated Assemblies when their inputs and dependencies are unchanged.
-- [ ] Give each Assembly a stable artifact/build identity, while keeping one project build record that references the complete set of Assembly artifacts and frozen dependencies.
-- [ ] Ensure changing one Assembly does not invalidate unrelated Assembly artifacts unless a shared project input or dependency actually changed.
-- [ ] Register all Assemblies from the selected immutable project build with the same project runtime.
+- [x] Update build orchestration to discover and compile every declared Assembly by default.
+- [x] Support building one selected Assembly without rebuilding unrelated Assemblies when their inputs and dependencies are unchanged. (`neuron build --assembly <name>`; unrelated Assemblies are carried forward from the prior build record)
+- [x] Give each Assembly a stable artifact/build identity, while keeping one project build record that references the complete set of Assembly artifacts and frozen dependencies. (per-Assembly `.neuron/assemblies/<name>/manifest.json`; one `.neuron/builds/<fingerprint>/build.json` listing every `AssemblyBuild`)
+- [x] Ensure changing one Assembly does not invalidate unrelated Assembly artifacts unless a shared project input or dependency actually changed. (per-Assembly fingerprint over config + own entry + shared sources)
+- [x] Register all Assemblies from the selected immutable project build with the same project runtime.
 - [ ] Add explicit Assembly discovery/metadata routes and a named run route, such as `POST /v1/assemblies/{name}/run`.
 - [ ] Define the default-Assembly route/alias and return a clear error when a request omits the Assembly name and no default exists.
-- [ ] Extend `neuron run` to support the default Assembly and an explicit Assembly name without confusing the name with direct Capability Runtime selection.
+- [x] Extend `neuron run` to support the default Assembly and an explicit Assembly name without confusing the name with direct Capability Runtime selection. (empty arg selects the default; a name matching a built Assembly selects it; `inst_*` and key syntax fall through to selector normalization)
 - [ ] Keep Assembly result contracts isolated by Assembly; never return an internal map of all Capability results as the public Assembly result.
 - [ ] Make project-runtime discovery and cleanup safe when multiple foreground sessions for the same project are running; a session must not overwrite or delete another session's metadata.
 - [ ] Add tests for multiple Assemblies, default selection, duplicate names, independent rebuilds, per-Assembly routing, and concurrent sessions.

@@ -70,23 +70,25 @@ func Lookup(lang language.Language) (Builder, error) {
 	return builder, nil
 }
 
-// Build dispatches to the builder registered for lang, then makes the
+// BuildAssembly dispatches to the builder registered for lang, then makes the
 // project configuration the single source of the Assembly's identity and
-// variables, canonicalizes the manifest, and persists it as the project's
-// .neuron/manifest.json. It is the one place in the pipeline where
-// identity and variable injection, canonicalization, and persistence
-// happen, so every authoring language gets identical behavior.
-func Build(ctx context.Context, lang language.Language, opts Options) error {
+// variables and canonicalizes the manifest. It returns the canonical,
+// identity-injected manifest and does not persist it: the caller owns
+// persistence, because a project may hold several Assemblies whose artifacts
+// are written to distinct paths. It is the one place in the pipeline where
+// identity and variable injection and canonicalization happen, so every
+// authoring language gets identical behavior.
+func BuildAssembly(ctx context.Context, lang language.Language, opts Options) (*manifest.Assembly, error) {
 	b, err := Lookup(lang)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sys, err := b.Build(ctx, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := manifest.ApplyIdentity(sys, opts.Name, opts.Version); err != nil {
-		return fmt.Errorf("apply assembly identity: %w", err)
+		return nil, fmt.Errorf("apply assembly identity: %w", err)
 	}
 	// Project variables (neuron.config.*) are written into the manifest
 	// exactly once, here, for every authoring language — a builder that no
@@ -99,12 +101,9 @@ func Build(ctx context.Context, lang language.Language, opts Options) error {
 	}
 	canonical, err := manifest.Canonicalize(sys)
 	if err != nil {
-		return fmt.Errorf("canonicalize manifest: %w", err)
+		return nil, fmt.Errorf("canonicalize manifest: %w", err)
 	}
-	if err := manifest.SaveToProjectRoot(opts.Root, canonical); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
-	return nil
+	return canonical, nil
 }
 
 func init() {

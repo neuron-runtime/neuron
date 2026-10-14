@@ -2,7 +2,13 @@
   "name": "hello",
   "version": "1.0.0",
   "lang": "typescript",
-  "entry": "assembly.ts",
+  "assemblies": [
+    {
+      "name": "hello",
+      "entry": "assembly.ts",
+      "default": true
+    }
+  ],
   "runtime": {
     "execution": {
       "mode": "wait",

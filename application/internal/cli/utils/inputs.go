@@ -12,31 +12,31 @@ import (
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
-// AuthoringInputs assembles the project's authoring inputs for a build
+// AuthoringInputs assembles an Assembly's authoring inputs for a build
 // fingerprint: the effective config file, the Assembly entry source, and every
 // project-owned source tree (capabilities/, implicit capability runtime root, configured
 // localRoots, fileassembly-backed local registries).
+//
+// entry is the Assembly's source file; an empty value resolves to the
+// language default for cfg.Lang. The shared project sources are common to every
+// Assembly, so changing one Assembly's entry changes only that Assembly's
+// fingerprint.
 //
 // Only inputs that exist participate; a pristine project with no capabilities/
 // directory and no capability runtime roots fingerprints its config and entry alone.
 // Local capability runtime declared build outputs (runtime.json artifact.path) are
 // excluded so in-place builds never churn the fingerprint.
-func AuthoringInputs(root string, cfg config.Config) (project.FingerprintInputs, error) {
+func AuthoringInputs(root string, cfg config.Config, entry string) (project.FingerprintInputs, error) {
 	in := project.FingerprintInputs{
 		ConfigFile: cfg.ConfigFile,
 	}
 
-	entry := cfg.Entry
 	if entry == "" {
 		lang, err := language.Resolve("", cfg.Lang, root)
 		if err != nil {
 			return in, err
 		}
-		if lang.Is(language.YAML) {
-			entry = "assembly.yaml"
-		} else {
-			entry = "index.ts"
-		}
+		entry = lang.DefaultEntry()
 	}
 	if !filepath.IsAbs(entry) {
 		entry = filepath.Join(root, entry)

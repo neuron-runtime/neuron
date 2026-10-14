@@ -102,24 +102,27 @@ spec:
 }
 
 // TestBuildPersistsIdentityInjectedManifest pins the shared injection
-// boundary: build.Build applies the project-configured identity, then
-// persists the manifest for every authoring language.
+// boundary: build.BuildAssembly applies the project-configured identity and
+// returns the canonical manifest; the caller persists it.
 func TestBuildPersistsIdentityInjectedManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLProject(t, dir)
 
-	if err := build.Build(context.Background(), language.YAML, build.Options{
+	m, err := build.BuildAssembly(context.Background(), language.YAML, build.Options{
 		Root:      dir,
 		Name:      "hello",
 		Version:   "0.1.0",
 		Variables: map[string]any{"environment": "staging"},
-	}); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	m, err := manifest.LoadFromProjectRoot(dir)
+	})
 	if err != nil {
-		t.Fatalf("LoadFromProjectRoot: %v", err)
+		t.Fatalf("BuildAssembly: %v", err)
+	}
+	if err := manifest.SaveAssembly(dir, "hello", m); err != nil {
+		t.Fatalf("SaveAssembly: %v", err)
+	}
+	m, err = manifest.LoadAssembly(dir, "hello")
+	if err != nil {
+		t.Fatalf("LoadAssembly: %v", err)
 	}
 	if m.Metadata.Name != "hello" {
 		t.Errorf("persisted name = %q, want hello", m.Metadata.Name)
@@ -142,23 +145,19 @@ func TestBuildYAMLWithoutAuthoredIdentity(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLProjectWithoutIdentity(t, dir)
 
-	if err := build.Build(context.Background(), language.YAML, build.Options{
+	m, err := build.BuildAssembly(context.Background(), language.YAML, build.Options{
 		Root:    dir,
 		Name:    "hello",
 		Version: "0.1.0",
-	}); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	m, err := manifest.LoadFromProjectRoot(dir)
+	})
 	if err != nil {
-		t.Fatalf("LoadFromProjectRoot: %v", err)
+		t.Fatalf("BuildAssembly: %v", err)
 	}
 	if m.Metadata.Name != "hello" {
-		t.Errorf("persisted name = %q, want hello", m.Metadata.Name)
+		t.Errorf("built name = %q, want hello", m.Metadata.Name)
 	}
 	if m.Metadata.Version != "0.1.0" {
-		t.Errorf("persisted version = %q, want 0.1.0", m.Metadata.Version)
+		t.Errorf("built version = %q, want 0.1.0", m.Metadata.Version)
 	}
 }
 
@@ -169,7 +168,7 @@ func TestBuildYAMLWithoutAuthoredIdentityRequiresConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLProjectWithoutIdentity(t, dir)
 
-	err := build.Build(context.Background(), language.YAML, build.Options{Root: dir})
+	_, err := build.BuildAssembly(context.Background(), language.YAML, build.Options{Root: dir})
 	if err == nil {
 		t.Fatal("expected an error when configuration carries no identity")
 	}
@@ -194,8 +193,9 @@ func (stubBuilder) Build(_ context.Context, opts build.Options) (*manifest.Assem
 }
 
 // TestBuildAppliesVariablesAtTheSharedSeam runs a freshly registered stub
-// builder through build.Build with project variables, proving the seam — and
-// not any individual builder — writes variables into the persisted manifest.
+// builder through build.BuildAssembly with project variables, proving the seam
+// — and not any individual builder — writes variables into the canonical
+// manifest.
 // This is the boundary the YAML frontend used to own alone, which is exactly
 // how the TypeScript path lost them.
 func TestBuildAppliesVariablesAtTheSharedSeam(t *testing.T) {
@@ -204,18 +204,21 @@ func TestBuildAppliesVariablesAtTheSharedSeam(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := build.Build(context.Background(), stubBuilder{}.Language(), build.Options{
+	m, err := build.BuildAssembly(context.Background(), stubBuilder{}.Language(), build.Options{
 		Root:      dir,
 		Name:      "hello",
 		Version:   "0.1.0",
 		Variables: map[string]any{"environment": "staging", "limits": map[string]any{"cpu": "1"}},
-	}); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	m, err := manifest.LoadFromProjectRoot(dir)
+	})
 	if err != nil {
-		t.Fatalf("LoadFromProjectRoot: %v", err)
+		t.Fatalf("BuildAssembly: %v", err)
+	}
+	if err := manifest.SaveAssembly(dir, "hello", m); err != nil {
+		t.Fatalf("SaveAssembly: %v", err)
+	}
+	m, err = manifest.LoadAssembly(dir, "hello")
+	if err != nil {
+		t.Fatalf("LoadAssembly: %v", err)
 	}
 	if m.Metadata.Name != "hello" || m.Metadata.Version != "0.1.0" {
 		t.Errorf("persisted identity = %q@%q, want hello@0.1.0", m.Metadata.Name, m.Metadata.Version)
@@ -235,7 +238,7 @@ func TestBuildRequiresConfiguredIdentity(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLProject(t, dir)
 
-	err := build.Build(context.Background(), language.YAML, build.Options{
+	_, err := build.BuildAssembly(context.Background(), language.YAML, build.Options{
 		Root:    dir,
 		Version: "0.1.0",
 	})
@@ -253,7 +256,7 @@ func TestBuildRejectsIdentityConflict(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLProject(t, dir)
 
-	err := build.Build(context.Background(), language.YAML, build.Options{
+	_, err := build.BuildAssembly(context.Background(), language.YAML, build.Options{
 		Root:    dir,
 		Name:    "other",
 		Version: "0.1.0",

@@ -1,12 +1,12 @@
 package run
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/neuron-runtime/neuron/application/client"
@@ -61,11 +61,7 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	// Resolve target assembly if provided
 	target := ""
 	if len(args) > 0 {
-		t, err := utils.NormalizeInstanceTarget(args[0])
-		if err != nil {
-			return err
-		}
-		target = t
+		target = args[0]
 	}
 
 	// Load params from --params or --params-file
@@ -116,16 +112,12 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	// Address the Assembly to run. The facade takes one selector query
-	// parameter, so an explicit target is used verbatim and the current project
-	// build's key is used otherwise; the server resolves it to a registered
-	// Assembly.
-	selector := target
-	if selector == "" {
-		key, err := resolveCurrentBuildKey(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		selector = key.ColonString()
+	// parameter. If an explicit target is provided, try to interpret it as an
+	// assembly name from the current build; otherwise pass it through as an
+	// existing instance key/selector.
+	selector, err := resolveSelector(cfg, target)
+	if err != nil {
+		return err
 	}
 
 	// Run synchronously through the facade to get the Assembly result.
@@ -232,26 +224,83 @@ func isProcessAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// resolveCurrentBuildKey resolves the InstanceKey from the current build.
-func resolveCurrentBuildKey(ctx context.Context, cfg config.Config) (protocol.InstanceKey, error) {
+// resolveSelector determines the selector to pass to the runtime facade:
+// if target is empty, it selects the default Assembly from the current build;
+// if target names a built Assembly, it returns its key colon form; otherwise it
+// normalizes the target as an instance key/selector (preserving legacy behavior).
+func resolveSelector(cfg config.Config, target string) (string, error) {
 	root, err := os.Getwd()
 	if err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("get current directory: %w", err)
+		return "", fmt.Errorf("get current directory: %w", err)
 	}
 
-	fingerprint, err := project.LoadCurrentPointer(root)
+	if target == "" {
+		return currentDefaultKey(root, cfg)
+	}
+
+	// A name that matches a built Assembly selects it. Instance IDs (inst_*)
+	// never name an Assembly, so they skip the lookup and are normalized as
+	// selectors along with any other explicit target.
+	if !strings.HasPrefix(target, "inst_") {
+		if key, ok := findAssemblyKey(root, target); ok {
+			return key.ColonString(), nil
+		}
+	}
+
+	norm, err := utils.NormalizeInstanceTarget(target)
+	if err != nil {
+		return "", err
+	}
+	return norm, nil
+}
+
+func findAssemblyKey(root, name string) (protocol.InstanceKey, bool) {
+	fp, err := project.LoadCurrentPointer(root)
+	if err != nil {
+		return protocol.InstanceKey{}, false
+	}
+	var record project.BuildRecord
+	if err := project.LoadBuildRecord(root, fp, &record); err != nil {
+		return protocol.InstanceKey{}, false
+	}
+	if a, ok := record.FindAssembly(name); ok {
+		return a.Key, true
+	}
+	return protocol.InstanceKey{}, false
+}
+
+func currentDefaultKey(root string, cfg config.Config) (string, error) {
+	fp, err := project.LoadCurrentPointer(root)
 	if err != nil {
 		if errors.Is(err, project.ErrNotBuilt) {
-			return protocol.InstanceKey{}, fmt.Errorf("project has not been built; run `neuron build` first")
+			return "", fmt.Errorf("project has not been built; run `neuron build` first")
 		}
-		return protocol.InstanceKey{}, fmt.Errorf("load current pointer: %w", err)
+		return "", fmt.Errorf("load current pointer: %w", err)
+	}
+	var record project.BuildRecord
+	if err := project.LoadBuildRecord(root, fp, &record); err != nil {
+		return "", fmt.Errorf("load build record: %w", err)
 	}
 
-	var record project.BuildRecord
-	if err := project.LoadBuildRecord(root, fingerprint, &record); err != nil {
-		return protocol.InstanceKey{}, fmt.Errorf("load build record: %w", err)
+	switch len(record.Assemblies) {
+	case 0:
+		return "", fmt.Errorf("current build records no Assemblies")
+	case 1:
+		return record.Assemblies[0].Key.ColonString(), nil
+	default:
+		// Select the default Assembly; if none is marked, require explicit name.
+		if def, ok := cfg.DefaultAssembly(); ok {
+			if a, ok := record.FindAssembly(def.Name); ok {
+				return a.Key.ColonString(), nil
+			}
+			return "", fmt.Errorf("default Assembly %q not found in current build", def.Name)
+		}
+		names := make([]string, 0, len(record.Assemblies))
+		for _, a := range record.Assemblies {
+			names = append(names, a.Name)
+		}
+		return "", fmt.Errorf("multiple Assemblies built (%v); specify one as an argument", names)
 	}
-	return record.Key, nil
 }
 
 // outputResult writes the Assembly result to stdout in the specified format.

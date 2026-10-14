@@ -33,10 +33,19 @@ type Config struct {
 	// Lang is the canonical authoring language. It defaults to "typescript".
 	Lang string `yaml:"lang,omitempty" mapstructure:"lang"`
 
-	// Entry is the assembly source file relative to the project root
-	// (e.g. "assembly.ts" or "assembly.yaml"). When empty the default entry for
-	// the resolved language is used.
+	// Entry is the legacy singular assembly source file relative to the
+	// project root (e.g. "assembly.ts" or "assembly.yaml"). It is superseded
+	// by Assemblies: a project that declares Assemblies must not also set
+	// Entry, and a project that sets neither is migrated to a single
+	// declaration named after the project (see EffectiveAssemblies). When
+	// Entry is empty and no Assemblies are declared the default entry for the
+	// resolved language is used.
 	Entry string `yaml:"entry,omitempty" mapstructure:"entry"`
+
+	// Assemblies is the ordered list of Assemblies this project defines. Each
+	// declaration names an Assembly and its entry source. Names must be unique
+	// within the project and at most one declaration may be the default.
+	Assemblies []AssemblyDeclaration `yaml:"assemblies,omitempty" mapstructure:"assemblies"`
 
 	// Variables are project-level values passed into the compiled assembly
 	// manifest. They have no meaning to the runtime itself.

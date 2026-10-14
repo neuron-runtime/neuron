@@ -135,6 +135,10 @@ func Load(opts Options) (Config, error) {
 
 	resolvePaths(&cfg, cfg.ProjectDir)
 
+	if err := validateAssemblyDeclarations(&cfg); err != nil {
+		return Config{}, fmt.Errorf("invalid assemblies: %w", err)
+	}
+
 	return cfg, nil
 }
 
@@ -222,6 +226,11 @@ func resolvePaths(cfg *Config, projectDir string) {
 	cfg.Daemon.PIDFile = Expand(cfg.Daemon.PIDFile, projectDir)
 	cfg.CapabilityRuntimes.StoreDir = Expand(cfg.CapabilityRuntimes.StoreDir, projectDir)
 	cfg.Entry = Expand(cfg.Entry, projectDir)
+	for i := range cfg.Assemblies {
+		if cfg.Assemblies[i].Entry != "" {
+			cfg.Assemblies[i].Entry = Expand(cfg.Assemblies[i].Entry, projectDir)
+		}
+	}
 
 	if cfg.Daemon.NorePath != "" {
 		cfg.Daemon.NorePath = Expand(cfg.Daemon.NorePath, projectDir)
