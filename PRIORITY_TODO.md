@@ -126,9 +126,9 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Include enough ownership information in discovery metadata to reject a stale or foreign process. **Implemented.** PID and project root in discovery metadata.
 - [x] Remove assumptions that the runtime is always reachable through the current global Unix socket. **Implemented.** `neuron run` discovers via `.neuron/runtime.json`; no global socket.
 - [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
-- [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
+- [x] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown. **Implemented.** The startup pieces were made testable in isolation and covered: `listenProject` in `nore/cmd/nore` is tested for OS-assigned, explicit, and occupied ports; the discovery-record contract moved to `shared/types/projectruntime` and is tested for round-trip, atomic write, owner-only permissions, idempotent removal, and the loopback default; `application/internal/cli/run` is tested for walking up to a project runtime, rejecting a dead process and a foreign project root, keeping concurrent projects isolated, the `--port` override, and adopting the published token. Process-level acceptance against real running runtimes stays in §24.
 
-**Existing project-runtime work implemented.** The remaining startup/concurrency tests are tracked above; multi-session discovery isolation is tracked in §19 and §24.
+**Existing project-runtime work implemented.** Startup unit coverage landed above (see Phase 8 findings P8-1/P8-2); process-level startup/concurrency acceptance is tracked in §24.
 
 ## 2. Project Runtime Endpoint / N.O.R.E. Port Discovery
 
@@ -145,9 +145,9 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Include enough ownership information in discovery metadata to reject a stale or foreign process. **Implemented.** PID and project root in discovery metadata.
 - [x] Remove assumptions that the runtime is always reachable through the current global Unix socket. **Implemented.** `neuron run` discovers via `.neuron/runtime.json`; no global socket.
 - [x] Make automatic port selection work correctly when multiple Neuron projects are running simultaneously. **Implemented.** OS assigns port via `net.Listen("tcp", "127.0.0.1:0")`.
-- [ ] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown.
+- [x] Add startup tests for `auto`, explicit ports, occupied ports, concurrent projects, stale discovery metadata, and clean shutdown. **Implemented.** Same work and tests as the identical §1 item: port allocation in `nore/cmd/nore`, the `shared/types/projectruntime` record contract, and discovery resolution in `application/internal/cli/run`.
 
-**Existing endpoint configuration implemented.** Remaining startup tests are tracked above and in §24.
+**Existing endpoint configuration implemented.** Startup tests landed under §1 (Phase 8 findings P8-1/P8-2); process-level acceptance is tracked in §24.
 
 ## 3. `neuron run` (Phase 9)
 
@@ -166,9 +166,14 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Send logs, diagnostics, runtime startup messages, and execution errors to stderr. **Implemented.** Errors to stderr, result to stdout.
 - [x] Return a non-zero process exit code for failed or cancelled executions. **Implemented.** `outputResult` returns error for failed executions.
 - [x] Add a stable machine-readable result format such as `--format json`. **Implemented.** `--format json` (default) and `--format text`.
-- [ ] Keep event streaming and detailed execution inspection available through advanced commands/APIs rather than the default `run` experience.
+- [ ] Keep event streaming and detailed execution inspection available through advanced commands/APIs rather than the default `run` experience. **(re-homed: Phase 9, §14)** — the advanced HTTP APIs already exist unchanged (`GET /v1/instances/{id}/executions`, its `/events`, `/events/stream`, and `cancel`); what remains is the command surface, which is the same work as §14's "advanced execution inspection" item. It is implemented once, in Phase 9, not duplicated here.
 
 **Phase 3 Complete.** `neuron run` is a client-only command that discovers the project runtime and returns the Assembly result.
+
+### Findings during Phase 8 implementation
+
+- [x] **P8-1** The project-runtime discovery record published the API token world-readable: `nore/cmd/nore` wrote `.neuron/runtime.json` with `0o644` and created `.neuron` with `0o755`. The token authenticates the loopback TCP endpoint, and loopback is reachable by every local user, so a second local user could read the token and run arbitrary capability runtimes. **Fixed** by moving the record to `shared/types/projectruntime`, whose `Write` uses `0600` for the file and `0700` for the directory, re-applied on every write so a `.neuron` directory created by an older build is tightened rather than left loose.
+- [x] **P8-2** The discovery contract had no single owner across the two Go modules: `nore/cmd/nore` wrote an anonymous `map[string]any` and `application/internal/cli/run` parsed a matching anonymous struct, and the reader walked the directory tree a second time purely to read the token. **Fixed** by consolidating the record into `shared/types/projectruntime` — the boundary the two modules already share — with one `Record`, one `Write`/`Read`/`Remove`, and a reader that resolves endpoint and token in a single walk. The JSON wire field names are pinned by a test so a renamed struct tag cannot silently break discovery.
 
 ## 4. `neuron build`
 

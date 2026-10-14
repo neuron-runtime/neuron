@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,5 +88,71 @@ func TestTokenPathForHonorsEnvironmentOverride(t *testing.T) {
 
 	if got := tokenPathFor("/run/neuron/nore.sock"); got != "/custom/credential" {
 		t.Fatalf("tokenPathFor = %q, want the override", got)
+	}
+}
+
+// With no explicit port the OS assigns one, and the bound listener reports the
+// real port. Retaining this listener is what makes concurrent project runtimes
+// safe: the OS resolves the race instead of the process probing and racing.
+func TestListenProjectAutoAssignsPort(t *testing.T) {
+	listener, err := listenProject("127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	if port == "" || port == "0" {
+		t.Fatalf("auto port = %q, want a concrete assigned port", port)
+	}
+}
+
+// An explicit port binds exactly that port.
+func TestListenProjectExplicitPort(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("probe listen: %v", err)
+	}
+	_, port, err := net.SplitHostPort(probe.Addr().String())
+	if err != nil {
+		t.Fatalf("split probe addr: %v", err)
+	}
+	probe.Close()
+
+	listener, err := listenProject("127.0.0.1", port)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", port, err)
+	}
+	defer listener.Close()
+
+	_, got, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	if got != port {
+		t.Errorf("bound port = %q, want the explicit %q", got, port)
+	}
+}
+
+// An occupied port must fail cleanly rather than silently binding elsewhere,
+// so an operator who asked for a specific port learns it is taken.
+func TestListenProjectOccupiedPortFails(t *testing.T) {
+	first, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("first listen: %v", err)
+	}
+	defer first.Close()
+
+	_, port, err := net.SplitHostPort(first.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+
+	if listener, err := listenProject("127.0.0.1", port); err == nil {
+		listener.Close()
+		t.Fatalf("binding occupied port %s succeeded, want an error", port)
 	}
 }

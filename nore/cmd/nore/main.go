@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -24,6 +23,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
+	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/version"
 )
 
@@ -311,25 +311,15 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 		log.Fatalf("generate api token: %v", err)
 	}
 
-	// Create a listener on loopback with auto port if not specified
-	var listener net.Listener
-	if port == "" {
-		// Ask OS for an available port on loopback
-		listener, err = net.Listen("tcp", host+":0")
-		if err != nil {
-			log.Fatalf("listen on %s:0: %v", host, err)
-		}
-	} else {
-		listener, err = net.Listen("tcp", host+":"+port)
-		if err != nil {
-			log.Fatalf("listen on %s:%s: %v", host, port, err)
-		}
+	// Bind the runtime's listener. An empty port asks the OS for an available
+	// one; the bound port is what gets published, never the requested one.
+	listener, err := listenProject(host, port)
+	if err != nil {
+		log.Fatal(err)
 	}
 	defer listener.Close()
 
-	// Get the actual bound address
-	addr := listener.Addr().String()
-	_, portStr, err := net.SplitHostPort(addr)
+	_, portStr, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
 		log.Fatalf("parse bound address: %v", err)
 	}
@@ -339,28 +329,10 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 		log.Fatalf("create data directory %s: %v", dataDir, err)
 	}
 
-	// Create project root .neuron directory for discovery metadata
-	projectNeuronDir := filepath.Join(absRoot, ".neuron")
-	if err := os.MkdirAll(projectNeuronDir, 0o755); err != nil {
-		log.Fatalf("create project .neuron directory: %v", err)
-	}
-
-	// Write discovery metadata atomically
-	discoveryPath := filepath.Join(projectNeuronDir, "runtime.json")
-	discovery := map[string]any{
-		"port":        portStr,
-		"host":        host,
-		"pid":         os.Getpid(),
-		"projectRoot": absRoot,
-		"startedAt":   time.Now().UTC().Format(time.RFC3339),
-		"token":       token,
-	}
-	discoveryData, err := json.MarshalIndent(discovery, "", "  ")
-	if err != nil {
-		log.Fatalf("marshal discovery metadata: %v", err)
-	}
-	if err := atomicWriteFile(discoveryPath, discoveryData); err != nil {
-		log.Fatalf("write discovery metadata: %v", err)
+	// Publish the discovery record so `neuron run` can find this runtime. The
+	// record is owner-only: it carries the API token.
+	if err := projectruntime.Write(absRoot, projectruntime.New(host, portStr, absRoot, os.Getpid(), token)); err != nil {
+		log.Fatalf("write discovery record: %v", err)
 	}
 
 	// Print the canonical URL for the user
@@ -401,13 +373,28 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	select {
 	case <-ctx.Done():
 		shutdownRuntimes(srv)
-		// Clean up discovery metadata
-		_ = os.Remove(discoveryPath)
+		_ = projectruntime.Remove(absRoot)
 	case err := <-errCh:
 		shutdownRuntimes(srv)
-		_ = os.Remove(discoveryPath)
+		_ = projectruntime.Remove(absRoot)
 		log.Fatal(err)
 	}
+}
+
+// listenProject binds the project runtime's TCP listener. An empty port asks
+// the OS for a free port and retaining that bound listener is what makes
+// concurrent projects safe: the OS resolves the race instead of the process
+// probing for a port and then racing to claim it.
+func listenProject(host, port string) (net.Listener, error) {
+	addr := host + ":" + port
+	if port == "" {
+		addr = host + ":0"
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	return listener, nil
 }
 
 // generateProjectToken generates a secure API token for a project runtime.
@@ -417,17 +404,4 @@ func generateProjectToken() (string, error) {
 		return "", err
 	}
 	return token, nil
-}
-
-// atomicWriteFile writes data to a temporary file and then atomically renames it.
-func atomicWriteFile(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }
