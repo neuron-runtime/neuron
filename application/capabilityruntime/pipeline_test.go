@@ -140,7 +140,7 @@ func writePackageArchiveCapabilityRuntime(t *testing.T, rootDir, typ, version, r
 		},
 		Capabilities: []string{"echo"},
 		Platforms: map[string]capabilityrt.Platform{
-			capabilityrt.PlatformWasm:        {Artifact: "echo.wasm"},
+			capabilityrt.PlatformWasm:   {Artifact: "echo.wasm"},
 			capabilityrt.HostPlatform(): {Artifact: "capabilityruntime.sh"},
 		},
 	}

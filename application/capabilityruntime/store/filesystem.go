@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // FileassemblyStore is a Store rooted at a local directory, by default

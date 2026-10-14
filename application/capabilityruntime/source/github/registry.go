@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // RepoRef identifies a GitHub repository as owner/name.

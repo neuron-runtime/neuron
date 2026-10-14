@@ -127,6 +127,12 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	if err != nil {
 		return nil, err
 	}
+	// A result may only read values guaranteed to complete inside the root
+	// execution. Detached branches are excluded because the parent never waits
+	// for them, so a reference into one could never resolve.
+	if err := validateResultDetachment(result, nodes); err != nil {
+		return nil, err
+	}
 
 	detached, err := buildDetachedScopes(nodes, metadata)
 	if err != nil {
@@ -377,9 +383,9 @@ func (c *Compiler) compileAssemblyResult(assemblyResult *shared.AssemblyResult) 
 			if _, ok := capabilityIDs[shared.ID(field.Source.Capability)]; !ok {
 				return nil, fmt.Errorf("assembly result field %q references unknown capability %q", field.Name, field.Source.Capability)
 			}
-			// Could also validate that the specific result port exists on the capability,
-			// but that would require access to the capability's Results which we don't have here.
-			// The compiler already validated this at authoring time.
+			// Port existence is validated once, in the build compiler, against
+			// the manifest every authoring surface produces. Repeating it here
+			// would make two authorities for the same rule.
 		}
 		result.Fields[i] = types.ExecutionResultField{
 			Name:   field.Name,

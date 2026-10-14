@@ -28,10 +28,20 @@ const (
 	ExecutionEventsStreamPath = "/v1/instances/{id}/executions/{execID}/events/stream"
 	CancelExecutionPath       = "/v1/instances/{id}/executions/{execID}/cancel"
 
+	// RunPath is the simple synchronous execution facade: one request in, one
+	// Assembly result out. The advanced per-instance execution resources above
+	// remain the way to start, observe, stream, or cancel execution.
+	RunPath = "/v1/run"
+
 	WebSocketPath = "/v1/ws"
 
 	RegisterPath = "/v1/register"
 )
+
+// AssemblySelectorParam names the query parameter that addresses the Assembly to
+// run on the POST /v1/run facade. It is a protocol constant because both the
+// client that writes it and the server that reads it have to agree on it.
+const AssemblySelectorParam = "assembly"
 
 // InstanceByID returns the path addressing a single instance.
 func InstanceByID(instanceID string) string {
@@ -42,6 +52,17 @@ func InstanceByID(instanceID string) string {
 // instance.
 func InstanceExecutions(instanceID string) string {
 	return fillRoute(ExecutePath, instanceID)
+}
+
+// Run returns the URL for the synchronous execution facade, addressing the
+// Assembly named by selector. The selector is carried as a query parameter
+// rather than a path segment or body field: the body is reserved for the
+// execution params alone, and the Assembly's identity stays in the URL where a
+// caller can see it.
+func Run(selector string) string {
+	v := url.Values{}
+	v.Set(AssemblySelectorParam, selector)
+	return RunPath + "?" + v.Encode()
 }
 
 // ExecutionByID returns the path addressing a single execution.

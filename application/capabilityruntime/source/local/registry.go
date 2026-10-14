@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // VersionSpec is a resolved view of one version directory under a local root.
