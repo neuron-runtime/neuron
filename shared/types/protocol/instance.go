@@ -137,9 +137,17 @@ type ExecuteRequest struct {
 	// capabilities.
 	Params map[string]any `json:"params,omitempty"`
 	// Mode selects how the server responds. "detach" returns immediately with
-	// the execution accepted (HTTP 202); anything else (empty or "wait") waits
-	// for the execution to finish and returns its final result (HTTP 200).
+	// the execution accepted (HTTP 202); anything else (wait) blocks until the
+	// execution terminates and returns its final result.
 	Mode string `json:"mode,omitempty"`
+}
+
+// RunRequest is the body of the synchronous POST /v1/run facade. It carries only
+// the execution params: the Assembly being run is named by the request URL, not
+// the payload, so the body stays a pure input contract regardless of how many
+// Assemblies a runtime hosts.
+type RunRequest struct {
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // CancelExecutionRequest is the body of a request to cancel a running execution.

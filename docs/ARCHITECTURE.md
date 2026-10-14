@@ -413,6 +413,7 @@ Command-line flags take precedence over environment variables.
 | --- | --- |
 | `GET /health` | Health check (used by the CLI bootstrap) |
 | `POST /v1/register` | Register a compiled Assembly |
+| `POST /v1/run?assembly=<selector>` | Run an Assembly synchronously and return its result |
 | `GET /v1/instances` | List Instances |
 | `POST /v1/instances` | Create an Instance and begin execution |
 | `DELETE /v1/instances` | Remove all Instances |

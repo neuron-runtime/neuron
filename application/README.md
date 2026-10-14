@@ -26,9 +26,9 @@ sequenceDiagram
     C-->>U: built and registered with key
 
     U->>C: neuron run --params '{...}'
-    C->>D: POST /v1/instances
-    D-->>C: instance + execution events streamed (WebSocket / SSE)
-    C-->>U: terminal state reached
+    C->>D: POST /v1/run?assembly=<key>
+    D-->>C: Assembly result
+    C-->>U: result on stdout (JSON or text)
 ```
 
 
@@ -211,14 +211,16 @@ Usage:
   neuron run [instance-id|assembly-key] [flags]
 
 Flags:
-      --detach         Return execution handles immediately without streaming live events
-      --params string  JSON params payload for execution (e.g., '{"key":"value"}')
-  -v, --verbose        Enable verbose output to display event payloads
+      --format string      Output format for the Assembly result (json, text) (default "json")
+      --params string      JSON params payload for execution (e.g., '{"key":"value"}')
+      --params-file string Path to JSON file with params payload
+      --port string        Override local runtime port (default: auto-discover from project)
+      --remote string      Remote N.O.R.E. endpoint (e.g., http://host:port)
 ```
 
-`neuron run` asks N.O.R.E. to create an instance and execute an assembly, then streams live execution events back to the terminal over the WebSocket endpoint, falling back to Server-Sent Events when WebSocket is unavailable.
+`neuron run` is a client of the project runtime. It discovers the runtime that bare `neuron` started, sends one synchronous execution request to `POST /v1/run`, and prints the Assembly result to stdout. It does not start or stop the runtime, stream events, or return execution handles — starting, observing, streaming, and cancelling executions are advanced inspection concerns exposed through the API, not the normal `run` output.
 
-Without an argument, `neuron run` runs the registered assembly: it loads the registration key recorded by `neuron build` from `.neuron/register.json`. With a target argument it runs that instance directly, which is useful for re-running an existing instance without a local registration:
+The Assembly is addressed by the `assembly` selector on the request URL, never inside the params payload, so the same command works whether the runtime hosts one Assembly or many. Without an argument, `neuron run` uses the key of the current project build — the one `neuron build` recorded in `.neuron/current.json`. With a target argument it addresses that Assembly instead:
 
 | Target form             | Example                             | Meaning                                  |
 | ----------------------- | ----------------------------------- | ---------------------------------------- |
@@ -230,30 +232,25 @@ Without an argument, `neuron run` runs the registered assembly: it loads the reg
 Remaining key segments (`:hash`, `:env`) are preserved as given. Instance IDs (`inst_*`) pass through unchanged; anything else is parsed as an assembly key and normalized to its colon-encoded wire form. When no argument is given and the project is not built, the command stops with a message pointing you at `neuron build`.
 
 ```bash
-# Run the registered assembly with no params, streaming events
+# Run the current project build with no params
 neuron run
 
-# Provide params
+# Provide params inline
 neuron run --params '{"order": {"id": "ord_123", "total": 4250, "currency": "USD"}}'
 
-# Re-run a specific instance
-neuron run inst_ab12cd
+# Load params from a file
+neuron run --params-file ./params.json
 
 # Run the latest registered version of a named assembly
 neuron run order-processing
 
-# Show event payloads
-neuron run -v
-
-# Start execution and return immediately with execution/instance handles
-neuron run --detach
+# Emit the Assembly result as text instead of JSON
+neuron run --format text
 ```
 
-The command always asks N.O.R.E. to accept the execution asynchronously (HTTP `202`, returning execution ID, instance ID, and status), and then decides how to present it: by default it streams live events until the execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`), while `--detach` prints the returned handles and returns immediately so you can follow progress with `neuron instance list`. `capability.log` events render their level and message inline; other event payloads are shown only with `-v`, which also attaches the daemon's output.
+stdout contains only the Assembly result in the selected `--format`; logs, diagnostics, and execution errors go to stderr, and a failed or cancelled execution exits non-zero. The result comes from one synchronous `POST /v1/run` request — the command does not stream events, expose execution handles, or list execution history.
 
-Pressing Ctrl-C cancels the execution rather than abandoning it. The CLI asks N.O.R.E. to stop the work and keeps streaming until the cancellation is reported, then exits non-zero — an execution that was cancelled on request did not complete. A second Ctrl-C force-quits, so an unresponsive runtime can never trap you. If the execution had already finished, the CLI says so instead of claiming it stopped something that was already done.
-
-Cancellation is also available directly against the API: `POST /v1/instances/{id}/executions/{execID}/cancel`, which answers `404` if there is no such instance or execution, `409` if it already reached a terminal state, and `200` if this call stopped it.
+Starting, observing, streaming, and cancelling executions remain available as advanced API operations: `POST /v1/instances/{id}/executions` starts an execution (optionally detached), its event stream is served over `WS /v1/ws` or `GET .../events/stream`, and `POST /v1/instances/{id}/executions/{execID}/cancel` stops one — answering `404` if there is no such instance or execution, `409` if it already reached a terminal state, and `200` if this call stopped it.
 
 ### `neuron add`
 

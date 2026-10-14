@@ -90,16 +90,16 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	input := utils.MergeMaps(utils.GetQueryParams(r), body.Params)
 
-	execution, err := i.Execute(r.Context(), input)
-	if err != nil {
-		utils.ErrorJSON(w, http.StatusInternalServerError, err)
-		return
-	}
-
 	// Detach returns as soon as the execution is accepted; the client can then
-	// follow progress through the event stream endpoint. This preserves the
-	// original behavior and is what the CLI uses to stream events live.
+	// follow progress through the event stream endpoint. It is the asynchronous
+	// half of the advanced execution resource; the simple synchronous facade is
+	// POST /v1/run.
 	if body.Mode == core.ExecutionModeDetach {
+		execution, err := i.Execute(r.Context(), input)
+		if err != nil {
+			utils.ErrorJSON(w, http.StatusInternalServerError, err)
+			return
+		}
 		utils.WriteJSON(w, http.StatusAccepted, protocol.Response{
 			Message: "execution accepted",
 			Status:  http.StatusAccepted,
@@ -113,51 +113,26 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait mode (the default) blocks until the execution terminates and
-	// returns its final result, turning N.O.R.E. into a synchronous runtime
-	// for API callers. The execution itself still runs asynchronously.
-	if err := execution.Wait(r.Context()); err != nil {
+	// Wait mode (the default) blocks until the execution terminates and returns
+	// its final result. The execution itself still runs asynchronously; this is
+	// one shared implementation with the simple POST /v1/run facade.
+	result, err := h.runSynchronously(r.Context(), i, input)
+	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return // the client went away; nothing can be written
 		}
-		utils.WriteJSON(w, http.StatusOK, protocol.Response{
-			Message: "execution failed",
-			Status:  http.StatusOK,
-			Data: protocol.ExecutionResult{
-				ExecutionID: execution.ID,
-				InstanceID:  i.ID,
-				Status:      string(execution.Status()),
-				Error:       err.Error(),
-			},
-		})
+		utils.ErrorJSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	// Resolve the Assembly result from the blueprint's result contract.
-	assemblyResult, err := execution.ResolveAssemblyResult()
-	if err != nil {
-		utils.WriteJSON(w, http.StatusOK, protocol.Response{
-			Message: "execution failed",
-			Status:  http.StatusOK,
-			Data: protocol.ExecutionResult{
-				ExecutionID: execution.ID,
-				InstanceID:  i.ID,
-				Status:      string(execution.Status()),
-				Error:       fmt.Sprintf("resolve assembly result: %v", err),
-			},
-		})
-		return
+	message := "execution completed"
+	if result.Error != "" {
+		message = "execution failed"
 	}
-
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
-		Message: "execution completed",
+		Message: message,
 		Status:  http.StatusOK,
-		Data: protocol.ExecutionResult{
-			ExecutionID: execution.ID,
-			InstanceID:  i.ID,
-			Status:      string(execution.Status()),
-			Result:      assemblyResult,
-		},
+		Data:    result,
 	})
 }
 

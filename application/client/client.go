@@ -178,6 +178,30 @@ func (c *Client) ExecuteByKeyOrTarget(ctx context.Context, key protocol.Instance
 	return response.Data, nil
 }
 
+// Run executes the Assembly named by selector and returns its result in one
+// synchronous request.
+//
+// It is the simple execution entry point, matching the POST /v1/run facade: the
+// request body carries only params, the Assembly is addressed by the URL, and
+// the response is the Assembly result (or the execution's terminal error). It
+// never returns execution history. Callers that need to start, stream, or cancel
+// an execution use ExecuteByKeyOrTarget with the advanced resources.
+func (c *Client) Run(ctx context.Context, selector string, params map[string]any) (protocol.ExecutionResult, error) {
+	if selector == "" {
+		return protocol.ExecutionResult{}, fmt.Errorf("assembly selector is required")
+	}
+
+	req := protocol.RunRequest{Params: params}
+
+	var response struct {
+		Data protocol.ExecutionResult `json:"data"`
+	}
+	if err := c.conn.Do(ctx, http.MethodPost, protocol.Run(selector), req, &response); err != nil {
+		return protocol.ExecutionResult{}, err
+	}
+	return response.Data, nil
+}
+
 // StreamExecutionEvents connects to the SSE stream for an execution and calls
 // the emit callback for each StreamEvent received. It blocks until the stream
 // ends or the context is cancelled.

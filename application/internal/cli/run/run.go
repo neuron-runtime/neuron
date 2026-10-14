@@ -20,10 +20,8 @@ import (
 )
 
 var (
-	verbose      bool
 	params       string
 	paramsFile   string
-	remoteURL    string
 	overridePort string
 	format       string
 )
@@ -37,10 +35,8 @@ func New() *cobra.Command {
 		RunE:  runCmdHandler,
 	}
 
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	cmd.Flags().StringVar(&params, "params", "", "JSON params payload for execution (e.g., '{\"key\":\"value\"}')")
 	cmd.Flags().StringVar(&paramsFile, "params-file", "", "Path to JSON file with params payload")
-	cmd.Flags().StringVar(&remoteURL, "remote", "", "Remote N.O.R.E. endpoint (e.g., http://host:port)")
 	cmd.Flags().StringVar(&overridePort, "port", "", "Override local runtime port (default: auto-discover from project)")
 	cmd.Flags().StringVar(&format, "format", "json", "Output format for Assembly result (json, text)")
 
@@ -56,6 +52,10 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("configuration not loaded")
 	}
+
+	// The remote endpoint is the global --remote flag, read directly so run does
+	// not shadow the root flag with a second identical definition.
+	remoteURL, _ := cmd.Flags().GetString("remote")
 
 	// Resolve target assembly if provided
 	target := ""
@@ -144,21 +144,21 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine target key
-	var key protocol.InstanceKey
-	if target != "" {
-		key, _ = protocol.ParseUserKey(target)
-	} else {
-		// Use current build from project
-		key, err := resolveCurrentBuildKey(cmd.Context(), cfg)
+	// Address the Assembly to run. The facade takes one selector query
+	// parameter, so an explicit target is used verbatim and the current project
+	// build's key is used otherwise; the server resolves it to a registered
+	// Assembly.
+	selector := target
+	if selector == "" {
+		key, err := resolveCurrentBuildKey(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		key = key
+		selector = key.ColonString()
 	}
 
-	// Execute using wait mode (synchronous) to get Assembly result
-	result, err := c.ExecuteByKeyOrTarget(ctx, key, target, execParams, "")
+	// Run synchronously through the facade to get the Assembly result.
+	result, err := c.Run(ctx, selector, execParams)
 	if err != nil {
 		return err
 	}

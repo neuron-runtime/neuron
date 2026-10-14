@@ -341,16 +341,23 @@ Confirmed by direct experiment, not by reading alone.
 
 ## 13. Execution HTTP API
 
-- [ ] Add a simple synchronous execution endpoint such as `POST /v1/run`.
-- [ ] Define the request body using `params`.
-- [ ] Define the response body using `result`.
-- [ ] Keep Assembly identity/runtime selection outside the request body when the project runtime has exactly one configured Assembly.
-- [ ] Preserve the existing lower-level execution API internally until the new facade is proven.
-- [ ] Separate synchronous execution from asynchronous execution instead of overloading one request with `mode`.
-- [ ] Keep `POST /v1/executions` as the advanced async execution resource if it remains necessary.
-- [ ] Keep `GET /v1/executions/{id}` and event streaming as advanced execution-management APIs.
-- [ ] Ensure the simple `/v1/run` contract cannot accidentally expose execution history.
-- [ ] Update API protocol types, handlers, clients, tests, and documentation.
+- [x] Add a simple synchronous execution endpoint such as `POST /v1/run`. **Implemented.** `protocol.RunPath` (`/v1/run`) plus `Handler.Run`, registered from the shared route table.
+- [x] Define the request body using `params`. **Implemented.** `protocol.RunRequest{Params}` — the body carries only execution params; no mode, no assembly, no addressing.
+- [x] Define the response body using `result`. **Implemented.** The facade returns `protocol.ExecutionResult` (`result`, `status`, `execution_id`, `error`), the same result contract as §12.
+- [x] Keep Assembly identity/runtime selection outside the request body when the project runtime has exactly one configured Assembly. **Implemented.** The Assembly is named by the `assembly` query parameter (`protocol.AssemblySelectorParam` + `protocol.Run(selector)`); identity never enters the payload.
+- [x] Preserve the existing lower-level execution API internally until the new facade is proven. **Kept.** The per-instance execution resources (`POST/GET /v1/instances/{id}/executions`, execution lookup, events, stream, cancel) are unchanged; the facade is additive.
+- [x] Separate synchronous execution from asynchronous execution instead of overloading one request with `mode`. **Implemented.** `/v1/run` is synchronous by contract with no `mode` field; the asynchronous path stays on the per-instance resource's `mode=detach`.
+- [x] Keep `POST /v1/executions` as the advanced async execution resource if it remains necessary. **Kept** as `POST /v1/instances/{id}/executions` (`mode=detach`) — no top-level `/v1/executions` was introduced or needed.
+- [x] Keep `GET /v1/executions/{id}` and event streaming as advanced execution-management APIs. **Kept.** `GET /v1/instances/{id}/executions/{execID}`, its `/events`, `/events/stream`, and the WebSocket stream are unchanged.
+- [x] Ensure the simple `/v1/run` contract cannot accidentally expose execution history. **Implemented and pinned by test.** `TestRunResponseExposesNoExecutionHistory` requires the `data` object to stay within the `ExecutionResult` fields.
+- [x] Update API protocol types, handlers, clients, tests, and documentation. **Implemented.** `RunRequest`/`RunPath`/`AssemblySelectorParam`/`Run()`; `Handler.Run` + shared `runSynchronously` (now the single sync implementation, reused by `Execute`'s wait branch); `Client.Run`; `neuron run` consumes the facade; handler tests; `docs/ARCHITECTURE.md` route table and `application/README.md`.
+
+### Findings during Phase 7 implementation
+
+- [x] **P7-1** `neuron run` could not run the current build. `runCmdHandler` shadowed the outer `key` when loading the current build (`key, err := resolveCurrentBuildKey(...)`, then `key = key`), so an argument-less run sent an empty key and failed with `instance AssemblyID or Name is required`. The selector is now resolved correctly and handed to the facade.
+- [x] **P7-2** `neuron run` declared a local `--verbose`/`-v` flag that was never read and duplicated the global persistent `--verbose`, and duplicated the global `--remote`. Both local definitions are removed; the command reads the global `--remote` directly.
+- [x] **P7-3** The client's bring-your-own-assembly path (`Client.Execute` and its `EnsureInstance` helper) is unused: durable registration means nothing ships an assembly with an execution request. They are kept because §13 asks to preserve the lower-level API and removing them would also orphan `ExecuteByKeyOrTarget` and the streaming/list/cancel methods that form the advanced execution surface §14 will consume. Recorded so the retention decision is explicit, not silent.
+- [x] **P7-4** `application/README.md` still describes the removed global-daemon/Unix-socket model ("How the CLI Talks to N.O.R.E.", `neuron daemon stop`) around the `neuron run` section this item corrected. Only the `run` section and the sequence diagram were reconciled here; the surrounding daemon narrative is left for the §23 documentation pass rather than rewritten twice.
 
 ## 14. `neuron instance` (Phase 9 - Removed)
 

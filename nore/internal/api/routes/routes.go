@@ -54,6 +54,9 @@ func BuildRoutes(
 	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionEventsStreamPath), instHandler.StreamExecutionEvents)
 	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.CancelExecutionPath), instHandler.CancelExecution)
 
+	// Synchronous run facade.
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.RunPath), instHandler.Run)
+
 	// WebSocket
 	ws := websocket.NewWebSocketHandler()
 	ws.SetRoomProvider(bridge.New(mgr))
