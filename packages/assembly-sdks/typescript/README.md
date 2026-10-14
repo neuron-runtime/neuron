@@ -426,25 +426,46 @@ export default manifest;
 {
   "apiVersion": "neuron/v1",
   "kind": "Assembly",
-  "metadata": {
-    "name": "order-fulfillment",
-    "version": "1.0.0",
-    "description": "Validate, authorize, and fulfill customer orders"
-  },
   "capabilities": [
-    { "name": "order.validate", "version": "1.0.0", "capabilityRuntime": { "name": "neuron:core:set" }, "params": [...], "results": [...] },
-    { "name": "payment.authorize", "version": "1.0.0", "capabilityRuntime": { "name": "neuron:core:set" }, "params": [...], "results": [...] }
+    {
+      "name": "order.validate",
+      "capabilityRuntime": { "name": "neuron:core:set", "version": "latest", "registry": "local" },
+      "params": [],
+      "results": []
+    },
+    {
+      "name": "payment.authorize",
+      "capabilityRuntime": { "name": "neuron:core:set", "version": "latest", "registry": "local" },
+      "params": [],
+      "results": []
+    }
   ],
   "bindings": [
-    { "from": "order.validate", "to": "payment.authorize", "mappings": [...], "validations": [...] }
+    {
+      "from": "order.validate",
+      "to": "payment.authorize",
+      "mappings": [
+        {
+          "target": "amount_cents",
+          "source": {
+            "kind": "capabilityResult",
+            "capability": "order.validate",
+            "path": ["order", "total_cents"]
+          }
+        }
+      ],
+      "validations": []
+    }
   ]
 }
 ```
 
+The Assembly's own identity (`name`/`version`) is not part of `toManifest()`; `neuron build` injects it from `neuron.config.*`. Declared `params` and `result` contracts appear as top-level keys when authored.
+
 | Field | What it contains |
 | --- | --- |
-| `capabilities` | Every capability definition — identity, runtime, contracts, validation rules |
-| `bindings` | Derived connections — field mappings and guard conditions between capabilities |
+| `capabilities` | Every capability definition — logical name, runtime declaration, param/result contracts, and configuration |
+| `bindings` | Derived connections — structured field mappings and guard conditions between capabilities |
 
 > [!NOTE]
 > You never author `bindings` directly. The SDK derives them from `.bind()`, `.withParams()`, and `.connect()` calls and the references those bindings carry.

@@ -375,10 +375,6 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
     return resolveRuntimeDeclaration(this._state.runtime);
   }
 
-  asReference(): CapabilityReference<TParams, TResult> {
-    return this;
-  }
-
   private clone<TNextParams extends object = TParams, TNextResult extends object = TResult>(
     patch: Partial<CapabilityState> = {}
   ): CapabilityDefinition<TNextParams, TNextResult> {

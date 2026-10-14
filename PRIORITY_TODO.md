@@ -260,8 +260,8 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Remove Capability `description` from the Assembly-facing Capability Definition. **Implemented.** `description` is gone from the SDK capability state and `CapabilityManifest`; same YAML-surface deferral note as §8.239.
 - [x] Keep implementation/version/registry identity on the Capability Runtime/package side. **Implemented/verified.** `.runtime({ name, version, registry })` carries the implementation identity on the runtime declaration; the SDK test suite pins it.
 - [x] Ensure the Capability Runtime package remains the source of truth for implementation version and artifact identity. **Implemented.** Resolution/installation/freezing key off the runtime artifact (`name`/`version`/`registry`), unchanged by the capability-surface cleanup.
-- [ ] Keep `.runtime(...)`, `.paramsSchema(...)`, `.resultSchema(...)`, `.withParams(...)`, `.bind(...)`, `.connect(...)`, and `.result` semantics where they remain useful.
-- [ ] Update generated/imported Capability Packages so Assembly authors normally consume ready-to-use typed Capability Definitions rather than reconstructing runtime metadata.
+- [x] Keep `.runtime(...)`, `.paramsSchema(...)`, `.resultSchema(...)`, `.withParams(...)`, `.bind(...)`, `.connect(...)`, and `.result` semantics where they remain useful. **Verified.** All are implemented and live; `.connect(...)` is real (free `connect()` plus the `CapabilityReference.connect` method), not a stub. Dead members revealed while verifying were removed: `setCapability` (`src/core/capabilities/set.ts`, unreferenced) and `CapabilityDefinition.asReference()` (unreferenced).
+- [ ] Update generated/imported Capability Packages so Assembly authors normally consume ready-to-use typed Capability Definitions rather than reconstructing runtime metadata. **(re-homed: later packaging phase after §15/§20)** — no package format, generator, or import convention exists anywhere today (`runtime.json` carries only a flat `capabilities: []string`), so this is net-new subsystem design that depends on the module/provider packaging model.
 - [x] Update TypeScript SDK types and all examples to remove the deprecated metadata fields. **Implemented/verified.** SDK generics/types, all SDK tests and type-tests, `examples/hello`, `examples/ecommerce_order_ts`, and every user-facing doc sample were updated; `pnpm test`/`typecheck`/`build` are green.
 
 ## 9. Structured Expressions and Compilation Protocol
@@ -271,7 +271,7 @@ Confirmed by direct experiment, not by reading alone.
 - [x] Define one canonical structured reference type for params/result references across TypeScript SDK, manifest, compiler, protocol, and N.O.R.E.
 - [x] Represent at minimum the referenced Capability identity and the result field/path separately.
 - [x] Ensure nested result paths are represented as structured path segments rather than embedded in strings.
-- [ ] Keep expression operators/conditions structured rather than encoding them as opaque strings wherever the protocol can support it. **(re-homed: Phase 3)** — mapping sources can no longer carry operators at all (Phase 1 rejects them in `ParseMappingSource`); validations/conditions stay CEL strings permanently per the locked P1-1 decision. The remaining surface is the not-yet-existing Assembly result mapping (§7 requires it structural, §16 forbids new string-based result references).
+- [x] Keep expression operators/conditions structured rather than encoding them as opaque strings wherever the protocol can support it. **Verified/closed.** Mapping sources cannot carry operators at all (Phase 1 rejects them in `ParseMappingSource`); validations/conditions stay CEL strings permanently per the locked P1-1 decision. The Assembly result mapping — the remaining surface — is fully structured (`AssemblyResultField.source` is a `ValueRefManifest`), and the SDK rejects operator results as mapping values (`toValueRef`). No opaque-string mapping surface remains.
 - [x] Define a source/reference union that can distinguish Assembly params, Capability results, project variables, literals, and supported expressions.
 - [x] Make the TypeScript SDK emit structured references directly. **Implemented.** The SDK emits `{target, source}` with the canonical ValueRef shape (`kind`/`capability`/`path`/`value`); expression proxies track semantic segments + referenced capability, generic `source.*` references are qualified with the binding's source capability at emission time, and expression operators are rejected as mapping values. `pnpm test/typecheck/build` green.
 - [x] Make the compiler consume structured references directly.
@@ -397,7 +397,7 @@ Confirmed by direct experiment, not by reading alone.
 
 ### Findings during Phase 3 implementation
 
-- [x] **P3-1** **(Phase 3, §8/§16)** — `packages/assembly-sdks/typescript/src/core/capabilities/set.ts` was dead code: `setCapability` was exported from no barrel (`core/capabilities/index.ts` exports only `http` and `delay`) and referenced nowhere in the SDK or examples, and it was already impossible under the `Capability(name)` API. Deleted per AGENTS.md §21.
+- [x] **P3-1** **(Phase 3, §8/§16)** — `packages/assembly-sdks/typescript/src/core/capabilities/set.ts` was dead code: `setCapability` was exported from no barrel (`core/capabilities/index.ts` exports only `http` and `delay`) and referenced nowhere in the SDK or examples, and it was already impossible under the `Capability(name)` API. **Deleted per AGENTS.md §21.** Correction: an earlier revision of this item claimed the file was deleted, but it still existed in the tree; it was actually removed while closing §8.263, together with the equally unreferenced `CapabilityDefinition.asReference()`.
 
 ## 17. Migration / Compatibility
 
