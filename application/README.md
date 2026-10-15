@@ -474,7 +474,9 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
   "name": "my-assembly",
   "version": "1.0.0",
   "lang": "typescript",
-  "entry": "assembly.ts",
+  "assemblies": [
+    { "name": "my-assembly", "entry": "assembly.ts", "default": true }
+  ],
   "runtime": {
     "host": "localhost",
     "port": "auto",
@@ -503,7 +505,11 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
 | `name`                      | —                     | Assembly identity for this project; required for build, and must match the authored Assembly metadata        |
 | `version`                   | —                     | Assembly semantic version; required for build, participates in Assembly identity and build hashing           |
 | `lang`                      | `typescript`          | Project authoring language (`yaml`, `yml`, `typescript`, `ts`)                                             |
-| `entry`                     | `index.ts` / `assembly.yaml` | Path to the project's entry assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
+| `assemblies`                | —                     | Ordered list of Assembly declarations (`name`, `entry`, optional `default: true`). A project may define several; the one marked default (or the sole declaration) is what `neuron run` uses with no argument |
+| `assemblies[].name`         | —                     | Assembly name; must be unique within the project                                                           |
+| `assemblies[].entry`        | `index.ts` / `assembly.yaml` | Project-relative path to the Assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
+| `assemblies[].default`      | `false`               | Marks the Assembly `neuron run` uses when no name is given; at most one may be `true`                       |
+| `entry`                     | —                     | Legacy single-Assembly form, migrated to one `assemblies` declaration named after the project; rejected alongside `assemblies` |
 | `variables`                 | —                     | Free-form variables carried into the compiled assembly manifest (e.g. environment-specific settings)        |
 | `runtime.host`              | `localhost`           | Interface the project runtime binds to (loopback-first by default)                                         |
 | `runtime.port`              | `auto`                | Project runtime port: `"auto"` (OS-assigned) or an explicit integer port                                   |

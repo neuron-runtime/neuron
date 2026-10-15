@@ -198,15 +198,13 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 		selected := opts.Assembly == "" || opts.Assembly == decl.Name
 		if !selected {
 			// A selective build never rebuilds an unrelated Assembly; it
-			// carries the previously built entry forward unchanged.
-			if previous != nil {
-				if prev, ok := previous.FindAssembly(decl.Name); ok {
-					builds = append(builds, prev)
-					continue
-				}
+			// carries the previously built entry forward unchanged. With no
+			// prior build to reuse it falls through and builds it, so the
+			// record stays complete even though it was not explicitly selected.
+			if prev, ok := carryForward(previous, decl.Name); ok {
+				builds = append(builds, prev)
+				continue
 			}
-			// No prior build for this Assembly: build it so the record is
-			// complete even though it was not explicitly selected.
 		}
 
 		m, err := build.BuildAssembly(ctx, lang, build.Options{
@@ -262,6 +260,18 @@ func resolveAssemblyEntry(root string, lang language.Language, entry string) (st
 		return "", fmt.Errorf("entry %s: %w", entry, err)
 	}
 	return entry, nil
+}
+
+// carryForward returns the previously built entry for an Assembly that a
+// selective build did not rebuild, so its manifest, frozen capability runtime
+// set, and identity are preserved byte-for-byte. ok is false when there is no
+// prior build to reuse, in which case the Assembly must be built so the new
+// project build record remains complete.
+func carryForward(previous *project.BuildRecord, name string) (project.AssemblyBuild, bool) {
+	if previous == nil {
+		return project.AssemblyBuild{}, false
+	}
+	return previous.FindAssembly(name)
 }
 
 // findDeclaration returns the declaration with the given name.

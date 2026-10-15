@@ -190,21 +190,23 @@ The `local` registry serves a directory laid out exactly like the installed stor
 
 It exists so the full resolution → selection → packaging → installation pipeline works offline and in tests, and it demonstrates that registries are pluggable — "local" is just another provider.
 
-Configure registries per project in `neuron.config.yaml` (or `neuron.config.json` / `neuron.config.yml`). The project configuration also carries the Assembly identity — `name` and `version`, required for build:
+Configure registries per project in `neuron.config.json` (or `neuron.config.yaml` / `neuron.config.yml`). The project configuration also carries the Assembly identity — `name` and `version`, required for build:
 
-```yaml
-# neuron.config.yaml
-name: my-assembly
-version: "1.0.0"
-lang: yaml
-entry: assembly.yaml
-
-capabilityRuntimes:
-  registries:
-    - name: local
-      url: /absolute/path/to/catalog
-    - name: github
-      url: https://api.github.com
+```json
+{
+  "name": "my-assembly",
+  "version": "1.0.0",
+  "lang": "yaml",
+  "assemblies": [
+    { "name": "my-assembly", "entry": "assembly.yaml", "default": true }
+  ],
+  "capabilityRuntimes": {
+    "registries": [
+      { "name": "local", "url": "/absolute/path/to/catalog" },
+      { "name": "github", "url": "https://api.github.com" }
+    ]
+  }
+}
 ```
 
 With no `capabilityRuntimes.registries` block, only built-in capability runtimes are available. Requirements without an explicit `registry` fall back to the default local registry automatically; `github` and any other registry must be declared here to be used.
