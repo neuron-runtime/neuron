@@ -1,14 +1,15 @@
-// Package wasm implements a Backend that hosts capability runtimes as WebAssembly
-// modules using wazero, the pure-Go WASI runtime. It speaks the same
-// stdin/stdout JSON protocol as process capability runtimes: a WASI command that
-// reads a JSON Request from stdin and writes a JSON Response to stdout
-// works identically when run as a native process or as a WASM module.
+// Package wasm implements the first-party WASM provider: the provider.Provider
+// that hosts capability runtimes as WebAssembly modules using wazero, the
+// pure-Go WASI runtime. It speaks the same stdin/stdout JSON protocol as process
+// capability runtimes: a WASI command that reads a JSON Request from stdin and
+// writes a JSON Response to stdout works identically when run as a native process
+// or as a WASM module.
 //
 // Why not gRPC: WASI preview1 has no socket interface, so a gRPC server
 // cannot run inside a WASI module. The stdin/stdout JSON protocol is the
-// natural transport for WASM capability runtimes. The Backend interface abstracts
-// this difference: callers see the same Execute/Health/Close contract
-// regardless of whether the backend is gRPC (process) or JSON (wasm).
+// natural transport for WASM capability runtimes. The provider.Provider
+// interface abstracts this difference: callers see the same Execute/Health/Close
+// contract regardless of whether the provider is process or wasm.
 //
 // Each execution instantiates a fresh sandboxed module from a shared,
 // precompiled module cached per entrypoint. Concurrent executions are safe
@@ -28,6 +29,8 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
+	"github.com/neuron-runtime/neuron/shared/version"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
@@ -134,31 +137,41 @@ func (w *wasmRuntime) close(ctx context.Context) error {
 	return w.rt.Close(ctx)
 }
 
-// Backend hosts WASM capability runtime modules. It implements capabilityrt.Backend and is
-// registered with the runtime registry for the "wasm" kind.
-type Backend struct {
+// Provider hosts WASM capability runtime modules. It implements
+// provider.Provider and declares the "wasm" runtime kind.
+type Provider struct {
 	shared *wasmRuntime
 }
 
-// New returns a WASM Backend using the process-global wazero runtime.
-func New() (*Backend, error) {
+// New returns a WASM provider using the process-global wazero runtime.
+func New() (*Provider, error) {
 	rt, err := sharedProcessRuntime()
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{shared: rt}, nil
+	return &Provider{shared: rt}, nil
 }
 
-// RuntimeName returns "wasm", matching RuntimeKindWasm.
-func (r *Backend) BackendName() string {
-	return capabilityrt.RuntimeKindWasm
+// Descriptor identifies this provider and the runtime kinds and invocation
+// protocols it supports. A WASI module is portable, so the provider declares the
+// portable "wasm32-wasi" platform rather than the host platform, and it supports
+// only the stdin/stdout JSON protocol because WASI preview1 has no sockets.
+func (r *Provider) Descriptor() provider.Descriptor {
+	return provider.Descriptor{
+		Name:                       capabilityrt.RuntimeKindWasm,
+		Version:                    version.String(),
+		ProtocolVersion:            provider.ProtocolVersion,
+		RuntimeKinds:               []string{capabilityrt.RuntimeKindWasm},
+		CapabilityRuntimeProtocols: []string{capabilityrt.ProtocolJSONV1},
+		Platforms:                  []string{capabilityrt.PlatformWasm},
+	}
 }
 
 // Start validates the frozen capability runtime and returns an Instance ready for
 // execution. The module is compiled lazily on first Execute (warm start),
 // but the entrypoint existence is checked here so Start fails fast when
 // the artifact is missing or invalid.
-func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (capabilityrt.BackendInstance, error) {
+func (r *Provider) Start(ctx context.Context, spec provider.Spec) (provider.Instance, error) {
 	if spec.Entrypoint == "" {
 		return nil, fmt.Errorf("capability runtime %s: no entrypoint", spec.Type)
 	}
@@ -166,9 +179,11 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 		return nil, fmt.Errorf("capability runtime %s: entrypoint %s: %w", spec.Type, spec.Entrypoint, err)
 	}
 
+	// A WASI module always speaks the stdin/stdout JSON protocol; it cannot run
+	// a gRPC server because WASI preview1 has no sockets.
 	protocol := spec.Protocol
 	if protocol == "" {
-		protocol = capabilityrt.ProtocolV1
+		protocol = capabilityrt.ProtocolJSONV1
 	}
 
 	return &instance{
@@ -186,16 +201,16 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 // runtime.
 //
 // This is process-wide and irreversible: the runtime is created once via
-// sync.OnceValues, so closing it permanently disables the WASM backend for
+// sync.OnceValues, so closing it permanently disables the WASM provider for
 // every instance in the process, and any later Start or Execute fails with
 // "runtime closed". It is therefore only safe at process shutdown, once all
 // instances have been closed and no execution will follow. It is not a
 // per-instance teardown, and callers must not use it to release one instance.
-func (r *Backend) Close(ctx context.Context) error {
+func (r *Provider) Close(ctx context.Context) error {
 	return r.shared.close(ctx)
 }
 
-// instance implements capabilityrt.BackendInstance for WASM capability runtimes. Each Execute
+// instance implements provider.Instance for WASM capability runtimes. Each Execute
 // instantiates a fresh sandboxed module from the shared compiled module,
 // feeds it the JSON request on stdin, and collects the JSON response from
 // stdout.
@@ -205,7 +220,7 @@ type instance struct {
 	entrypoint string
 	protocol   string
 	rootDir    string
-	runtime    *Backend
+	runtime    *Provider
 	timeout    time.Duration
 
 	compiled wazero.CompiledModule // cached on first use, shared across executions

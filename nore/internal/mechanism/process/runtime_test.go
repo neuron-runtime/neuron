@@ -16,6 +16,7 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -76,8 +77,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newSpec(typ, entrypoint string, protocol string, maxWorkers int) capabilityrt.BackendSpec {
-	return capabilityrt.BackendSpec{
+func newSpec(typ, entrypoint string, protocol string, maxWorkers int) provider.Spec {
+	return provider.Spec{
 		Type:       typ,
 		Version:    "1.0.0",
 		Protocol:   protocol,
@@ -454,7 +455,7 @@ func TestPoolNeverExceedsMaxWorkers(t *testing.T) {
 func TestDiscardingAWorkerKeepsAnotherWorkersReservation(t *testing.T) {
 	const maxWorkers = 2
 	logger := slog.New(slog.DiscardHandler)
-	p := newWorkerPool(capabilityrt.BackendSpec{}, "v1", maxWorkers, logger)
+	p := newWorkerPool(provider.Spec{}, "v1", maxWorkers, logger)
 
 	live := &worker{logger: logger}
 	p.mu.Lock()
@@ -480,7 +481,7 @@ func TestDiscardingAWorkerKeepsAnotherWorkersReservation(t *testing.T) {
 func TestPoolRefusesMoreCapacityThanMaxWorkersWhileOthersStart(t *testing.T) {
 	const maxWorkers = 2
 	logger := slog.New(slog.DiscardHandler)
-	p := newWorkerPool(capabilityrt.BackendSpec{}, "v1", maxWorkers, logger)
+	p := newWorkerPool(provider.Spec{}, "v1", maxWorkers, logger)
 
 	live := &worker{logger: logger}
 	p.mu.Lock()
@@ -511,7 +512,7 @@ func TestWorkerEnvIsAllowlisted(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "must-not-be-inherited")
 
 	pool := newWorkerPool(
-		capabilityrt.BackendSpec{Type: "example:echo", Version: "1.0.0"},
+		provider.Spec{Type: "example:echo", Version: "1.0.0"},
 		capabilityrt.ProtocolV1,
 		1,
 		slog.Default(),
@@ -544,7 +545,7 @@ func TestWorkerEnvIsAllowlisted(t *testing.T) {
 // after the kill, because nothing would ever signal that the process is gone.
 func TestShutdownIsBoundedWhenWorkerRefusesToExit(t *testing.T) {
 	pool := newWorkerPool(
-		capabilityrt.BackendSpec{Type: "example:stubborn", Version: "1.0.0", Entrypoint: fixtures.stubborn},
+		provider.Spec{Type: "example:stubborn", Version: "1.0.0", Entrypoint: fixtures.stubborn},
 		capabilityrt.ProtocolV1,
 		1,
 		slog.Default(),

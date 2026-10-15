@@ -291,7 +291,7 @@ Built-in modules are the exception that proves the rule: they run in-process ins
 | **Registration** | Receiving compiled Assembly definitions from the CLI and persisting them |
 | **Execution planning** | Compiling the registered assembly and its frozen capability runtime set into a plan over an event bus |
 | **Instances** | Creating, running, pausing, restarting, and removing living realizations of Assemblies |
-| **Capability runtimes** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM backends) |
+| **Capability runtimes** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM providers) |
 | **Scheduling** | Advancing executions, evaluating binding mappings and validations, handling cancellations |
 | **Persistence** | Durable storage of registered assemblies, instances, executions, and events through an interchangeable storage provider (SQLite by default) |
 | **API** | The local HTTP/JSON transport over which the CLI talks to the runtime |
@@ -314,7 +314,7 @@ flowchart TB
         inst[instance<br/>lifecycle manager]
         exec[execution<br/>state machine · scheduler · engine]
         ev[event<br/>event bus · durable log]
-        rt[backend<br/>capability runtime abstraction]
+        rt[provider<br/>capability runtime host]
         pl[planner<br/>assembly → execution plan]
         rv[resolver<br/>CEL expressions]
         st[storage<br/>provider + SQLite]
@@ -342,16 +342,16 @@ flowchart TB
 | `instance` | Lifecycle — create/remove/clear, restoration on startup, registry of live instances |
 | `execution` | State machine — scheduler transitions, snapshotting, wait-for-completion, the capability runtime engine that drives module calls, and the execution store (in-memory, write-through to storage) |
 | `event` | Single source of truth for state transitions; the durable event log used for persistence and streaming |
-| `backend` | Capability runtime backend abstraction — one interface, multiple backends (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
+| `mechanism` | Provider registry — one provider contract, multiple first-party providers (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
 | `planner` | Compiles the registered Assembly + frozen capability runtimes into an executable plan. Source-language agnostic; owns no HTTP clients, registries, or file downloads |
 | `resolver` | CEL expression resolver — binding mappings and validations |
 | `storage` | Provider interface + SQLite implementation — assemblies, instances, executions, events |
-| `plugin` | Boundary between frozen capability runtime records and the runtime backends — thin adapters, no process/socket/WASM machinery itself |
+| `plugin` | Boundary between frozen capability runtime records and the providers — thin adapters, no process/socket/WASM machinery itself |
 | `assembly` | Registered assembly repository and indexing |
 
 ### The capability runtime boundary
 
-The runtime boundary inside N.O.R.E. is the **capability runtime** abstraction. One interface, multiple backends:
+The runtime boundary inside N.O.R.E. is the **capability runtime** abstraction. One contract, multiple first-party providers:
 
 ```mermaid
 flowchart TB
@@ -363,7 +363,7 @@ flowchart TB
     WASM -->|neuron/capability-runtime-v1-json · stdio| MOD[wasm32-wasi modules]
 ```
 
-A backend owns starting the capability runtime, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that.
+A provider owns starting the capability runtime, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that.
 
 ## Running N.O.R.E.
 
@@ -448,7 +448,7 @@ Describes one immutable artifact: its name and version, its runtime kind, its en
 }
 ```
 
-`runtime.type` selects the backend (`process` or `wasm`); the `protocol` selects the transport; `maxWorkers` (optional) bounds the worker pool for process capability runtimes. Validation requires a correct `apiVersion` and `kind`, a name, a version, a runtime type, an entrypoint, and at least one capability.
+`runtime.type` selects the provider (`process` or `wasm`); the `protocol` selects the transport; `maxWorkers` (optional) bounds the worker pool for process capability runtimes. Validation requires a correct `apiVersion` and `kind`, a name, a version, a runtime type, an entrypoint, and at least one capability.
 
 `platforms` keys are selected by the runtime kind: process capability runtimes bind the host's native key (`linux-amd64`, …) because the artifact runs on the N.O.R.E. machine, while WASM capability runtimes bind the portable `wasm32-wasi` key. The mapping lives in one place, `PlatformForRuntime` (`application/capabilityruntime/model.go`). The preferred distribution unit is the capability runtime package archive (`<name>-<version>-capability-runtime.neuron.tar.gz`) carrying `runtime.json` plus every platform artifact; registries prefer it over per-platform assets and the installer reconciles its inner manifest against the resolved identity.
 
@@ -471,45 +471,56 @@ The gRPC surface is `CapabilityRuntimeService` in `shared/protocol/capabilityrun
 > [!NOTE]
 > A non-empty `Error` in a response is a **controlled failure**, even when the process exits zero.
 
-### The backend contract
+### The provider contract
 
-Three Go interfaces define how a backend hosts an artifact:
+Two Go interfaces define how a provider hosts an artifact:
 
 ```go
-type Backend interface {
-    Start(ctx context.Context, spec BackendSpec) (BackendInstance, error)
-    BackendName() string
+type Provider interface {
+    Descriptor() Descriptor
+    Start(ctx context.Context, spec Spec) (Instance, error)
+    Close(ctx context.Context) error
 }
 
-type BackendInstance interface {
+type Instance interface {
     Execute(ctx context.Context, req *Request) (*Response, error)
     Health(ctx context.Context) error
     Close(ctx context.Context) error
 }
 ```
 
-`BackendSpec` carries everything needed to launch one artifact: the capability runtime type and version, the declared protocol, the absolute entrypoint path, the install root, and an optional worker-pool bound. The returned `BackendInstance` is the uniform execution handle — regardless of whether the underlying capability runtime is a child process, a WASM module, a container, or a remote service.
+`Spec` carries everything needed to launch one artifact: the capability runtime type and version, the runtime kind, the declared protocol, the entrypoint, the install root, and an optional worker-pool bound. `Descriptor` carries identity and the compatibility requirements. The returned `Instance` is the uniform execution handle — regardless of whether the underlying capability runtime is a child process or a WASM module.
 
-## The backend registry and dispatch
+## The provider registry and dispatch
 
-A single registry (`nore/internal/backend.Registry`) owns runtime backends and the instances they launch. Backends register themselves by kind:
+A **provider** is the host or engine that runs a Capability Runtime artifact — the process provider runs one as an OS child process, the WASM provider runs one as a `wasm32-wasi` module. The provider contract is separate from the Capability Runtime invocation protocol: a provider launches and supervises an artifact and passes `Request`/`Response` through unchanged, so it can never redefine what `params`, `result`, lifecycle, or structured errors mean.
+
+The contract lives in `shared/types/provider` (the two Go modules agree on it there) and is deliberately **not** a public control-plane API. It declares:
+
+- `Descriptor` — provider identity and compatibility: name, provider version, provider contract version, the runtime kinds it hosts, the Capability Runtime invocation protocols it speaks, and the platforms it runs on;
+- `Spec` — what to launch, derived from a frozen `ResolvedCapabilityRuntime` (a provider never resolves, downloads, or installs anything);
+- `Provider` — `Descriptor`, `Start`, and a process-global `Close`;
+- `Instance` — `Execute`, `Health`, `Close`;
+- a typed `provider.Error` that normalizes a missing provider, an unsupported runtime kind, an unsupported protocol, a platform mismatch, an incompatible provider contract version, and an unavailable provider.
+
+A single registry (`nore/internal/mechanism.Registry`) owns the providers and the instances they launch. Providers register the kinds they declare:
 
 ```go
-reg := backend.New()
-reg.Register("process", processRuntime)
-reg.Register("wasm", wasmRuntime)
+reg := mechanism.New()
+reg.Register(process.New(logger)) // declares the "process" kind
+reg.Register(wasmRuntime)         // declares the "wasm" kind
 ```
 
-`Start(kind, spec)` looks up the backend for the kind and dispatches. If no backend is registered for the requested kind, the start fails with an explicit error listing the supported kinds — a frozen artifact that declares an unsupported or unknown runtime type is **never silently mis-executed**.
+`Start(spec)` selects the provider for `spec.RuntimeKind` and evaluates compatibility in one place (`Select`): the provider must implement this contract version and must match the runtime kind, the Capability Runtime protocol, and the platform. An incompatible or unknown kind fails with a typed `provider.Error` naming exactly what was not met — a frozen artifact that declares an unsupported or unknown runtime type is **never silently mis-executed**.
 
-`SupportedRuntimeKinds()` in `shared/types/capabilityruntime` lists the two kinds the runtime layer can actually launch: `process` and `wasm`. The `container` and `remote` kinds are reserved for the future and currently rejected.
+`SupportedRuntimeKinds()` in `shared/types/capabilityruntime` lists the two kinds a first-party provider hosts: `process` and `wasm`. The `container` and `remote` kinds are reserved for the future and currently have no provider.
 
-The registry also tracks launched instances by `type@version`. Closing an instance removes it from the registry; `CloseAll` drains every tracked instance.
+The registry does not track launched instances. Whether two launches share one underlying runtime is the provider's decision and each provider shares differently: the process provider keeps one refcounted worker pool per capability runtime, the WASM provider keeps its compiled modules and sandbox engine on the provider itself, and the legacy JSON transport holds nothing between executions. `Close` releases what a provider holds for the whole process, once at shutdown.
 
-In the running process there is a single **shared** registry, built lazily and shared by every instance:
+In the running process there is a single **shared** registry, built lazily and shared by every instance (`nore/internal/plugin.sharedRuntimes`):
 
-- the WASM backend owns process-global compiled-module state that every WASM adapter must share;
-- the process backend tracks its worker pools by capability runtime identity, so two instances of the same assembly legitimately share one pool per capability runtime.
+- the WASM provider owns process-global compiled-module state that every WASM adapter must share;
+- the process provider tracks its worker pools by capability runtime identity, so two instances of the same assembly legitimately share one pool per capability runtime.
 
 ## Core and external capability runtimes
 
@@ -528,15 +539,15 @@ There are two ways a capability type gets a capability runtime.
 
 They are registered by `RegisterCoreRuntimes` in `nore/internal/registry`, under both the canonical namespaced name (`neuron:core:set`, …) and the legacy bare name.
 
-**External capability runtimes.** Anything else is hosted by a runtime backend. An external capability runtime is an installed artifact (a native binary or a WASM module) that speaks one of the two declared wire protocols. External capability runtimes are declared as requirements in an assembly, resolved to exact versions at register time, frozen into the deployment as `ResolvedCapabilityRuntime` records, and launched by a runtime backend when the assembly becomes an instance.
+**External capability runtimes.** Anything else is hosted by a provider. An external capability runtime is an installed artifact (a native binary or a WASM module) that speaks one of the two declared wire protocols. External capability runtimes are declared as requirements in an assembly, resolved to exact versions at register time, frozen into the deployment as `ResolvedCapabilityRuntime` records, and launched by the matching provider when the assembly becomes an instance.
 
 The distinction is decided in `nore/internal/plugin.RegisterResolvedCapabilityRuntimes`: a frozen capability runtime is only registered if no core capability runtime already exists for the same capability type. **Core capability runtimes always win.**
 
 ## The adapter boundary
 
-`nore/internal/plugin` is the boundary between frozen capability runtime records and the runtime backends. It owns no process, socket, or WASM machinery itself. It only maps a `ResolvedCapabilityRuntime` onto the contract N.O.R.E.'s capability runtime engine consumes.
+`nore/internal/plugin` is the boundary between frozen capability runtime records and the providers. It owns no process, socket, or WASM machinery itself. It only maps a `ResolvedCapabilityRuntime` onto the contract N.O.R.E.'s capability runtime engine consumes.
 
-`NewAdapter` reads the frozen record's runtime kind and builds a `BackendSpec`:
+`NewAdapter` reads the frozen record's runtime kind and builds a `provider.Spec`:
 
 - an empty runtime kind defaults to `process` (the original capability runtime model);
 - an empty protocol defaults to `neuron/capability-runtime-v1-json` so legacy capability runtimes that omit the declaration keep speaking JSON;
@@ -609,7 +620,7 @@ The engine enforces what the plan carries at the invocation boundary:
 - **`execution.mode: detach`** splits the plan at that capability: the capability and everything downstream of it become a separately tracked child execution (`parent_execution_id`) that may outlive the caller, while the parent continues. The split is compiled once, when the plan is built, so detaching costs no graph work at runtime. A detached task runs under a bounded drain window during shutdown (`--detached-drain-timeout`, default `30s`), and is marked `detached` in the parent rather than `completed`, because its work lives elsewhere.
 - **`execution.timeout`** bounds the whole invocation, including every retry attempt and the backoff between them — so an exponential backoff cannot keep a capability alive past the deadline its author declared.
 - **`retry`** retries every failure with fixed or exponential backoff, except shutdown cancellation and an already-exhausted deadline. Neuron has no capability-level error taxonomy, so it does not guess which failures are transient; each scheduled re-attempt emits `capability.retry`.
-- **`resources`** is a reserved group with no fields. No backend enforces resource constraints yet, so any key under it is rejected when the declaration is decoded rather than silently ignored — an option is never accepted unless it is actually honored.
+- **`resources`** is a reserved group with no fields. No provider enforces resource constraints yet, so any key under it is rejected when the declaration is decoded rather than silently ignored — an option is never accepted unless it is actually honored.
 
 The capability runtime returns the result map. Errors from the capability runtime are distinguished:
 
@@ -713,13 +724,13 @@ A client therefore sees every event exactly once, in order, whether it subscribe
 
 ---
 
-# Part IV — Capability runtime backends
+# Part IV — Capability runtime providers
 
-The runtime backends are the only place launch machinery lives. Both implement the same `Backend` interface; each owns its own process, socket, or module state.
+The providers are the only place launch machinery lives. Both implement the same `provider.Provider` contract; each owns its own process, socket, or module state.
 
-## The process runtime
+## The process provider
 
-**The process backend** (`nore/internal/backend/process`) hosts external capability runtimes as OS child processes. It is registered with the runtime registry for the runtime kind `process`.
+**The process provider** (`nore/internal/mechanism/process`) hosts external capability runtimes as OS child processes. It declares the runtime kind `process`.
 
 It supports two transports, selected by the frozen record's declared protocol:
 
@@ -824,7 +835,7 @@ The transport is decided entirely by the frozen record's `protocol`:
 
 ## The WASM runtime
 
-**The WASM backend** (`nore/internal/backend/wasm`) hosts external capability runtimes as `wasm32-wasi` WebAssembly modules, implemented on top of **wazero**, the pure-Go WASI runtime. It is registered for the runtime kind `wasm`.
+**The WASM provider** (`nore/internal/mechanism/wasm`) hosts external capability runtimes as `wasm32-wasi` WebAssembly modules, implemented on top of **wazero**, the pure-Go WASI runtime. It is registered for the runtime kind `wasm`.
 
 ### Why not gRPC
 
@@ -857,7 +868,7 @@ A frozen record whose runtime kind is neither `process` nor `wasm` (for example 
 
 ## Timeouts and failure semantics
 
-Every backend enforces a defensive execution bound (10 minutes by default) when the caller context carries no deadline; the stricter of the two applies when the caller does carry one. Runaway behavior never blocks the process:
+Every provider enforces a defensive execution bound (10 minutes by default) when the caller context carries no deadline; the stricter of the two applies when the caller does carry one. Runaway behavior never blocks the process:
 
 - process capability runtimes are reaped by timeout and the pool restarts workers;
 - WASM modules are interrupted by wazero's close-on-context-done and their module is torn down.
@@ -880,7 +891,7 @@ GOOS=wasip1 GOARCH=wasm go build -o capability.wasm .
 
 **The manifest.** Every capability runtime ships a `runtime.json` — see [the manifest contract](#the-manifest-runtimejson). A process capability runtime declares `neuron/capability-runtime-v1` (with `maxWorkers` when it wants more than one concurrent worker); a WASI module or legacy command declares `neuron/capability-runtime-v1-json` and binds the `wasm32-wasi` platform key.
 
-From there the normal evolution holds: the artifact is distributed through a registry, resolved by requirement, verified and installed into the store, frozen into a deployment, and finally operated unchanged by the matching runtime backend. The reference module `examples/capability-runtimes/echo` ships in this repository, compiled to both a native binary and a `wasm32-wasi` module from a single Go source.
+From there the normal evolution holds: the artifact is distributed through a registry, resolved by requirement, verified and installed into the store, frozen into a deployment, and finally operated unchanged by the matching provider. The reference module `examples/capability-runtimes/echo` ships in this repository, compiled to both a native binary and a `wasm32-wasi` module from a single Go source.
 
 ---
 
@@ -908,7 +919,7 @@ Execution history and retention are intended to become a **configurable storage 
 
 - Concurrency is bounded by a capability runtime worker pool (`-workers`, default 8); long-lived workers are reused across requests rather than respawned per invocation, so warm execution latency is dominated by the capability runtime protocol call rather than process startup.
 - Resolution prefers already-installed artifacts, so instance execution stays local and offline once modules are in the store.
-- The WASM backend keeps compilation and compiled modules shared process-wide, so instance creation does not pay a compile cost.
+- The WASM provider keeps compilation and compiled modules shared process-wide, so instance creation does not pay a compile cost.
 - Optimization follows measurement, not assumption: the tunable numbers are worker counts, the 25 ms stream reconciliation interval, and the 10-minute defensive execution bound.
 
 > [!NOTE]

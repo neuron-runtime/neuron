@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -65,7 +66,7 @@ type workerPool struct {
 // A pool starts with one holder, the Start call that created it. Each
 // additional Start returning the same pool adds a holder, and each release
 // removes one.
-func newWorkerPool(spec capabilityrt.BackendSpec, protocol string, maxWorkers int, logger *slog.Logger) *workerPool {
+func newWorkerPool(spec provider.Spec, protocol string, maxWorkers int, logger *slog.Logger) *workerPool {
 	return &workerPool{
 		type_:      spec.Type,
 		version:    spec.Version,
@@ -106,9 +107,9 @@ func (p *workerPool) release(ctx context.Context) error {
 	return p.shutdown(ctx)
 }
 
-// Close implements the BackendInstance contract, which is per-holder: it
+// Close implements the provider.Instance contract, which is per-holder: it
 // releases this caller's claim on the shared pool. The underlying workers are
-// terminated only when no other instance still holds the pool. Use Backend.Close
+// terminated only when no other instance still holds the pool. Use Provider.Close
 // to force teardown of every pool regardless of holders.
 func (p *workerPool) Close(ctx context.Context) error {
 	return p.release(ctx)

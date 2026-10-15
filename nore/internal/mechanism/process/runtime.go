@@ -1,10 +1,10 @@
-// Package process implements a Backend that hosts capability runtimes as OS child
-// processes.
+// Package process implements the first-party process provider: the provider.Provider
+// that hosts capability runtimes as OS child processes.
 //
 // Two transports are supported, selected by the capability runtime's declared protocol:
 //
 //   - neuron/capability-runtime-v1 (canonical): the capability runtime process speaks gRPC
-//     over a Unix domain socket (see packages/capability runtime-sdks/golang). The runtime
+//     over a Unix domain socket (see packages/executor-sdks/golang). The provider
 //     maintains a pool of long-lived worker processes, leasing requests to
 //     available workers. This provides warm runtimes, connection reuse,
 //     bounded concurrency, health checking, and graceful shutdown.
@@ -17,6 +17,9 @@
 // The protocol negotiation happens during the Initialize handshake for gRPC
 // workers: the runtime sends the protocol version and capability runtime identity, and
 // the capability runtime responds with its supported version and capabilities.
+//
+// The process provider hosts Capability Runtime artifacts directly in the N.O.R.E.
+// address space as child processes and is a trusted first-party built-in.
 package process
 
 import (
@@ -29,6 +32,8 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
+	"github.com/neuron-runtime/neuron/shared/version"
 )
 
 const (
@@ -46,34 +51,41 @@ const (
 	defaultStartTimeout = 30 * time.Second
 )
 
-// Backend hosts capability runtime processes and manages their lifecycle. It implements
-// capabilityrt.Backend and is registered with the backend registry for the
-// "process" kind.
-type Backend struct {
+// Provider hosts capability runtime processes and manages their lifecycle. It
+// implements provider.Provider and declares the "process" runtime kind.
+type Provider struct {
 	mu     sync.RWMutex
 	pools  map[string]*workerPool
 	logger *slog.Logger
 }
 
-// New returns a Process Backend ready to manage capability runtime workers.
-func New(logger *slog.Logger) *Backend {
+// New returns a process provider ready to manage capability runtime workers.
+func New(logger *slog.Logger) *Provider {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Backend{
+	return &Provider{
 		pools:  make(map[string]*workerPool),
 		logger: logger,
 	}
 }
 
-// RuntimeName returns "process", matching RuntimeKindProcess.
-func (r *Backend) BackendName() string {
-	return capabilityrt.RuntimeKindProcess
+// Descriptor identifies this provider and the runtime kinds and invocation
+// protocols it supports. The process provider runs on the host platform, so it
+// declares no platform constraint.
+func (r *Provider) Descriptor() provider.Descriptor {
+	return provider.Descriptor{
+		Name:                       capabilityrt.RuntimeKindProcess,
+		Version:                    version.String(),
+		ProtocolVersion:            provider.ProtocolVersion,
+		RuntimeKinds:               []string{capabilityrt.RuntimeKindProcess},
+		CapabilityRuntimeProtocols: []string{capabilityrt.ProtocolV1, capabilityrt.ProtocolJSONV1},
+	}
 }
 
 // Start launches an capability runtime instance backed by a pool of long-lived
 // worker processes. The pool is created lazily on the first request.
-func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (capabilityrt.BackendInstance, error) {
+func (r *Provider) Start(ctx context.Context, spec provider.Spec) (provider.Instance, error) {
 	if spec.Entrypoint == "" {
 		return nil, fmt.Errorf("capability runtime %s: no entrypoint", spec.Type)
 	}
@@ -138,11 +150,11 @@ func (r *Backend) Start(ctx context.Context, spec capabilityrt.BackendSpec) (cap
 	}
 }
 
-// Close shuts down every pool this backend manages, regardless of how many
-// holders each pool has. This is the backend-level teardown performed when the
+// Close shuts down every pool this provider manages, regardless of how many
+// holders each pool has. This is the provider-level teardown performed when the
 // runtime itself is shutting down; per-instance teardown goes through the
-// BackendInstance Close contract and only releases a single holder.
-func (r *Backend) Close(ctx context.Context) error {
+// provider.Instance Close contract and only releases a single holder.
+func (r *Provider) Close(ctx context.Context) error {
 	r.mu.Lock()
 	pools := make([]*workerPool, 0, len(r.pools))
 	for _, p := range r.pools {

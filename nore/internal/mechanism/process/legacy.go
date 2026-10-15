@@ -12,6 +12,7 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 // legacyInstance runs an capability runtime as a one-shot OS subprocess speaking the
@@ -33,7 +34,7 @@ type legacyInstance struct {
 
 // newLegacyInstance builds a one-shot JSON subprocess instance for a frozen
 // capability runtime spec.
-func newLegacyInstance(spec capabilityrt.BackendSpec, logger *slog.Logger) (capabilityrt.BackendInstance, error) {
+func newLegacyInstance(spec provider.Spec, logger *slog.Logger) (provider.Instance, error) {
 	return &legacyInstance{
 		type_:      spec.Type,
 		version:    spec.Version,

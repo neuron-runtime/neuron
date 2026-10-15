@@ -4,11 +4,15 @@ import (
 	"context"
 )
 
-// Provider is the registry-provider contract the capability runtime Resolver consumes.
-// Concrete providers (source/github, source/local) implement it. Keeping the
-// interface here (consumer-side) avoids an import cycle between the capability runtime
-// package and its source implementations.
-type Provider interface {
+// Source is the capability runtime registry source the Resolver consumes.
+// Concrete sources (source/github, source/local) implement it. The name is
+// deliberate: a "provider" in Neuron is the host that runs a Capability Runtime
+// artifact, so the artifact registry a requirement is resolved against is a
+// "source" instead, to keep the two concepts from being confused.
+//
+// Keeping the interface here (consumer-side) avoids an import cycle between the
+// capability runtime package and its source implementations.
+type Source interface {
 	// Name is the unique registry identifier referenced by requirements
 	// (e.g. "github", "local").
 	Name() string

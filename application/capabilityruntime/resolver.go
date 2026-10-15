@@ -142,7 +142,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, requirements []Requirement) 
 	return env, nil
 }
 
-func (r *Resolver) resolveFrom(ctx context.Context, registry Provider, req Requirement, force bool) (*Installed, error) {
+func (r *Resolver) resolveFrom(ctx context.Context, registry Source, req Requirement, force bool) (*Installed, error) {
 	versions, err := registry.Versions(ctx, req.Type)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {

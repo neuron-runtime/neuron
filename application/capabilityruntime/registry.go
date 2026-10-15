@@ -11,17 +11,17 @@ import (
 // "which providers can I ask for packages".
 type Registry struct {
 	mu      sync.RWMutex
-	sources map[string]Provider
+	sources map[string]Source
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		sources: make(map[string]Provider),
+		sources: make(map[string]Source),
 	}
 }
 
 // NewRegistryFrom builds a catalog from an initial set of providers.
-func NewRegistryFrom(registries ...Provider) (*Registry, error) {
+func NewRegistryFrom(registries ...Source) (*Registry, error) {
 	r := NewRegistry()
 	for _, reg := range registries {
 		if reg == nil {
@@ -34,7 +34,7 @@ func NewRegistryFrom(registries ...Provider) (*Registry, error) {
 	return r, nil
 }
 
-func (r *Registry) Add(registry Provider) error {
+func (r *Registry) Add(registry Source) error {
 	if registry == nil {
 		return fmt.Errorf("registry is nil")
 	}
@@ -53,7 +53,7 @@ func (r *Registry) Add(registry Provider) error {
 	return nil
 }
 
-func (r *Registry) Get(name string) (Provider, bool) {
+func (r *Registry) Get(name string) (Source, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

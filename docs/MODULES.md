@@ -11,7 +11,7 @@ flowchart LR
     MOD --> REG[Registry]
     REG --> PKG[Package archive]
     PKG --> STORE[Immutable store]
-    STORE --> RT[Backend<br/>process · wasm]
+    STORE --> RT[Provider<br/>process · wasm]
 ```
 
 > [!NOTE]

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 const (
@@ -68,8 +69,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newSpec(typ, entrypoint string) capabilityrt.BackendSpec {
-	return capabilityrt.BackendSpec{
+func newSpec(typ, entrypoint string) provider.Spec {
+	return provider.Spec{
 		Type:       typ,
 		Version:    "1.0.0",
 		Protocol:   capabilityrt.ProtocolJSONV1,
@@ -254,7 +255,7 @@ func TestConcurrentExecutions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	instances := make([]capabilityrt.BackendInstance, 4)
+	instances := make([]provider.Instance, 4)
 	for i := range instances {
 		inst, err := rt.Start(context.Background(), newSpec("example:echo", fixtures.echo))
 		if err != nil {
@@ -267,7 +268,7 @@ func TestConcurrentExecutions(t *testing.T) {
 	var wg sync.WaitGroup
 	for g := 0; g < 4; g++ {
 		wg.Add(1)
-		go func(inst capabilityrt.BackendInstance, g int) {
+		go func(inst provider.Instance, g int) {
 			defer wg.Done()
 			for i := 0; i < 5; i++ {
 				resp, err := inst.Execute(context.Background(), &capabilityrt.Request{Params: map[string]any{"value": "hi"}})

@@ -1,12 +1,11 @@
 // Package plugin adapts frozen capability runtime artifacts into N.O.R.E.'s
 // in-process CapabilityRuntime contract. A ResolvedCapabilityRuntime is hosted
-// by a runtime backend (process, wasm) selected by the artifact's declared
-// runtime kind.
+// by a provider (process, wasm) selected by the artifact's declared runtime kind.
 //
 // The plugin package is the boundary between the frozen capability runtime set
-// persisted with a registered assembly and the runtime backends in
-// nore/internal/backend. It owns no process, socket, or WASM machinery itself;
-// it only maps a ResolvedCapabilityRuntime to a runtime backend instance.
+// persisted with a registered assembly and the providers in
+// nore/internal/mechanism. It owns no process, socket, or WASM machinery itself;
+// it only maps a ResolvedCapabilityRuntime to a provider instance.
 package plugin
 
 import (
@@ -17,12 +16,13 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/neuron-runtime/neuron/nore/internal/backend"
-	"github.com/neuron-runtime/neuron/nore/internal/backend/process"
-	"github.com/neuron-runtime/neuron/nore/internal/backend/wasm"
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/nore/internal/mechanism"
+	"github.com/neuron-runtime/neuron/nore/internal/mechanism/process"
+	"github.com/neuron-runtime/neuron/nore/internal/mechanism/wasm"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
+	"github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 // DecodeResolvedCapabilityRuntimes extracts the frozen capability runtime set
@@ -61,23 +61,23 @@ func DecodeResolvedCapabilityRuntimes(payload any) ([]capabilityrt.ResolvedCapab
 	return resolved, nil
 }
 
-// sharedRuntimes provides the process-wide set of runtime backends. It is
-// created once because the WASM backend owns process-global compiled-module
-// state that must be shared by every adapter (see backend/wasm), and the
-// process backend tracks its worker pools by capability runtime identity.
-var sharedRuntimes = sync.OnceValues(func() (*backend.Registry, error) {
-	reg := backend.New()
+// sharedRuntimes provides the process-wide set of providers. It is created once
+// because the WASM provider owns process-global compiled-module state that must
+// be shared by every adapter (see mechanism/wasm), and the process provider
+// tracks its worker pools by capability runtime identity.
+var sharedRuntimes = sync.OnceValues(func() (*mechanism.Registry, error) {
+	reg := mechanism.New()
 
 	wm, err := wasm.New()
 	if err != nil {
-		return nil, fmt.Errorf("initialize wasm backend: %w", err)
+		return nil, fmt.Errorf("initialize wasm provider: %w", err)
 	}
-	if err := reg.Register(capabilityrt.RuntimeKindWasm, wm); err != nil {
+	if err := reg.Register(wm); err != nil {
 		return nil, err
 	}
 
 	proc := process.New(slog.Default())
-	if err := reg.Register(capabilityrt.RuntimeKindProcess, proc); err != nil {
+	if err := reg.Register(proc); err != nil {
 		return nil, err
 	}
 
@@ -161,16 +161,17 @@ func NewAdapter(resolved capabilityrt.ResolvedCapabilityRuntime) (contracts.Capa
 		entrypoint = filepath.Join(installedDir, filepath.FromSlash(entrypoint))
 	}
 
-	spec := capabilityrt.BackendSpec{
-		Type:       resolved.Type,
-		Version:    resolved.ResolvedVersion,
-		Protocol:   protocol,
-		Entrypoint: entrypoint,
-		RootDir:    installedDir,
-		MaxWorkers: resolved.Runtime.MaxWorkers,
+	spec := provider.Spec{
+		Type:        resolved.Type,
+		Version:     resolved.ResolvedVersion,
+		RuntimeKind: kind,
+		Protocol:    protocol,
+		Entrypoint:  entrypoint,
+		RootDir:     installedDir,
+		MaxWorkers:  resolved.Runtime.MaxWorkers,
 	}
 
-	inst, err := reg.Start(context.Background(), kind, spec)
+	inst, err := reg.Start(context.Background(), spec)
 	if err != nil {
 		return nil, fmt.Errorf("capability runtime %s: %w", resolved.Type, err)
 	}
@@ -192,15 +193,14 @@ func CloseSharedRuntimes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return reg.CloseBackends(ctx)
+	return reg.Close(ctx)
 }
 
-// instanceAdapter bridges a capabilityrt.BackendInstance (backend contract)
-// onto the contracts.CapabilityRuntime interface consumed by N.O.R.E.'s
-// execution engine. It maps the engine's ExecutionContext to a Request and
-// back.
+// instanceAdapter bridges a provider.Instance (provider contract) onto the
+// contracts.CapabilityRuntime interface consumed by N.O.R.E.'s execution engine.
+// It maps the engine's ExecutionContext to a capabilityruntime.Request and back.
 type instanceAdapter struct {
-	instance capabilityrt.BackendInstance
+	instance provider.Instance
 	typ      string
 }
 
