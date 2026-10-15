@@ -111,11 +111,7 @@ func (r *Registry) Select(spec provider.Spec) (provider.Provider, error) {
 	r.mu.RUnlock()
 
 	if !ok {
-		return nil, &provider.Error{
-			Kind:        provider.ErrMissingProvider,
-			RuntimeKind: spec.RuntimeKind,
-			Err:         fmt.Errorf("no provider registered for runtime kind %q (registered: %v)", spec.RuntimeKind, kinds),
-		}
+		return nil, provider.MissingProvider(spec.RuntimeKind, kinds)
 	}
 
 	descriptor := selected.Descriptor()

@@ -1,13 +1,11 @@
-// Package provider defines the artifact manifest schema for installable
-// providers (provider.runtime.json). The structure mirrors the
-// capabilityruntime.Manifest but is scoped to provider artifacts: identity,
-// protocol compatibility, which runtime kinds a provider can host, which
-// capability runtime invocation protocols it carries, and platform artifacts.
 package provider
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
 // Provider manifest constants.
@@ -34,8 +32,7 @@ const (
 // PackageArchiveName returns the canonical name of the provider package
 // archive for a provider name and version.
 func PackageArchiveName(name, version string) string {
-	clean := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), ":", "-"), "/", "-")
-	return clean + "-" + strings.TrimSpace(version) + PackageArchiveSuffix
+	return sanitizeName(name) + "-" + strings.TrimSpace(version) + PackageArchiveSuffix
 }
 
 // Manifest is the provider.runtime.json manifest.
@@ -79,6 +76,28 @@ type Platform struct {
 	SHA256   string `json:"sha256,omitempty"`
 }
 
+// knownRuntimeKinds is the closed set of runtime kinds a provider may declare.
+// It includes the reserved container and remote kinds so a provider built for a
+// future backend is a valid manifest on a build that cannot host it yet; the
+// host's ability is checked separately at registry selection time.
+func knownRuntimeKinds() map[string]struct{} {
+	return map[string]struct{}{
+		capabilityrt.RuntimeKindProcess:   {},
+		capabilityrt.RuntimeKindWasm:      {},
+		capabilityrt.RuntimeKindContainer: {},
+		capabilityrt.RuntimeKindRemote:    {},
+	}
+}
+
+// knownProtocols is the set of Capability Runtime invocation protocols a
+// provider artifact may declare it carries.
+func knownProtocols() map[string]struct{} {
+	return map[string]struct{}{
+		capabilityrt.ProtocolV1:     {},
+		capabilityrt.ProtocolJSONV1: {},
+	}
+}
+
 // Validate verifies the provider manifest conforms to its schema.
 func (m *Manifest) Validate() error {
 	if m == nil {
@@ -98,6 +117,26 @@ func (m *Manifest) Validate() error {
 	}
 	if len(m.RuntimeKinds) == 0 {
 		return fmt.Errorf("provider manifest %s: runtimeKinds is required", m.Metadata.Name)
+	}
+	kinds := knownRuntimeKinds()
+	for _, kind := range m.RuntimeKinds {
+		if _, ok := kinds[kind]; !ok {
+			return fmt.Errorf("provider manifest %s: unknown runtimeKind %q", m.Metadata.Name, kind)
+		}
+	}
+	protocols := knownProtocols()
+	for _, proto := range m.Protocols {
+		if _, ok := protocols[proto]; !ok {
+			return fmt.Errorf("provider manifest %s: unknown protocol %q", m.Metadata.Name, proto)
+		}
+	}
+	if len(m.Platforms) == 0 {
+		return fmt.Errorf("provider manifest %s: platforms is required", m.Metadata.Name)
+	}
+	for platform := range m.Platforms {
+		if strings.TrimSpace(platform) == "" {
+			return fmt.Errorf("provider manifest %s: platform key is empty", m.Metadata.Name)
+		}
 	}
 	if m.Provider.ProtocolVersion != "" && m.Provider.ProtocolVersion != ProtocolVersion {
 		return fmt.Errorf("provider manifest %s: incompatible protocolVersion %q (want %q)", m.Metadata.Name, m.Provider.ProtocolVersion, ProtocolVersion)
@@ -123,17 +162,25 @@ func (m *Manifest) Sanitized() *Manifest {
 	return &clone
 }
 
-// ToDescriptor converts the manifest to a provider Descriptor.
+// ToDescriptor converts the manifest to a provider Descriptor. The platform
+// keys are carried through in sorted order so the descriptor is deterministic
+// and a caller can compare descriptors without map-ordering noise.
 func (m *Manifest) ToDescriptor() Descriptor {
 	proto := m.Provider.ProtocolVersion
 	if proto == "" {
 		proto = ProtocolVersion
 	}
+	platforms := make([]string, 0, len(m.Platforms))
+	for platform := range m.Platforms {
+		platforms = append(platforms, platform)
+	}
+	sort.Strings(platforms)
 	return Descriptor{
 		Name:                       m.Metadata.Name,
 		Version:                    m.Metadata.Version,
 		ProtocolVersion:            proto,
 		RuntimeKinds:               append([]string(nil), m.RuntimeKinds...),
 		CapabilityRuntimeProtocols: append([]string(nil), m.Protocols...),
+		Platforms:                  platforms,
 	}
 }
