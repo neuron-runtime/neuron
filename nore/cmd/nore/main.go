@@ -330,8 +330,11 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	}
 
 	// Publish the discovery record so `neuron run` can find this runtime. The
-	// record is owner-only: it carries the API token.
-	if err := projectruntime.Write(absRoot, projectruntime.New(host, portStr, absRoot, os.Getpid(), token)); err != nil {
+	// record is owner-only: it carries the API token. Each session writes its
+	// own record file, so concurrent sessions for the same project do not
+	// overwrite one another.
+	session := projectruntime.New(host, portStr, absRoot, os.Getpid(), token)
+	if err := projectruntime.Write(absRoot, session); err != nil {
 		log.Fatalf("write discovery record: %v", err)
 	}
 
@@ -373,10 +376,10 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	select {
 	case <-ctx.Done():
 		shutdownRuntimes(srv)
-		_ = projectruntime.Remove(absRoot)
+		_ = projectruntime.Remove(absRoot, session.SessionID)
 	case err := <-errCh:
 		shutdownRuntimes(srv)
-		_ = projectruntime.Remove(absRoot)
+		_ = projectruntime.Remove(absRoot, session.SessionID)
 		log.Fatal(err)
 	}
 }

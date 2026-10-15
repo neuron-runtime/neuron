@@ -170,26 +170,19 @@ func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, tok
 }
 
 // findRuntimeRecord walks up from startDir looking for a project runtime
-// discovery record. It returns the first record it finds after validating it;
-// a record left behind by a dead or foreign process is reported as an error
-// rather than silently ignored, because it means the project believes a runtime
-// is running when it is not.
+// discovery record. It returns the newest live record for the nearest project
+// that has one. A record left behind by a dead or foreign process is reported as
+// an error rather than silently ignored, because it means the project believes a
+// runtime is running when it is not.
 func findRuntimeRecord(startDir string) (projectruntime.Record, bool, error) {
 	root := filepath.Clean(startDir)
 	for {
-		path := projectruntime.Path(root)
-		if _, err := os.Stat(path); err == nil {
-			record, found, err := projectruntime.Read(root)
-			if err != nil {
-				return projectruntime.Record{}, false, err
-			}
-			if !found {
-				return projectruntime.Record{}, false, nil
-			}
-			if err := validateRuntimeRecord(record, root); err != nil {
-				return projectruntime.Record{}, false, err
-			}
-			return record, true, nil
+		record, err := selectRuntimeRecord(root)
+		if err != nil {
+			return projectruntime.Record{}, false, err
+		}
+		if record != nil {
+			return *record, true, nil
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
@@ -197,6 +190,28 @@ func findRuntimeRecord(startDir string) (projectruntime.Record, bool, error) {
 		}
 		root = parent
 	}
+}
+
+// selectRuntimeRecord returns the newest live runtime record for a project root,
+// or nil when the project has no runtime record at all. Several sessions may
+// publish records for the same project; the newest whose process is still alive
+// and whose project root matches wins. If records exist but none is usable, the
+// newest unusable record is reported as an error so the caller learns the
+// project's runtime is stale rather than absent.
+func selectRuntimeRecord(root string) (*projectruntime.Record, error) {
+	records, err := projectruntime.ReadAll(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	for i := range records {
+		if err := validateRuntimeRecord(records[i], root); err == nil {
+			return &records[i], nil
+		}
+	}
+	return nil, validateRuntimeRecord(records[0], root)
 }
 
 // validateRuntimeRecord rejects a record that cannot belong to a live runtime
