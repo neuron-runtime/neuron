@@ -57,6 +57,12 @@ func BuildRoutes(
 	// Synchronous run facade.
 	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.RunPath), instHandler.Run)
 
+	// Assembly discovery and named run routes
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.AssembliesPath), instHandler.ListAssemblies)
+	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.AssemblyByNamePath), instHandler.GetAssembly)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.AssemblyRunPath), instHandler.RunNamed)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.AssemblyDefaultRunPath), instHandler.RunDefault)
+
 	// WebSocket
 	ws := websocket.NewWebSocketHandler()
 	ws.SetRoomProvider(bridge.New(mgr))

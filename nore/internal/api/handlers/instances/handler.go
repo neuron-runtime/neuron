@@ -1,6 +1,7 @@
 package instances
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,34 +38,33 @@ func (h *Handler) resolveInstance(r *http.Request, id string) (*instance.Instanc
 }
 
 // runningInstance resolves the URL segment to an instance that is actually
-// running. A resolved instance whose runtime is gone — for example one restored
-// metadata-only after a daemon restart — is transparently recreated from its
-// registered key. This is what makes `neuron run` re-run an existing assembly
-// instead of failing with "instance is not running".
+// running. The segment is either an instance ID (inst_*) or a colon-encoded
+// assembly key.
 func (h *Handler) runningInstance(r *http.Request, id string) (*instance.Instance, error) {
-	if i, ok := h.resolveInstance(r, id); ok {
-		if i.Status() == instance.StatusRunning {
-			return i, nil
-		}
-		// Stale runtime: recreate it under the same key.
-		recreated, _, err := h.instances.GetOrCreate(r.Context(), i.Key)
-		return recreated, err
-	}
-
-	var key protocol.InstanceKey
 	if strings.HasPrefix(id, "inst_") {
 		i, ok := h.instances.GetByID(id)
 		if !ok {
 			return nil, fmt.Errorf("instance %s not found", id)
 		}
-		key = i.Key
-	} else {
-		parsed, err := protocol.ParseKey(id)
-		if err != nil {
-			return nil, fmt.Errorf("instance %s not found", id)
-		}
-		key = parsed
+		return h.runningInstanceByKey(r.Context(), i.Key)
 	}
-	i, _, err := h.instances.GetOrCreate(r.Context(), key)
+
+	key, err := protocol.ParseKey(id)
+	if err != nil {
+		return nil, fmt.Errorf("instance %s not found", id)
+	}
+	return h.runningInstanceByKey(r.Context(), key)
+}
+
+// runningInstanceByKey resolves a concrete assembly key to a running instance.
+// A resolved instance whose runtime is gone — for example one restored
+// metadata-only after a daemon restart — is transparently recreated from its
+// registered key. This is what makes `neuron run` re-run an existing assembly
+// instead of failing with "instance is not running".
+func (h *Handler) runningInstanceByKey(ctx context.Context, key protocol.InstanceKey) (*instance.Instance, error) {
+	if i, ok := h.instances.Resolve(ctx, key); ok && i.Status() == instance.StatusRunning {
+		return i, nil
+	}
+	i, _, err := h.instances.GetOrCreate(ctx, key)
 	return i, err
 }

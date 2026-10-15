@@ -11,8 +11,9 @@ import (
 // they are written in the named-wildcard form Go's ServeMux registers, because
 // the server is what ultimately has to serve them. The client cannot use the
 // templates directly -- it needs a concrete URL -- so every parameterized
-// template has a constructor below that substitutes the placeholders and escapes
-// the values as path segments.
+// template a Go client consumes has a constructor below that substitutes the
+// placeholders and escapes the values as path segments. A template with no Go
+// client yet (the assembly routes) carries no constructor until one needs it.
 //
 // Both directions go through this one table on purpose. A client that
 // hand-assembled a path, or a server that registered a literal, would agree with
@@ -32,6 +33,14 @@ const (
 	// Assembly result out. The advanced per-instance execution resources above
 	// remain the way to start, observe, stream, or cancel execution.
 	RunPath = "/v1/run"
+
+	// Assemblies routes provide discovery and named execution of registered
+	// Assemblies. The default Assembly can be addressed by the run endpoint
+	// without a name, and named Assemblies use /v1/assemblies/{name}.
+	AssembliesPath         = "/v1/assemblies"
+	AssemblyByNamePath     = "/v1/assemblies/{name}"
+	AssemblyRunPath        = "/v1/assemblies/{name}/run"
+	AssemblyDefaultRunPath = "/v1/assemblies/run"
 
 	WebSocketPath = "/v1/ws"
 
