@@ -144,9 +144,9 @@ func TestManifestValidate(t *testing.T) {
 func TestManifestToDescriptorCarriesPlatforms(t *testing.T) {
 	m := validManifest()
 	m.Platforms = map[string]Platform{
-		"linux-amd64": {},
+		"linux-amd64":  {},
 		"darwin-arm64": {},
-		"linux-arm64": {},
+		"linux-arm64":  {},
 	}
 	d := m.ToDescriptor()
 	want := []string{"darwin-arm64", "linux-amd64", "linux-arm64"}

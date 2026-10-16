@@ -29,8 +29,6 @@ func NewFileSystemStore(root string) (*FileSystemStore, error) {
 
 func (s *FileSystemStore) Root() string { return s.root }
 
-func DefaultStoreDir() string { return providerapp.DefaultStoreDir() }
-
 func (s *FileSystemStore) InstalledDir(name, version, digest string) (string, error) {
 	return s.installedDir(name, version, digest)
 }

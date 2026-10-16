@@ -10,18 +10,19 @@ import (
 	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
-// InstallRecord is written into an installed provider directory after a verified,
-// atomic install. It records the exact artifact identity, digest, and provenance.
+// InstallRecord is written into an installed provider directory after a
+// verified, atomic install. It records the exact artifact identity, digest,
+// and provenance. RootDir and ManifestPath are convenience locations inside
+// the installed directory; they are not artifact identity — the identity is
+// (provider, version, digest) — and must never be treated as such.
 type InstallRecord struct {
-	Provider     string      `json:"provider"`
-	Version      string      `json:"version"`
-	Digest       string      `json:"digest,omitempty"`
-	Registry     string      `json:"registry,omitempty"`
-	Platform     string      `json:"platform,omitempty"`
-	RootDir      string      `json:"rootDir"`
-	ManifestPath string      `json:"manifestPath"`
-	InstalledAt  time.Time   `json:"installedAt"`
-	Manifest     interface{} `json:"manifest,omitempty"`
+	Provider     string    `json:"provider"`
+	Version      string    `json:"version"`
+	Digest       string    `json:"digest,omitempty"`
+	Source       string    `json:"source,omitempty"`
+	RootDir      string    `json:"rootDir"`
+	ManifestPath string    `json:"manifestPath"`
+	InstalledAt  time.Time `json:"installedAt"`
 }
 
 // WriteInstallRecord persists the record at path.
@@ -46,25 +47,19 @@ func ReadInstallRecord(path string) (*InstallRecord, error) {
 	return &rec, nil
 }
 
-// ProviderTypePath returns the path segment for a provider type.
+// ProviderTypePath returns the path segment for a provider name inside the
+// store. The sanitization rule matches the one shared/types/provider uses for
+// canonical archive names, so a name maps to the same segment in both
+// layouts; both rules are pinned by tests so they cannot drift silently.
 func ProviderTypePath(name string) (string, error) {
-	clean := sanitizeName(name)
+	clean := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), ":", "-"), "/", "-")
 	if clean == "" {
 		return "", fmt.Errorf("provider name is required")
 	}
 	return clean, nil
 }
 
-func sanitizeName(name string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), ":", "-"), "/", "-")
-}
-
-// PackageArchiveName returns the canonical archive name for a provider.
-func PackageArchiveName(name, version string) string {
-	return providertypes.PackageArchiveName(name, version)
-}
-
-// ManifestFile, InstallFile, APIVersion etc match shared contract constants.
+// ManifestFile, InstallFile match the shared contract constants.
 const (
 	ManifestFile = providertypes.ManifestFile
 	InstallFile  = providertypes.InstallFile

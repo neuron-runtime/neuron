@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,11 +19,22 @@ type Installer struct {
 
 // Package describes a provider artifact to install.
 type Package struct {
-	Name     string
-	Version  string
+	Name    string
+	Version string
+	// Registry records where the package came from (a registry name such as
+	// "local" or "github", or a bootstrap marker). It is persisted in the
+	// install record so a bootstrap install is never mistaken for a
+	// registry install. It is not part of the artifact identity.
+	Registry string
+	// Manifest is the provider.runtime.json bytes. When empty, the
+	// materialized source must already contain the manifest file.
 	Manifest []byte
-	Source   string // path to dir or archive
-	Digest   string
+	// Source is the path to a directory or a .tar.gz archive to install.
+	Source string
+	// Digest, when set, is the expected content digest of the staged tree.
+	// A declared digest that does not match the staged content fails the
+	// install; it is never trusted blindly.
+	Digest string
 }
 
 // InstallResult reports the result of installing a provider.
@@ -32,19 +44,21 @@ type InstallResult struct {
 }
 
 // Install materializes the provider package into the store.
+//
+// The flow is stage → materialize → reconcile identity → sanitize the
+// persisted manifest → compute the content digest → verify a declared digest
+// if one was supplied → reject a conflicting already-installed identity →
+// write the install record → atomically commit. The content digest covers
+// every staged file including the sanitized manifest, and excludes only the
+// install record itself, which is written after the digest is computed; this
+// makes the digest a verifiable property of the committed tree rather than of
+// an intermediate staging state.
 func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, error) {
 	if pkg == nil {
 		return nil, fmt.Errorf("package is nil")
 	}
 	if i.Store == nil {
 		return nil, fmt.Errorf("provider store is nil")
-	}
-
-	if existing, err := i.Store.Get(ctx, pkg.Name, pkg.Version); err == nil && existing != nil {
-		if existing.Digest == pkg.Digest {
-			return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
-		}
-		return nil, fmt.Errorf("%w: %s@%s", ErrIntegrityConflict, pkg.Name, pkg.Version)
 	}
 
 	stage, err := i.Store.Stage()
@@ -57,13 +71,12 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, fmt.Errorf("install provider %s@%s: %w", pkg.Name, pkg.Version, err)
 	}
 
-	if pkg.Digest == "" {
-		digest, err := artifact.DigestTree(stage)
-		if err != nil {
-			return nil, err
-		}
-		pkg.Digest = digest
-	}
+	// A source tree may carry a stale install record — for example when the
+	// source is an already-installed directory or an archive packed from
+	// one. It must never be committed with the new install, so drop it
+	// before the digest is computed; a fresh record is written after
+	// verification.
+	_ = os.Remove(filepath.Join(stage, InstallFile))
 
 	manifestPath := filepath.Join(stage, ManifestFile)
 	if len(pkg.Manifest) > 0 {
@@ -94,14 +107,35 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
-	finalDir, err := i.Store.InstalledDir(pkg.Name, pkg.Version, pkg.Digest)
+	digest, err := artifact.DigestTree(stage)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.Digest != "" && pkg.Digest != digest {
+		return nil, fmt.Errorf("declared digest %s does not match staged content %s: %w", pkg.Digest, digest, artifact.ErrChecksumMismatch)
+	}
+	pkg.Digest = digest
+
+	existing, err := i.Store.Get(ctx, pkg.Name, pkg.Version)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Digest == digest {
+			return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
+		}
+		return nil, fmt.Errorf("%w: %s@%s installed with digest %s, staged content is %s", ErrIntegrityConflict, pkg.Name, pkg.Version, existing.Digest, digest)
+	}
+
+	finalDir, err := i.Store.InstalledDir(pkg.Name, pkg.Version, digest)
 	if err != nil {
 		return nil, err
 	}
 	rec := InstallRecord{
 		Provider:     pkg.Name,
 		Version:      pkg.Version,
-		Digest:       pkg.Digest,
+		Digest:       digest,
+		Source:       pkg.Registry,
 		RootDir:      finalDir,
 		ManifestPath: filepath.Join(finalDir, ManifestFile),
 		InstalledAt:  time.Now().UTC(),
@@ -110,7 +144,7 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, err
 	}
 
-	installed, err := i.Store.Commit(ctx, stage, pkg.Name, pkg.Version, pkg.Digest)
+	installed, err := i.Store.Commit(ctx, stage, pkg.Name, pkg.Version, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -126,42 +160,10 @@ func materialize(pkg *Package, stage string) error {
 		return err
 	}
 	if info.IsDir() {
-		return copyDir(pkg.Source, stage)
+		return artifact.CopyDir(pkg.Source, stage)
 	}
 	if artifact.IsArchive(pkg.Source) {
 		return artifact.ExtractTarGz(pkg.Source, stage)
 	}
 	return fmt.Errorf("unsupported provider source: %s", pkg.Source)
-}
-
-func copyDir(src, dst string) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-		if entry.IsDir() {
-			if err := os.MkdirAll(dstPath, 0o755); err != nil {
-				return err
-			}
-			if err := copyDir(srcPath, dstPath); err != nil {
-				return err
-			}
-			continue
-		}
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			return err
-		}
-		mode := 0o644
-		if entry.Type()&0o111 != 0 {
-			mode = 0o755
-		}
-		if err := os.WriteFile(dstPath, data, os.FileMode(mode)); err != nil {
-			return err
-		}
-	}
-	return nil
 }

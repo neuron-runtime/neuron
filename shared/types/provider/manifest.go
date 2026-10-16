@@ -35,6 +35,14 @@ func PackageArchiveName(name, version string) string {
 	return sanitizeName(name) + "-" + strings.TrimSpace(version) + PackageArchiveSuffix
 }
 
+// sanitizeName reduces a provider name to a filesystem- and archive-safe
+// segment by replacing the separators that appear in provider references.
+// The application-side store path sanitization (provider.ProviderTypePath)
+// applies the same rule; both are pinned by tests so they cannot drift.
+func sanitizeName(name string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), ":", "-"), "/", "-")
+}
+
 // Manifest is the provider.runtime.json manifest.
 type Manifest struct {
 	APIVersion   string              `json:"apiVersion"`
