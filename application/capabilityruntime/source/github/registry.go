@@ -2,10 +2,10 @@ package github
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/internal/githubrepo"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
@@ -19,7 +19,7 @@ type RepoRef struct {
 type Option func(*Registry)
 
 // WithClient overrides the HTTP/API client.
-func WithClient(c *Client) Option {
+func WithClient(c *githubrepo.Client) Option {
 	return func(r *Registry) { r.client = c }
 }
 
@@ -49,14 +49,14 @@ func WithCatalog(catalog map[string]RepoRef) Option {
 // asset named runtime.json (or the raw repository file at the release tag);
 // the binary is the release asset matching the manifest's host-platform entry.
 type Registry struct {
-	client  *Client
+	client  *githubrepo.Client
 	catalog map[string]RepoRef
 }
 
 // New returns a GitHub registry using default conventions.
 func New(opts ...Option) *Registry {
 	r := &Registry{
-		client:  NewClient(),
+		client:  githubrepo.NewClient(),
 		catalog: make(map[string]RepoRef),
 	}
 	for _, opt := range opts {
@@ -112,13 +112,13 @@ func (r *Registry) Versions(ctx context.Context, typ string) ([]string, error) {
 
 	releases, err := r.client.ListReleases(ctx, ref.Owner, ref.Repo)
 	if err != nil {
-		if errors.Is(err, notFoundSentinel) {
+		if githubrepo.IsNotFound(err) {
 			return nil, capabilityruntime.ErrNotFound
 		}
 		return nil, err
 	}
 
-	return versionsFromReleases(releases), nil
+	return githubrepo.VersionsFromReleases(releases), nil
 }
 
 // Package returns the immutable package for an exact version.
@@ -130,7 +130,7 @@ func (r *Registry) Package(ctx context.Context, typ, version string) (*capabilit
 
 	release, err := r.client.ReleaseByTag(ctx, ref.Owner, ref.Repo, "v"+version)
 	if err != nil {
-		if errors.Is(err, notFoundSentinel) {
+		if githubrepo.IsNotFound(err) {
 			return nil, capabilityruntime.ErrNotFound
 		}
 		return nil, err

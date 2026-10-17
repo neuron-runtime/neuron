@@ -2,11 +2,11 @@ package github
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/internal/githubrepo"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
@@ -17,8 +17,8 @@ const manifestAssetName = "runtime.json"
 // The exact <type>-<version>-capabilityruntime.neuron.tar.gz name wins; otherwise any
 // asset carrying the canonical package archive suffix is accepted, trusting
 // the manifest inside the archive to reconcile identity at install time.
-func packageArchiveAsset(release *Release, typ, version string) (Asset, bool) {
-	if asset, ok := release.assetByName(capabilityrt.PackageArchiveName(typ, version)); ok {
+func packageArchiveAsset(release *githubrepo.Release, typ, version string) (githubrepo.Asset, bool) {
+	if asset, ok := release.AssetByName(capabilityrt.PackageArchiveName(typ, version)); ok {
 		return asset, true
 	}
 	for _, a := range release.Assets {
@@ -26,7 +26,7 @@ func packageArchiveAsset(release *Release, typ, version string) (Asset, bool) {
 			return a, true
 		}
 	}
-	return Asset{}, false
+	return githubrepo.Asset{}, false
 }
 
 // buildPackage assembles an capabilityruntime.Package for one release. The capability runtime
@@ -41,7 +41,7 @@ func (r *Registry) buildPackage(
 	ctx context.Context,
 	typ, version string,
 	ref RepoRef,
-	release *Release,
+	release *githubrepo.Release,
 ) (*capabilityruntime.Package, error) {
 
 	// Package archive distribution.
@@ -89,7 +89,7 @@ func (r *Registry) buildPackage(
 	// select the "wasm32-wasi" key; process capability runtimes select the host key.
 	platformKey := capabilityruntime.PlatformForRuntime(m.Runtime.Type)
 	if platform, ok := m.Platforms[platformKey]; ok && platform.Artifact != "" {
-		if asset, found := release.assetByName(platform.Artifact); found {
+		if asset, found := release.AssetByName(platform.Artifact); found {
 			pkg.Artifact = capabilityruntime.Artifact{
 				URL:    asset.BrowserDownloadURL,
 				Name:   asset.Name,
@@ -99,7 +99,7 @@ func (r *Registry) buildPackage(
 			// Fall back to raw URL construction; the manifest is authoritative
 			// for the artifact name even when the asset listing lags.
 			pkg.Artifact = capabilityruntime.Artifact{
-				URL:    rawDownloadURL(ref.Owner, ref.Repo, release.TagName, platform.Artifact),
+				URL:    githubrepo.RawDownloadURL(ref.Owner, ref.Repo, release.TagName, platform.Artifact),
 				Name:   platform.Artifact,
 				SHA256: platform.SHA256,
 			}
@@ -111,8 +111,8 @@ func (r *Registry) buildPackage(
 
 // fetchManifest returns the validated runtime.json bytes. Precedence: release
 // asset named runtime.json, then the raw repository file at the release tag.
-func (r *Registry) fetchManifest(ctx context.Context, ref RepoRef, release *Release) ([]byte, string, error) {
-	if asset, ok := release.assetByName(manifestAssetName); ok {
+func (r *Registry) fetchManifest(ctx context.Context, ref RepoRef, release *githubrepo.Release) ([]byte, string, error) {
+	if asset, ok := release.AssetByName(manifestAssetName); ok {
 		data, err := r.client.Get(ctx, asset.BrowserDownloadURL)
 		if err != nil {
 			return nil, "", err
@@ -120,21 +120,13 @@ func (r *Registry) fetchManifest(ctx context.Context, ref RepoRef, release *Rele
 		return data, "asset " + asset.Name, nil
 	}
 
-	raw := rawFileURL(ref.Owner, ref.Repo, release.TagName, manifestAssetName)
+	raw := githubrepo.RawFileURL(ref.Owner, ref.Repo, release.TagName, manifestAssetName)
 	data, err := r.client.Get(ctx, raw)
 	if err != nil {
-		if errors.Is(err, notFoundSentinel) {
+		if githubrepo.IsNotFound(err) {
 			return nil, "", nil
 		}
 		return nil, "", err
 	}
 	return data, "raw " + raw, nil
-}
-
-func rawFileURL(owner, repo, tag, file string) string {
-	return "https://raw.githubusercontent.com/" + escapePath(owner) + "/" + escapePath(repo) + "/" + escapePath(tag) + "/" + escapePath(file)
-}
-
-func rawDownloadURL(owner, repo, tag, asset string) string {
-	return "https://github.com/" + escapePath(owner) + "/" + escapePath(repo) + "/releases/download/" + escapePath(tag) + "/" + escapePath(asset)
 }

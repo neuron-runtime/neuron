@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/neuron-runtime/neuron/application/internal/semverselect"
 )
 
 // Resolver turns a Requirement into an Installed capabilityruntime. It prefers
@@ -151,9 +153,9 @@ func (r *Resolver) resolveFrom(ctx context.Context, registry Source, req Require
 		return nil, fmt.Errorf("registry %s versions for %s: %w", registry.Name(), req.Type, err)
 	}
 
-	version, err := SelectVersion(req.Version, versions)
+	version, err := semverselect.SelectVersion(req.Version, versions)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("capability runtime %s: %w", req.Type, err)
 	}
 
 	pkg, err := registry.Package(ctx, req.Type, version)
@@ -193,7 +195,7 @@ func (r *Resolver) installedSatisfying(ctx context.Context, req Requirement) (*I
 	}
 
 	// Exact pin: direct lookup.
-	if IsExactVersion(req.Version) {
+	if semverselect.IsExactVersion(req.Version) {
 		installed, err := r.store.Get(ctx, req.Type, req.Version)
 		if err == nil && installed != nil {
 			return installed, true, nil
@@ -215,7 +217,7 @@ func (r *Resolver) installedSatisfying(ctx context.Context, req Requirement) (*I
 		versions = append(versions, in.Version)
 	}
 
-	best, err := SelectVersion(req.Version, versions)
+	best, err := semverselect.SelectVersion(req.Version, versions)
 	if err != nil {
 		return nil, false, nil
 	}

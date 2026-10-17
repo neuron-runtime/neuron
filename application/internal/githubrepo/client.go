@@ -1,4 +1,8 @@
-package github
+// Package githubrepo is a minimal GitHub Releases/raw client shared by the
+// capability runtime and provider registry sources. It intentionally avoids
+// SDKs and domain types: consumers need releases, assets, and raw file
+// contents, nothing more.
+package githubrepo
 
 import (
 	"context"
@@ -15,13 +19,16 @@ import (
 // gitHubAPI is the default REST API base.
 const gitHubAPI = "https://api.github.com"
 
-// notFoundSentinel lets the registry translate API 404s into
-// capabilityruntime.ErrNotFound so the resolver can try the next registry.
-var notFoundSentinel = errors.New("github: not found")
+// ErrNotFound marks API 404s so registries can translate them into their own
+// not-found errors and let the resolver try the next registry.
+var ErrNotFound = errors.New("github: not found")
 
-// Client is a minimal, unauthenticated-or-token GitHub REST/raw client. It
-// intentionally avoids SDKs: the registry only needs releases, assets, and raw
-// file contents.
+// IsNotFound reports whether err wraps ErrNotFound.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
+}
+
+// Client is a minimal, unauthenticated-or-token GitHub REST/raw client.
 type Client struct {
 	HTTP *http.Client
 
@@ -33,6 +40,7 @@ type Client struct {
 	BaseURL string
 }
 
+// NewClient returns a client with the default API base and timeout.
 func NewClient() *Client {
 	return &Client{
 		HTTP:    &http.Client{Timeout: 60 * time.Second},
@@ -152,17 +160,17 @@ func (c *Client) checkStatus(endpoint string, resp *http.Response) error {
 	}
 }
 
-// releaseNotFound marks a 404 so the resolver can try the next registry.
+// errNotFound marks a 404 so registries can try the next source.
 func errNotFound(endpoint string) error {
-	return fmt.Errorf("%w: github %s", notFoundSentinel, endpoint)
+	return fmt.Errorf("%w: github %s", ErrNotFound, endpoint)
 }
 
-// parseTagToVersion strips a leading "v": "v1.2.0" -> "1.2.0".
-func parseTagToVersion(tag string) string {
+// ParseTagToVersion strips a leading "v": "v1.2.0" -> "1.2.0".
+func ParseTagToVersion(tag string) string {
 	return strings.TrimPrefix(strings.TrimSpace(tag), "v")
 }
 
-// escapePath encodes a path segment for API URLs.
-func escapePath(path string) string {
+// EscapePath encodes a path segment for API URLs.
+func EscapePath(path string) string {
 	return url.PathEscape(path)
 }

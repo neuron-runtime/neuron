@@ -1,11 +1,11 @@
-package github
+package githubrepo
 
 import (
 	"context"
 	"sort"
 )
 
-// Release is the subset of the GitHub Releases API record the registry needs.
+// Release is the subset of the GitHub Releases API record registries need.
 type Release struct {
 	TagName    string  `json:"tag_name"`
 	Name       string  `json:"name"`
@@ -21,9 +21,9 @@ type Asset struct {
 	Size               int64  `json:"size"`
 }
 
-// ListReleases fetches published releases for a repository.
+// ListReleases fetches published (non-draft) releases for a repository.
 func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]Release, error) {
-	endpoint := "repos/" + escapePath(owner) + "/" + escapePath(repo) + "/releases?per_page=100"
+	endpoint := "repos/" + EscapePath(owner) + "/" + EscapePath(repo) + "/releases?per_page=100"
 
 	var releases []Release
 	if err := c.do(ctx, "GET", endpoint, &releases); err != nil {
@@ -42,7 +42,7 @@ func (c *Client) ListReleases(ctx context.Context, owner, repo string) ([]Releas
 
 // ReleaseByTag fetches the release for an exact tag (e.g. "v1.2.0").
 func (c *Client) ReleaseByTag(ctx context.Context, owner, repo, tag string) (*Release, error) {
-	endpoint := "repos/" + escapePath(owner) + "/" + escapePath(repo) + "/releases/tags/" + escapePath(tag)
+	endpoint := "repos/" + EscapePath(owner) + "/" + EscapePath(repo) + "/releases/tags/" + EscapePath(tag)
 
 	var release Release
 	if err := c.do(ctx, "GET", endpoint, &release); err != nil {
@@ -51,14 +51,14 @@ func (c *Client) ReleaseByTag(ctx context.Context, owner, repo, tag string) (*Re
 	return &release, nil
 }
 
-// versionsFromReleases extracts semver-ish versions from release tags, newest
-// first. Only non-empty, valid version strings survive SelectVersion upstream,
-// but prereleases are excluded here unless no stable release exists.
-func versionsFromReleases(releases []Release) []string {
+// VersionsFromReleases extracts semver-ish versions from release tags. Only
+// non-empty, valid version strings survive semver selection upstream, but
+// prereleases are excluded here unless no stable release exists.
+func VersionsFromReleases(releases []Release) []string {
 	var stable []string
 	var prerelease []string
 	for _, r := range releases {
-		v := parseTagToVersion(r.TagName)
+		v := ParseTagToVersion(r.TagName)
 		if v == "" {
 			continue
 		}
@@ -82,12 +82,23 @@ func versionsFromReleases(releases []Release) []string {
 	return versions
 }
 
-// assetByName finds a release asset by exact name.
-func (r *Release) assetByName(name string) (Asset, bool) {
+// AssetByName finds a release asset by exact name.
+func (r *Release) AssetByName(name string) (Asset, bool) {
 	for _, a := range r.Assets {
 		if a.Name == name {
 			return a, true
 		}
 	}
 	return Asset{}, false
+}
+
+// RawFileURL builds the raw.githubusercontent.com URL for a repository file
+// at a given ref.
+func RawFileURL(owner, repo, tag, file string) string {
+	return "https://raw.githubusercontent.com/" + EscapePath(owner) + "/" + EscapePath(repo) + "/" + EscapePath(tag) + "/" + EscapePath(file)
+}
+
+// RawDownloadURL builds the release-download URL for an asset.
+func RawDownloadURL(owner, repo, tag, asset string) string {
+	return "https://github.com/" + EscapePath(owner) + "/" + EscapePath(repo) + "/releases/download/" + EscapePath(tag) + "/" + EscapePath(asset)
 }

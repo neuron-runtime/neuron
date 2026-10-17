@@ -1,4 +1,8 @@
-package capabilityruntime
+// Package semverselect resolves a version requirement against a set of
+// available versions. It is domain-neutral on purpose: capability runtime
+// resolution and provider resolution share one implementation, and callers
+// add their own domain context when wrapping returned errors.
+package semverselect
 
 import (
 	"fmt"
@@ -18,13 +22,12 @@ func IsExactVersion(version string) bool {
 	return err == nil
 }
 
-func SelectVersion(
-	constraint string,
-	versions []string,
-) (string, error) {
-
+// SelectVersion returns the highest version in versions that satisfies
+// constraint. An empty constraint selects the highest valid semver version.
+// Versions that do not parse as semver are ignored.
+func SelectVersion(constraint string, versions []string) (string, error) {
 	if len(versions) == 0 {
-		return "", fmt.Errorf("no capability runtime versions available")
+		return "", fmt.Errorf("no versions available")
 	}
 
 	if constraint == "" {
@@ -40,39 +43,29 @@ func SelectVersion(
 			}
 		}
 		if latest == nil {
-			return "", fmt.Errorf("no valid semver capability runtime versions available")
+			return "", fmt.Errorf("no valid semver versions available")
 		}
 		return latest.String(), nil
 	}
 
 	c, err := semver.NewConstraint(constraint)
-
 	if err != nil {
-		return "", fmt.Errorf(
-			"invalid capability runtime version constraint %q: %w",
-			constraint,
-			err,
-		)
+		return "", fmt.Errorf("invalid version constraint %q: %w", constraint, err)
 	}
 
 	candidates := make([]*semver.Version, 0)
-
 	for _, raw := range versions {
 		v, err := semver.NewVersion(raw)
 		if err != nil {
 			continue
 		}
-
 		if c.Check(v) {
 			candidates = append(candidates, v)
 		}
 	}
 
 	if len(candidates) == 0 {
-		return "", fmt.Errorf(
-			"no capability runtime version satisfies %q",
-			constraint,
-		)
+		return "", fmt.Errorf("no version satisfies %q", constraint)
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
