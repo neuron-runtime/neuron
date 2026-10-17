@@ -3,6 +3,8 @@ package capabilityruntime
 import (
 	"errors"
 	"fmt"
+
+	"github.com/neuron-runtime/neuron/application/internal/artifact"
 )
 
 // Sentinel errors for the capability runtime registry pipeline. Callers can use
@@ -17,8 +19,9 @@ var (
 	ErrRegistryNotConfigured = errors.New("capability runtime registry not configured")
 
 	// ErrChecksumMismatch is returned when an artifact fails SHA-256
-	// verification.
-	ErrChecksumMismatch = errors.New("capability runtime artifact checksum mismatch")
+	// verification. It is the shared artifact-package sentinel so that a
+	// checksum failure is identical across every artifact kind.
+	ErrChecksumMismatch = artifact.ErrChecksumMismatch
 
 	// ErrNoVersionSatisfies is returned when no available version satisfies a
 	// requirement's version constraint.

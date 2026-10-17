@@ -1,7 +1,10 @@
 name: order-processing
 version: "1.0.0"
 lang: yaml
-entry: assemblies/order-processing/assembly.yaml
+assemblies:
+  - name: order-processing
+    entry: assemblies/order-processing/assembly.yaml
+    default: true
 
 variables:
   environment: development

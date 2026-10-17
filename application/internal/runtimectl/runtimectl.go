@@ -53,14 +53,9 @@ type CatalogConfig struct {
 func BuildCatalog(cfg CatalogConfig) (*Catalog, error) {
 	storeDir := cfg.CapabilityRuntimesConfig.StoreDir
 	if storeDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home for capability runtime store: %w", err)
-		}
-		storeDir = store.DefaultStoreDir()
-		if storeDir == "" {
-			storeDir = home + "/.neuron/capabilityRuntimes"
-		}
+		// config owns the default store path (see DefaultStoreDir), matching the
+		// provider store convention; resolving it here keeps one implementation.
+		storeDir = config.DefaultStoreDir()
 	}
 
 	fsStore, err := store.NewFileassemblyStore(storeDir)

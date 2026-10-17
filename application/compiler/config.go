@@ -3,7 +3,13 @@ package compiler
 import (
 	"github.com/neuron-runtime/neuron/application/compiler/manifest"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
+
+// ResolvedProvidersKey is the JSON key under which the frozen provider set
+// travels in the register payload. The struct tag and this constant are
+// pinned together by a test so they cannot drift.
+const ResolvedProvidersKey = "resolved_providers"
 
 // ExecutionConfigurations is the consolidated project/runtime configuration
 // payload sent to N.O.R.E. alongside a registered assembly. N.O.R.E. persists
@@ -31,6 +37,12 @@ type ExecutionConfigurations struct {
 	// checksum so N.O.R.E. can execute capabilities without resolving or
 	// installing anything.
 	ResolvedCapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"resolved_capabilityRuntimes,omitempty"`
+
+	// ResolvedProviders is the frozen provider identity set selected from the
+	// installed host store for the frozen capability runtimes' runtime kinds.
+	// It pins the exact provider version and content digest so execution can
+	// be hosted without resolving, downloading, or installing anything.
+	ResolvedProviders []providertypes.ResolvedProvider `json:"resolved_providers,omitempty"`
 
 	// Runtime describes runtime execution defaults.
 	Runtime manifest.RuntimeConfig `json:"runtime,omitempty"`

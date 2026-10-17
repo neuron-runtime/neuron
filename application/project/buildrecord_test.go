@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -25,12 +26,15 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	fingerprint := "abc123"
 	rec := BuildRecord{
 		Fingerprint: fingerprint,
-		Key: protocol.InstanceKey{
-			AssemblyID: "demo",
-			Version:    "1.0.0",
-			Hash:       "h1",
-			Env:        "default",
-		},
+		Assemblies: []AssemblyBuild{{
+			Name: "demo",
+			Key: protocol.InstanceKey{
+				AssemblyID: "demo",
+				Version:    "1.0.0",
+				Hash:       "h1",
+				Env:        "default",
+			},
+		}},
 		BuiltAt: time.Now().UTC(),
 	}
 
@@ -45,11 +49,96 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	if got.Fingerprint != rec.Fingerprint {
 		t.Errorf("fingerprint = %q, want %q", got.Fingerprint, rec.Fingerprint)
 	}
-	if got.Key.ColonString() != rec.Key.ColonString() {
-		t.Errorf("key = %q, want %q", got.Key.ColonString(), rec.Key.ColonString())
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("got %d assemblies, want 1", len(got.Assemblies))
+	}
+	if got.Assemblies[0].Key.ColonString() != rec.Assemblies[0].Key.ColonString() {
+		t.Errorf("key = %q, want %q", got.Assemblies[0].Key.ColonString(), rec.Assemblies[0].Key.ColonString())
 	}
 	if !got.BuiltAt.Equal(rec.BuiltAt) {
 		t.Errorf("builtAt = %v, want %v", got.BuiltAt, rec.BuiltAt)
+	}
+}
+
+// A frozen provider identity must survive the build record round trip so a
+// later run addresses the exact provider artifact the build selected, by
+// version and digest, without any host-specific path.
+func TestBuildRecordRoundTripsFrozenProviders(t *testing.T) {
+	root := t.TempDir()
+	fingerprint := "prov123"
+	rec := BuildRecord{
+		Fingerprint: fingerprint,
+		Assemblies: []AssemblyBuild{{
+			Name: "demo",
+			Key: protocol.InstanceKey{
+				AssemblyID: "demo",
+				Version:    "1.0.0",
+				Hash:       "h1",
+				Env:        "default",
+			},
+			Providers: []providertypes.ResolvedProvider{{
+				Name:            "process",
+				ResolvedVersion: "0.1.0",
+				ProtocolVersion: providertypes.ProtocolVersion,
+				Registry:        "bootstrap",
+				Digest:          "sha256:abc",
+				RuntimeKinds:    []string{"process"},
+			}},
+		}},
+		BuiltAt: time.Now().UTC(),
+	}
+
+	if err := SaveBuildRecord(root, fingerprint, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	var got BuildRecord
+	if err := LoadBuildRecord(root, fingerprint, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("got %d assemblies, want 1", len(got.Assemblies))
+	}
+	providers := got.Assemblies[0].Providers
+	if len(providers) != 1 {
+		t.Fatalf("frozen providers = %+v, want one entry", providers)
+	}
+	p := providers[0]
+	if p.Name != "process" || p.ResolvedVersion != "0.1.0" || p.Digest != "sha256:abc" ||
+		p.ProtocolVersion != providertypes.ProtocolVersion || p.Registry != "bootstrap" {
+		t.Fatalf("frozen provider did not survive the round trip: %+v", p)
+	}
+}
+
+func TestLoadBuildRecordMigratesLegacyRecord(t *testing.T) {
+	root := t.TempDir()
+	fingerprint := "legacy1"
+
+	// A pre-multi-Assembly record: a single key and capability runtime set, no
+	// `assemblies` list.
+	legacy := `{
+  "fingerprint": "legacy1",
+  "builtAt": "2026-01-01T00:00:00Z",
+  "key": {"assembly_id": "demo", "version": "1.0.0", "hash": "h1", "env": "default"},
+  "capabilityRuntimes": []
+}`
+	writeFile(t, filepath.Join(root, neuronDirectory, buildsDirectory, fingerprint, buildRecordFile), legacy)
+
+	var got BuildRecord
+	if err := LoadBuildRecord(root, fingerprint, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("migrated assemblies = %d, want 1", len(got.Assemblies))
+	}
+	if got.Assemblies[0].Name != "demo" {
+		t.Errorf("migrated name = %q, want demo", got.Assemblies[0].Name)
+	}
+	if got.Assemblies[0].Key.AssemblyID != "demo" {
+		t.Errorf("migrated key = %+v, want demo", got.Assemblies[0].Key)
+	}
+	if got.LegacyKey != nil {
+		t.Errorf("legacy key was not cleared after migration")
 	}
 }
 

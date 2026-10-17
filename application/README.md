@@ -341,6 +341,88 @@ neuron capability-runtime inspect example:echo@1.0.0
 
 
 
+### `neuron install`
+
+Resolve, verify, and install a provider artifact into the machine-global provider store.
+
+```
+Usage:
+  neuron install [flags]
+
+Flags:
+      --provider string    provider reference: name, name@version, or name@constraint
+      --registry strings   registries allowed to satisfy the requirement (default: configured providers.defaultRegistries)
+```
+
+`--provider` selects an exact version (`--provider process@1.0.0`) or a constraint (`--provider process@^1.0.0`); without a version, the best available version is chosen. Providers are resolved through the configured registries (`github`, `local`), verified by content digest, and installed immutably into the machine-global provider store (`~/.neuron/providers` by default). The store layout is `<name>/<version>/<digest>/`.
+
+```bash
+# Install the latest version
+neuron install --provider process
+
+# Install a specific version
+neuron install --provider process@1.0.0
+
+# Restrict resolution to one registry
+neuron install --provider process@^1.0.0 --registry local
+```
+
+```text
+installed process@1.0.0 (a1b2c3d4e5f6a7b8, from local)
+```
+
+> [!NOTE]
+> `neuron install` installs a **provider** — the host that supervises Capability Runtime artifacts — not a capability runtime. Capability runtimes are installed with `neuron add`. Omitting `--provider` fails with a message pointing you at `neuron add`.
+
+### `neuron provider`
+
+Manage first-party provider artifacts for local development.
+
+```
+Usage:
+  neuron provider [flags]
+  neuron provider [command]
+
+Available Commands:
+  build       Bootstrap descriptor-only first-party providers into the store
+```
+
+Providers obtained from a registry are installed with `neuron install --provider`. There is no `list`, `inspect`, or `remove` subcommand yet.
+
+#### `neuron provider build`
+
+Bootstrap descriptor-only first-party provider artifacts into the store.
+
+```
+Usage:
+  neuron provider build [flags]
+
+Flags:
+  -o, --out string                override the target provider store root (defaults to providers.storeDir)
+      --provider-version string   version assigned to the bootstrapped providers (default "0.1.0")
+```
+
+`neuron provider build` builds descriptor-only artifacts for the first-party providers `process` and `wasm` and installs them through the real installer. It performs **no** registry resolution and **no** download, and the artifacts carry no executable payload: each is a valid `provider.runtime.json` identity, so project builds and invocations resolve it exactly like a registry-installed provider. The install record marks every artifact with `source: bootstrap`, so a bootstrap install is never mistaken for a registry install.
+
+```bash
+# Install the first-party providers into the default provider store
+neuron provider build
+
+# Write them under a specific store root
+neuron provider build --out /tmp/neuron-providers
+
+# Assign a specific version
+neuron provider build --provider-version 0.1.0
+```
+
+```text
+bootstrap: process@0.1.0 (a1b2c3d4e5f6a7b8)
+bootstrap: wasm@0.1.0 (b8a7f6e5d4c3b2a1)
+bootstrap: providers available in /home/user/.neuron/providers
+```
+
+Rebuilding over an identical artifact reports `already present` instead of failing or duplicating.
+
 ### `neuron instance`
 
 Create, list, and manage running assembly instances.
@@ -474,7 +556,9 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
   "name": "my-assembly",
   "version": "1.0.0",
   "lang": "typescript",
-  "entry": "assembly.ts",
+  "assemblies": [
+    { "name": "my-assembly", "entry": "assembly.ts", "default": true }
+  ],
   "runtime": {
     "host": "localhost",
     "port": "auto",
@@ -503,7 +587,11 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
 | `name`                      | —                     | Assembly identity for this project; required for build, and must match the authored Assembly metadata        |
 | `version`                   | —                     | Assembly semantic version; required for build, participates in Assembly identity and build hashing           |
 | `lang`                      | `typescript`          | Project authoring language (`yaml`, `yml`, `typescript`, `ts`)                                             |
-| `entry`                     | `index.ts` / `assembly.yaml` | Path to the project's entry assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
+| `assemblies`                | —                     | Ordered list of Assembly declarations (`name`, `entry`, optional `default: true`). A project may define several; the one marked default (or the sole declaration) is what `neuron run` uses with no argument |
+| `assemblies[].name`         | —                     | Assembly name; must be unique within the project                                                           |
+| `assemblies[].entry`        | `index.ts` / `assembly.yaml` | Project-relative path to the Assembly definition (defaults: `index.ts` for TypeScript, `assembly.yaml` for YAML) |
+| `assemblies[].default`      | `false`               | Marks the Assembly `neuron run` uses when no name is given; at most one may be `true`                       |
+| `entry`                     | —                     | Legacy single-Assembly form, migrated to one `assemblies` declaration named after the project; rejected alongside `assemblies` |
 | `variables`                 | —                     | Free-form variables carried into the compiled assembly manifest (e.g. environment-specific settings)        |
 | `runtime.host`              | `localhost`           | Interface the project runtime binds to (loopback-first by default)                                         |
 | `runtime.port`              | `auto`                | Project runtime port: `"auto"` (OS-assigned) or an explicit integer port                                   |
@@ -515,12 +603,15 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
 | `capabilityRuntimes.localRoots` | `./neuron/capabilityRuntimes` | Project-scoped directories treated as implicit `local` registries for resolution                      |
 | `capabilityRuntimes.registries` | none              | Registries used to resolve external modules; with no block, only built-in capability runtimes are available |
 | `capabilityRuntimes.defaultRegistries` | `["local"]` | Registries a requirement falls back to when it declares none of its own                                |
+| `providers.registries`      | none                  | Registries used to resolve provider artifacts; with no block, only the machine-global provider store and configured `local` roots are available |
+| `providers.localRoots`      | none                  | Machine-global directories served by the `local` provider registry (no implicit project root)          |
+| `providers.defaultRegistries` | `["local"]`         | Registries a provider requirement falls back to when it declares none of its own                        |
 | `inspector.enabled`         | `true`                | Enable the runtime inspector                                                                               |
 | `inspector.address`         | `127.0.0.1:7433`      | Inspector address                                                                                          |
 | `dev.maxWorkers`            | `1`                   | How many capability runtime builds may run in parallel during `neuron build`                                |
 
 > [!NOTE]
-> Project configuration (`neuron.config.*`) rejects engine plumbing outright: `daemon.*` (daemon endpoint, socket, PID file, N.O.R.E. binary path), `storage.provider` / `storage.directory`, and `capabilityRuntimes.storeDir` are managed by Neuron, and unknown keys fail validation with an error. Address the engine endpoint with `--remote` / `--nore-path` (or `NEURON_*` variables) instead; `daemon.*` remains settable only in the machine-level global `~/.config/neuron/config.yaml` during the transition. The daemon data directory is controlled with `NEURON_DATA_DIR`.
+> Project configuration (`neuron.config.*`) rejects engine plumbing outright: `daemon.*` (daemon endpoint, socket, PID file, N.O.R.E. binary path), `storage.provider` / `storage.directory`, `capabilityRuntimes.storeDir`, and `providers.storeDir` are managed by Neuron, and unknown keys fail validation with an error. Address the engine endpoint with `--remote` / `--nore-path` (or `NEURON_*` variables) instead; `daemon.*` remains settable only in the machine-level global `~/.config/neuron/config.yaml` during the transition. The daemon data directory is controlled with `NEURON_DATA_DIR`.
 
 
 

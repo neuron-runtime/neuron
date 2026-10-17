@@ -46,6 +46,16 @@ func (l Language) Is(candidate Language) bool {
 	return l == candidate
 }
 
+// DefaultEntry returns the default Assembly entry file name for the language,
+// relative to the project root. It is used when a configuration declares no
+// explicit entry.
+func (l Language) DefaultEntry() string {
+	if l.Is(YAML) {
+		return "assembly.yaml"
+	}
+	return "index.ts"
+}
+
 // Normalize canonicalizes an author-provided language token. It accepts
 // "yaml", "yml", "typescript", and "ts" (case-insensitive).
 func Normalize(s string) (Language, error) {

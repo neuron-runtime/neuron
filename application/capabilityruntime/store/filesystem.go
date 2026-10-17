@@ -35,16 +35,6 @@ func (s *FileassemblyStore) Root() string {
 	return s.root
 }
 
-// DefaultStoreDir returns the default capability runtime store directory
-// (~/.neuron/capabilityRuntimes).
-func DefaultStoreDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".neuron/capabilityRuntimes"
-	}
-	return filepath.Join(home, ".neuron", "capabilityRuntimes")
-}
-
 // InstalledDir returns the final installed directory for an exact
 // (type, version, digest). The directory may not exist yet.
 func (s *FileassemblyStore) InstalledDir(typ, version, digest string) (string, error) {

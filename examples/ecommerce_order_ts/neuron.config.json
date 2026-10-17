@@ -2,7 +2,13 @@
   "name": "order-processing-ts",
   "version": "2.0.0",
   "lang": "typescript",
-  "entry": "assembly.ts",
+  "assemblies": [
+    {
+      "name": "order-processing-ts",
+      "entry": "assembly.ts",
+      "default": true
+    }
+  ],
   "runtime": {
     "execution": {
       "mode": "wait",

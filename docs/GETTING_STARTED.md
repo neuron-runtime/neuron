@@ -112,24 +112,28 @@ npm install
 
 > `neuron init --lang yaml` scaffolds the YAML authoring surface instead (`assembly.yaml` + `capabilities/`, no Node toolchain required).
 
-The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run — including the Assembly identity. The TypeScript scaffold writes:
+The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron.config.yml`) is the single source of truth for how the project is authored and run — including the Assembly identity. The TypeScript scaffold writes `neuron.config.json` (abridged):
 
-```yaml
-# neuron.config.json (abridged: the generated file is the same structure as JSON)
-name: my-first-system        # Assembly identity — required for build
-version: "1.0.0"             # Assembly semver — required for build
-lang: typescript
-entry: assembly.ts
-runtime:
-  host: localhost
-  port: "auto"
-  execution:
-    mode: wait
-    timeout: 30m
-capabilityRuntimes:
-  localRoots:
-    - ./neuron/capabilityRuntimes
+```json
+{
+  "name": "my-first-system",
+  "version": "1.0.0",
+  "lang": "typescript",
+  "assemblies": [
+    { "name": "my-first-system", "entry": "assembly.ts", "default": true }
+  ],
+  "runtime": {
+    "host": "localhost",
+    "port": "auto",
+    "execution": { "mode": "wait", "timeout": "30m" }
+  },
+  "capabilityRuntimes": {
+    "localRoots": ["./neuron/capabilityRuntimes"]
+  }
+}
 ```
+
+`name` and `version` are the Assembly identity — required for build. They live in `neuron.config.*` and nowhere else. A project declares one or more `assemblies`, each with a `name` and an `entry`; the one marked `"default": true` is what `neuron run` uses with no argument.
 
 > [!IMPORTANT]
 > `name` and `version` are the Assembly identity and are **required for `neuron build`**. They live in `neuron.config.*` and nowhere else: the authored Assembly (TypeScript or YAML) never repeats them, and `neuron build` injects the configured identity into the canonical manifest at the shared build seam. Scaffolded values come from the directory name and `1.0.0`; edit the config to rename or re-version the assembly.
@@ -215,15 +219,16 @@ export default manifest;
 
 Point the project configuration at the entry file (it must default-export the manifest); the config **is** the Assembly identity — the authored entry repeats none of it. Edit the scaffolded file; do not add a second `neuron.config.*` file:
 
-```yaml
-# neuron.config.json (scaffolded file, rendered as YAML for readability)
-name: order-processing   # the Assembly name — config is the single source
-version: "1.0.0"         # the Assembly version — config is the single source
-lang: typescript
-entry: assembly.ts
-runtime:
-  host: localhost
-  port: "auto"
+```json
+{
+  "name": "order-processing",
+  "version": "1.0.0",
+  "lang": "typescript",
+  "assemblies": [
+    { "name": "order-processing", "entry": "assembly.ts", "default": true }
+  ],
+  "runtime": { "host": "localhost", "port": "auto" }
+}
 ```
 
 > [!NOTE]
@@ -293,21 +298,21 @@ catalog/example/echo/1.0.0/
 
 Add a `local` registry to the same project configuration (the file also carries the Assembly identity — `name` / `version` are required for build):
 
-```yaml
-# neuron.config.json (rendered as YAML for readability)
-name: order-processing
-version: "1.0.0"
-lang: typescript
-entry: assembly.ts
-
-runtime:
-  host: localhost
-  port: "auto"
-
-capabilityRuntimes:
-  registries:
-    - name: local
-      url: /absolute/path/to/neuron/examples/capability-runtimes/catalog
+```json
+{
+  "name": "order-processing",
+  "version": "1.0.0",
+  "lang": "typescript",
+  "assemblies": [
+    { "name": "order-processing", "entry": "assembly.ts", "default": true }
+  ],
+  "runtime": { "host": "localhost", "port": "auto" },
+  "capabilityRuntimes": {
+    "registries": [
+      { "name": "local", "url": "/absolute/path/to/neuron/examples/capability-runtimes/catalog" }
+    ]
+  }
+}
 ```
 
 The `local` registry is directory-backed and served offline. Additional registries (such as `github`) are declared the same way and are opted in explicitly — with no `capabilityRuntimes.registries` block, only built-in capability runtimes are available.

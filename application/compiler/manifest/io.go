@@ -24,10 +24,22 @@ func Load(path string) (*Assembly, error) {
 	return m, nil
 }
 
-// LoadFromProjectRoot resolves and loads the canonical
-// .neuron/manifest.json for a project root.
-func LoadFromProjectRoot(projectRoot string) (*Assembly, error) {
-	return Load(ManifestPath(projectRoot))
+// LoadAssembly resolves and loads the canonical manifest artifact for one
+// named Assembly of a project.
+func LoadAssembly(projectRoot, name string) (*Assembly, error) {
+	return Load(AssemblyManifestPath(projectRoot, name))
+}
+
+// SaveAssembly writes the canonical manifest artifact for one named Assembly
+// of a project.
+func SaveAssembly(projectRoot, name string, m *Assembly) error {
+	return Save(AssemblyManifestPath(projectRoot, name), m)
+}
+
+// LoadSDKManifest loads the transient manifest the TypeScript neuron-sdk CLI
+// writes for a project (see SDKManifestPath).
+func LoadSDKManifest(projectRoot string) (*Assembly, error) {
+	return Load(SDKManifestPath(projectRoot))
 }
 
 // Save serializes the manifest to the given path atomically.
@@ -56,9 +68,4 @@ func Save(path string, m *Assembly) error {
 		return fmt.Errorf("commit manifest: %w", err)
 	}
 	return nil
-}
-
-// SaveToProjectRoot writes the canonical manifest for a project root.
-func SaveToProjectRoot(projectRoot string, m *Assembly) error {
-	return Save(ManifestPath(projectRoot), m)
 }

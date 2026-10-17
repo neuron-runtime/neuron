@@ -98,12 +98,21 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 //  3. `nore` on the assembly PATH (globally installed runtime).
 //  4. Development fallback for a local repository checkout.
 func NoreBinaryPath(cfg config.Config) (string, error) {
+	return NoreBinaryPathFromPath(cfg.Daemon.NorePath)
+}
+
+// NoreBinaryPathFromPath resolves the nore binary from an explicit override
+// path and the standard fallbacks, without requiring a loaded project
+// configuration. It is the entry point for commands that deliberately run
+// outside a project, such as direct Capability Runtime invocation, where
+// loading neuron.config.* is not permitted.
+func NoreBinaryPathFromPath(custom string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		// Degrade gracefully: PATH and the checkout fallback remain usable.
 		exe = ""
 	}
-	return resolveNoreBinary(cfg.Daemon.NorePath, exe)
+	return resolveNoreBinary(custom, exe)
 }
 
 func resolveNoreBinary(custom, exe string) (string, error) {

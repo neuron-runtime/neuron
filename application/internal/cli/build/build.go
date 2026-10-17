@@ -1,26 +1,32 @@
 // Package build implements `neuron build`, the single command that takes a
-// project from source to a registered, runnable assembly:
+// project from source to registered, runnable Assemblies:
 //
 //	project source (TypeScript or YAML)
-//	    → languages.Build          → .neuron/manifest.json  (canonical manifest)
+//	    → languages.Build          → .neuron/assemblies/<name>/manifest.json  (per Assembly)
 //	    → catalog.BuildLocal       → installed local capability runtimes (immutable store)
 //	    → compiler.Compile         → core.Assembly
 //	    → resolve + freeze         → locked capability runtime set
+//	    → freeze providers         → locked provider identities (store-only)
 //	    → register                 → N.O.R.E.
-//	    → project.SaveBuildRecord  → .neuron/build.json     (build artifact)
+//	    → project.SaveBuildRecord  → .neuron/builds/<fingerprint>/build.json
 //
-// `neuron run` and future commands read .neuron/build.json to address the
-// registered assembly and to detect staleness against the project's authoring
-// fingerprint. `neuron register` is a deprecated alias of this command.
+// A project may declare several Assemblies. Each is compiled, registered, and
+// persisted independently under its own identity while the project keeps one
+// immutable build record referencing all of them. `neuron run` and future
+// commands read that record to address a registered Assembly and to select the
+// default one. `neuron register` is a deprecated alias of this command.
 package build
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/neuron-runtime/neuron/application/build"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
+	"github.com/neuron-runtime/neuron/application/client"
 	"github.com/neuron-runtime/neuron/application/compiler"
 	"github.com/neuron-runtime/neuron/application/compiler/manifest"
 	"github.com/neuron-runtime/neuron/application/config"
@@ -28,12 +34,15 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/progress"
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
+	"github.com/neuron-runtime/neuron/application/internal/providerctl"
 	"github.com/neuron-runtime/neuron/application/internal/runtimectl"
 	"github.com/neuron-runtime/neuron/application/language"
 	"github.com/neuron-runtime/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/provider"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +52,7 @@ type Options struct {
 	// Verbose toggles project-build verbose output.
 	Verbose bool
 
-	// Force replaces the registered assembly even when one exists.
+	// Force replaces a registered Assembly even when one exists.
 	Force bool
 
 	// Lang overrides the project authoring language. Empty resolves from the
@@ -52,27 +61,34 @@ type Options struct {
 
 	// Root is the honored project root. Empty uses the current directory.
 	Root string
+
+	// Assembly selects one declared Assembly to (re)build. Empty builds every
+	// declared Assembly.
+	Assembly string
 }
 
-// New returns the `neuron build` command. It takes a project from source to a
-// registered, runnable assembly: build the project to its canonical manifest,
-// build and install any local capability runtimes, resolve and freeze the capability runtime set,
-// and register the compiled assembly with N.O.R.E.
+// New returns the `neuron build` command. It takes a project from source to
+// registered, runnable Assemblies: build each declared Assembly to its
+// canonical manifest, build and install any local capability runtimes, resolve
+// and freeze each Assembly's capability runtime set, and register it with
+// N.O.R.E. The outcome is persisted in an immutable build record under
+// .neuron/builds, which `neuron run` uses to address a registered Assembly.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Build,
-		Short: "Build the project and register it with N.O.R.E.",
-		Long: "Build the project for the given authoring language, compile the resulting " +
-			".neuron/manifest.json to a core.Assembly, build and install any local capability runtimes, " +
-			"resolve and freeze the exact capability runtime set, and register the compiled assembly with " +
-			"N.O.R.E. The outcome is persisted in .neuron/build.json, which `neuron run` uses " +
-			"to detect staleness and address the registered assembly.",
+		Short: "Build the project and register its Assemblies with N.O.R.E.",
+		Long: "Build every declared Assembly for the given authoring language, compile each " +
+			"manifest to a core.Assembly, build and install any local capability runtimes, " +
+			"resolve and freeze each Assembly's exact capability runtime set, and register the " +
+			"compiled Assemblies with N.O.R.E. The outcome is persisted in .neuron/builds, which " +
+			"`neuron run` uses to address a registered Assembly.",
 		RunE: Handler,
 	}
 
 	f := cmd.Flags()
 	f.StringP("lang", "l", "", "project authoring language (yaml, yml, typescript, ts)")
 	f.StringP("root", "r", "", "project root (defaults to the current directory)")
+	f.StringP("assembly", "a", "", "build only the named Assembly (default: all declared Assemblies)")
 
 	return cmd
 }
@@ -84,12 +100,14 @@ func Handler(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	langFlag, _ := cmd.Flags().GetString("lang")
 	rootFlag, _ := cmd.Flags().GetString("root")
+	assemblyFlag, _ := cmd.Flags().GetString("assembly")
 
 	return ExecuteWith(cmd, Options{
-		Verbose: verbose,
-		Force:   force,
-		Lang:    langFlag,
-		Root:    rootFlag,
+		Verbose:  verbose,
+		Force:    force,
+		Lang:     langFlag,
+		Root:     rootFlag,
+		Assembly: assemblyFlag,
 	})
 }
 
@@ -115,40 +133,35 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 	}
 
 	// Progress output lives on stderr so stdout stays reserved for the
-	// registration record printed at the end.
+	// registration records printed at the end.
 	rep := progress.New(cmd.ErrOrStderr())
 	defer rep.Stop()
 
-	// Build the project into the canonical .neuron/manifest.json for the
-	// resolved language. Configuration is the single source of truth for the
-	// Assembly identity (name/version), the entry file, and project
-	// variables.
-	if err := build.Build(ctx, lang, build.Options{
-		Root:      root,
-		Entry:     cfg.Entry,
-		Name:      cfg.Name,
-		Version:   cfg.Version,
-		Variables: cfg.Variables,
-		Verbose:   opts.Verbose,
-		Out:       cmd.ErrOrStderr(),
-	}); err != nil {
-		return fmt.Errorf("build project: %w", err)
+	declarations := cfg.EffectiveAssemblies()
+	if len(declarations) == 0 {
+		return fmt.Errorf("project declares no Assemblies: add an `assemblies` list to neuron.config.*")
 	}
 
-	// Snapshot the authoring inputs consumed by this build. The fingerprint is
-	// what `neuron run` compares against to decide whether the project changed
-	// since it was last built.
-	inputs, err := utils.AuthoringInputs(root, cfg)
-	if err != nil {
-		return err
-	}
-	fingerprint, err := project.ComputeFingerprint(inputs)
-	if err != nil {
-		return fmt.Errorf("fingerprint project inputs: %w", err)
+	// Resolve and validate every declared entry path before building anything,
+	// so an invalid path is reported up front rather than after partial work.
+	entries := make([]string, len(declarations))
+	for i, decl := range declarations {
+		entry, err := resolveAssemblyEntry(root, lang, decl.Entry)
+		if err != nil {
+			return fmt.Errorf("assembly %q: %w", decl.Name, err)
+		}
+		entries[i] = entry
 	}
 
-	// Build and install any local capability runtimes declared by the project before
-	// resolution, so resolveFrozenCapabilityRuntimes operates on current artifacts.
+	if opts.Assembly != "" {
+		if _, ok := findDeclaration(declarations, opts.Assembly); !ok {
+			return fmt.Errorf("no Assembly named %q is declared by the project", opts.Assembly)
+		}
+	}
+
+	// Build and install any local capability runtimes declared by the project
+	// before resolution, so resolveFrozenCapabilityRuntimes operates on current
+	// artifacts. Local capability runtimes are shared across Assemblies.
 	maxWorkers := cfg.Dev.MaxWorkers
 	if maxWorkers < 1 {
 		maxWorkers = 1
@@ -157,14 +170,147 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 		return err
 	}
 
-	// Compile the canonical manifest, resolve and freeze the capability runtime set, and
-	// register the Assembly with N.O.R.E.
-	result, resolved, err := register(ctx, cfg, root, opts.Verbose, opts.Force, rep)
+	// Carry forward unrelated Assemblies when a single Assembly is selected.
+	var previous *project.BuildRecord
+	if fp, err := project.LoadCurrentPointer(root); err == nil {
+		var rec project.BuildRecord
+		if err := project.LoadBuildRecord(root, fp, &rec); err == nil {
+			previous = &rec
+		}
+	}
+
+	// One runtime client serves every registration in this build.
+	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	builds := make([]project.AssemblyBuild, 0, len(declarations))
+	for i, decl := range declarations {
+		entry := entries[i]
+
+		inputs, err := utils.AuthoringInputs(root, cfg, entry)
+		if err != nil {
+			return err
+		}
+		fingerprint, err := project.ComputeFingerprint(inputs)
+		if err != nil {
+			return fmt.Errorf("fingerprint assembly %q: %w", decl.Name, err)
+		}
+
+		selected := opts.Assembly == "" || opts.Assembly == decl.Name
+		if !selected {
+			// A selective build never rebuilds an unrelated Assembly; it
+			// carries the previously built entry forward unchanged. With no
+			// prior build to reuse it falls through and builds it, so the
+			// record stays complete even though it was not explicitly selected.
+			if prev, ok := carryForward(previous, decl.Name); ok {
+				builds = append(builds, prev)
+				continue
+			}
+		}
+
+		m, err := build.BuildAssembly(ctx, lang, build.Options{
+			Root:      root,
+			Entry:     entry,
+			Name:      decl.Name,
+			Version:   cfg.Version,
+			Variables: cfg.Variables,
+			Verbose:   opts.Verbose,
+			Out:       cmd.ErrOrStderr(),
+		})
+		if err != nil {
+			return fmt.Errorf("build assembly %q: %w", decl.Name, err)
+		}
+
+		if err := manifest.SaveAssembly(root, decl.Name, m); err != nil {
+			return fmt.Errorf("persist assembly %q manifest: %w", decl.Name, err)
+		}
+
+		result, resolved, providers, err := register(ctx, c, cfg, m, opts.Force)
+		if err != nil {
+			return fmt.Errorf("register assembly %q: %w", decl.Name, err)
+		}
+
+		builds = append(builds, project.AssemblyBuild{
+			Name:               decl.Name,
+			ManifestPath:       relativeManifestPath(decl.Name),
+			Fingerprint:        fingerprint,
+			Key:                result.Key,
+			CapabilityRuntimes: resolved,
+			Providers:          providers,
+		})
+	}
+
+	projectFingerprint, err := projectFingerprint(root, cfg, entries)
 	if err != nil {
 		return err
 	}
 
-	return saveBuildRecord(root, fingerprint, result.Key, resolved)
+	return saveBuildRecord(root, projectFingerprint, builds)
+}
+
+// resolveAssemblyEntry resolves an Assembly entry to an absolute path and
+// verifies it exists. An empty entry resolves to the language default.
+func resolveAssemblyEntry(root string, lang language.Language, entry string) (string, error) {
+	if entry == "" {
+		entry = lang.DefaultEntry()
+	}
+	if !filepath.IsAbs(entry) {
+		entry = filepath.Join(root, entry)
+	}
+	entry = filepath.Clean(entry)
+	if _, err := os.Stat(entry); err != nil {
+		return "", fmt.Errorf("entry %s: %w", entry, err)
+	}
+	return entry, nil
+}
+
+// carryForward returns the previously built entry for an Assembly that a
+// selective build did not rebuild, so its manifest, frozen capability runtime
+// set, and identity are preserved byte-for-byte. ok is false when there is no
+// prior build to reuse, in which case the Assembly must be built so the new
+// project build record remains complete.
+func carryForward(previous *project.BuildRecord, name string) (project.AssemblyBuild, bool) {
+	if previous == nil {
+		return project.AssemblyBuild{}, false
+	}
+	return previous.FindAssembly(name)
+}
+
+// findDeclaration returns the declaration with the given name.
+func findDeclaration(declarations []config.AssemblyDeclaration, name string) (config.AssemblyDeclaration, bool) {
+	for _, d := range declarations {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return config.AssemblyDeclaration{}, false
+}
+
+// relativeManifestPath returns the project-relative manifest path recorded in a
+// build entry.
+func relativeManifestPath(name string) string {
+	return filepath.ToSlash(filepath.Join(manifest.ManifestDir, manifest.AssembliesDir, name, manifest.ManifestFile))
+}
+
+// projectFingerprint hashes the whole project's authoring inputs: the config,
+// every Assembly entry, and the shared project sources.
+func projectFingerprint(root string, cfg config.Config, entries []string) (string, error) {
+	if len(entries) == 0 {
+		return "", fmt.Errorf("no Assembly entries to fingerprint")
+	}
+	inputs, err := utils.AuthoringInputs(root, cfg, entries[0])
+	if err != nil {
+		return "", err
+	}
+	inputs.Sources = append(inputs.Sources, entries[1:]...)
+	fingerprint, err := project.ComputeFingerprint(inputs)
+	if err != nil {
+		return "", fmt.Errorf("fingerprint project inputs: %w", err)
+	}
+	return fingerprint, nil
 }
 
 // buildLocalCapabilityRuntimes materializes every local capability runtime under the project's
@@ -196,16 +342,15 @@ func buildLocalCapabilityRuntimes(ctx context.Context, cfg config.Config, root s
 	return nil
 }
 
-// saveBuildRecord persists the build outcome together with the authoring
+// saveBuildRecord persists the build outcome together with the project
 // fingerprint that produced it. The record is written immutably to
 // .neuron/builds/<fingerprint>/build.json and the current pointer is updated
 // atomically to point to the new build.
-func saveBuildRecord(root, fingerprint string, key protocol.InstanceKey, capabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime) error {
+func saveBuildRecord(root, fingerprint string, assemblies []project.AssemblyBuild) error {
 	record := project.BuildRecord{
-		Fingerprint:        fingerprint,
-		Key:                key,
-		BuiltAt:            time.Now().UTC(),
-		CapabilityRuntimes: capabilityRuntimes,
+		Fingerprint: fingerprint,
+		BuiltAt:     time.Now().UTC(),
+		Assemblies:  assemblies,
 	}
 	if err := project.SaveBuildRecord(root, fingerprint, record); err != nil {
 		return fmt.Errorf("save build record: %w", err)
@@ -219,34 +364,24 @@ func saveBuildRecord(root, fingerprint string, key protocol.InstanceKey, capabil
 	return nil
 }
 
-// register performs the compile + register flow against the manifest already
-// produced at root. It returns the registration response and the frozen
-// capability runtime set used to serve executions.
-func register(ctx context.Context, cfg config.Config, root string, verbose bool, force bool, rep capabilityruntime.Observer) (*protocol.RegisterResponse, []capabilityrt.ResolvedCapabilityRuntime, error) {
-	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
-	if err != nil {
-		return nil, nil, err
-	}
-	defer cleanup()
-
-	// Load the canonical manifest produced by the build step.
-	m, err := manifest.LoadFromProjectRoot(root)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load manifest (a `%s` build must write .neuron/manifest.json): %w", command.Build, err)
-	}
-
+// register compiles one Assembly manifest, resolves and freezes its capability
+// runtime set and provider identities, and registers it with N.O.R.E. through
+// the shared client. It returns the registration response, the frozen
+// capability runtime set, and the frozen provider set used to serve
+// executions.
+func register(ctx context.Context, c *client.Client, cfg config.Config, m *manifest.Assembly, force bool) (*protocol.RegisterResponse, []capabilityrt.ResolvedCapabilityRuntime, []providertypes.ResolvedProvider, error) {
 	// Compile the manifest into the runtime core.Assembly representation.
 	comp := compiler.New()
 	sys, err := comp.Compile(m)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compile manifest: %w", err)
+		return nil, nil, nil, fmt.Errorf("compile manifest: %w", err)
 	}
 
 	// Compute the instance key from the manifest + compiled assembly. The execution
 	// environment comes from the effective config, not the manifest.
 	key, err := comp.InstanceKey(m, cfg.Runtime.Execution.Mode)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compute instance key: %w", err)
+		return nil, nil, nil, fmt.Errorf("compute instance key: %w", err)
 	}
 
 	configs := buildExecutionConfigurations(cfg, m)
@@ -254,11 +389,20 @@ func register(ctx context.Context, cfg config.Config, root string, verbose bool,
 	// Resolve the capability runtime requirements declared by capabilities and freeze the
 	// exact dependency set into the register payload, so N.O.R.E. can launch
 	// Instances without resolving or installing anything itself.
-	resolved, err := resolveFrozenCapabilityRuntimes(ctx, cfg, configs.CapabilityRuntimeRequirements, rep)
+	resolved, err := resolveFrozenCapabilityRuntimes(ctx, cfg, configs.CapabilityRuntimeRequirements, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	configs.ResolvedCapabilityRuntimes = resolved
+
+	// Freeze the provider identities hosting the frozen capability runtimes'
+	// runtime kinds. This is strictly store-only: a normal build never
+	// downloads, installs, or silently updates a provider.
+	providers, err := freezeProviders(ctx, cfg, resolved)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	configs.ResolvedProviders = providers
 
 	request := protocol.RegisterRequest{
 		Key:                     key,
@@ -269,12 +413,12 @@ func register(ctx context.Context, cfg config.Config, root string, verbose bool,
 
 	result, err := c.Register(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	printRegistration(result)
 
-	return &result, resolved, nil
+	return &result, resolved, providers, nil
 }
 
 // printRegistration writes the registration record (assembly, version, frozen
@@ -372,4 +516,37 @@ func resolveFrozenCapabilityRuntimes(ctx context.Context, cfg config.Config, req
 		frozen = append(frozen, *installed.Frozen(requested[installed.Type]))
 	}
 	return frozen, nil
+}
+
+// freezeProviders maps the frozen capability runtime set's runtime kinds to
+// their installed provider identities and freezes them for the register
+// payload and the build record.
+//
+// Freezing is strictly store-only: providers are resolved against the
+// installed host store and never downloaded, installed, or silently updated
+// during a normal build. A kind with no installed host fails with an
+// actionable error naming the development bootstrap and install commands.
+// Assemblies that use only in-process built-in capability runtimes freeze no
+// providers at all.
+func freezeProviders(ctx context.Context, cfg config.Config, resolved []capabilityrt.ResolvedCapabilityRuntime) ([]providertypes.ResolvedProvider, error) {
+	kinds := make([]string, 0, len(resolved))
+	for _, cr := range resolved {
+		kinds = append(kinds, cr.Runtime.Type)
+	}
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+
+	catalog, err := providerctl.BuildCatalog(providerctl.CatalogConfig{
+		ProvidersConfig: cfg.Providers,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build provider catalog: %w", err)
+	}
+
+	providers, err := provider.FreezeForKinds(ctx, catalog.Store, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("freeze providers: %w", err)
+	}
+	return providers, nil
 }

@@ -42,6 +42,14 @@ func Defaults() Config {
 			DefaultRegistries: []string{"local"},
 		},
 
+		// Like capability runtimes, no provider registries are compiled in;
+		// the default registry list is the fallback for requirements that
+		// name none.
+		Providers: ProvidersConfig{
+			StoreDir:          DefaultProviderStoreDir(),
+			DefaultRegistries: []string{"local"},
+		},
+
 		Inspector: InspectorConfig{
 			Enabled: true,
 			Address: "127.0.0.1:7433",

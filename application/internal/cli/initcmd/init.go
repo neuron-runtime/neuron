@@ -123,7 +123,7 @@ func writeJSON(path string, data any) error {
 // languages. It declares the project identity (name/version), which is the
 // single source of the Assembly identity for YAML projects and the
 // authoritative value the TypeScript scaffold's authored metadata must match,
-// plus the authoring language, the Assembly entry file, the loopback runtime
+// plus the authoring language, the single declared Assembly, the loopback runtime
 // endpoint, and the canonical local capability runtime root. Everything the
 // runtime needs beyond that has sane defaults inside N.O.R.E. The keys are
 // exactly the strict project configuration schema: unknown keys are rejected
@@ -133,7 +133,16 @@ func configTemplate(name, lang, entry string) map[string]any {
 		"name":    name,
 		"version": scaffoldAssemblyVersion,
 		"lang":    lang,
-		"entry":   entry,
+		// A project declares one or more named Assemblies. The scaffold
+		// declares one, named after the project (so its registered identity is
+		// the project name) and marked as the default for `neuron run`.
+		"assemblies": []map[string]any{
+			{
+				"name":    name,
+				"entry":   entry,
+				"default": true,
+			},
+		},
 		"runtime": map[string]any{
 			"host": "localhost",
 			"port": "auto",

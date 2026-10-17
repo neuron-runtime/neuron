@@ -40,6 +40,10 @@ var (
 			path:   "capabilityRuntimes.storeDir",
 			reason: "is managed by Neuron and cannot be configured here",
 		},
+		{
+			path:   "providers.storeDir",
+			reason: "is managed by Neuron and cannot be configured here",
+		},
 	}
 
 	deniedInProjectFile = []deniedKey{
@@ -57,6 +61,14 @@ var (
 		{
 			path:   "version",
 			reason: "assembly identity is project configuration; set it in neuron.config.*",
+		},
+		{
+			path:   "entry",
+			reason: "assembly declarations are project configuration; set them in neuron.config.*",
+		},
+		{
+			path:   "assemblies",
+			reason: "assembly declarations are project configuration; set them in neuron.config.*",
 		},
 	}
 )
@@ -167,15 +179,45 @@ func checkUnknownKeys(node map[string]any, t reflect.Type, prefix string) error 
 		for ft.Kind() == reflect.Ptr {
 			ft = ft.Elem()
 		}
-		if ft.Kind() != reflect.Struct {
+
+		// Struct-typed nodes are configuration keys and are validated
+		// recursively.
+		if ft.Kind() == reflect.Struct {
+			sub, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := checkUnknownKeys(sub, ft, path); err != nil {
+				return err
+			}
 			continue
 		}
-		sub, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		if err := checkUnknownKeys(sub, ft, path); err != nil {
-			return err
+
+		// A slice of structs (for example `assemblies`) is a list of
+		// configuration records, not a free-form value container, so each
+		// element is validated against the element type. Slices of scalars and
+		// maps stay free-form.
+		if ft.Kind() == reflect.Slice {
+			elem := ft.Elem()
+			for elem.Kind() == reflect.Ptr {
+				elem = elem.Elem()
+			}
+			if elem.Kind() != reflect.Struct {
+				continue
+			}
+			items, ok := value.([]any)
+			if !ok {
+				continue
+			}
+			for i, item := range items {
+				sub, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if err := checkUnknownKeys(sub, elem, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil

@@ -88,7 +88,7 @@ func TestYAMLBuilderBuildProducesManifest(t *testing.T) {
 }
 
 // TestYAMLBuilderDoesNotApplyVariables pins that the builder returns the
-// authored manifest without touching project variables: application/build.Build
+// authored manifest without touching project variables: build.BuildAssembly
 // writes them at the shared seam, and a builder that applied them itself would
 // let the YAML frontend diverge from the TypeScript frontend.
 func TestYAMLBuilderDoesNotApplyVariables(t *testing.T) {

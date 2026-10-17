@@ -135,6 +135,10 @@ func Load(opts Options) (Config, error) {
 
 	resolvePaths(&cfg, cfg.ProjectDir)
 
+	if err := validateAssemblyDeclarations(&cfg); err != nil {
+		return Config{}, fmt.Errorf("invalid assemblies: %w", err)
+	}
+
 	return cfg, nil
 }
 
@@ -209,6 +213,25 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	if len(cfg.CapabilityRuntimes.LocalRoots) > 0 {
 		v.SetDefault("capabilityRuntimes.localRoots", cfg.CapabilityRuntimes.LocalRoots)
 	}
+
+	if len(cfg.Providers.Registries) > 0 {
+		items := make([]map[string]any, 0, len(cfg.Providers.Registries))
+		for _, reg := range cfg.Providers.Registries {
+			items = append(items, map[string]any{
+				"name": reg.Name,
+				"url":  reg.URL,
+			})
+		}
+		v.SetDefault("providers.registries", items)
+	}
+
+	v.SetDefault("providers.storeDir", cfg.Providers.StoreDir)
+	if len(cfg.Providers.DefaultRegistries) > 0 {
+		v.SetDefault("providers.defaultRegistries", cfg.Providers.DefaultRegistries)
+	}
+	if len(cfg.Providers.LocalRoots) > 0 {
+		v.SetDefault("providers.localRoots", cfg.Providers.LocalRoots)
+	}
 	v.SetDefault("dev.maxWorkers", cfg.Dev.MaxWorkers)
 	v.SetDefault("entry", cfg.Entry)
 	v.SetDefault("variables", cfg.Variables)
@@ -221,7 +244,13 @@ func resolvePaths(cfg *Config, projectDir string) {
 	cfg.Daemon.Socket = Expand(cfg.Daemon.Socket, projectDir)
 	cfg.Daemon.PIDFile = Expand(cfg.Daemon.PIDFile, projectDir)
 	cfg.CapabilityRuntimes.StoreDir = Expand(cfg.CapabilityRuntimes.StoreDir, projectDir)
+	cfg.Providers.StoreDir = Expand(cfg.Providers.StoreDir, projectDir)
 	cfg.Entry = Expand(cfg.Entry, projectDir)
+	for i := range cfg.Assemblies {
+		if cfg.Assemblies[i].Entry != "" {
+			cfg.Assemblies[i].Entry = Expand(cfg.Assemblies[i].Entry, projectDir)
+		}
+	}
 
 	if cfg.Daemon.NorePath != "" {
 		cfg.Daemon.NorePath = Expand(cfg.Daemon.NorePath, projectDir)
@@ -229,6 +258,10 @@ func resolvePaths(cfg *Config, projectDir string) {
 
 	for i := range cfg.CapabilityRuntimes.LocalRoots {
 		cfg.CapabilityRuntimes.LocalRoots[i] = Expand(cfg.CapabilityRuntimes.LocalRoots[i], projectDir)
+	}
+
+	for i := range cfg.Providers.LocalRoots {
+		cfg.Providers.LocalRoots[i] = Expand(cfg.Providers.LocalRoots[i], projectDir)
 	}
 
 	for i := range cfg.CapabilityRuntimes.Registries {

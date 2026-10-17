@@ -76,10 +76,12 @@ func (b Builder) Build(ctx context.Context, opts builder.Options) (*manifest.Ass
 
 	// The SDK writes camelCase binding keys inherited from JS objects; the
 	// build package canonicalizes them after this return so every language
-	// produces the same snake_case shape on disk.
-	sys, err := manifest.LoadFromProjectRoot(root)
+	// produces the same snake_case shape on disk. The SDK writes to its fixed
+	// transient path (SDKManifestPath); the build persists the canonical
+	// result under the per-Assembly artifact path.
+	sys, err := manifest.LoadSDKManifest(root)
 	if err != nil {
-		return nil, fmt.Errorf("load manifest: %w", err)
+		return nil, fmt.Errorf("load SDK manifest: %w", err)
 	}
 
 	if opts.Verbose {

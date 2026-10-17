@@ -15,33 +15,83 @@ import (
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 const (
-	neuronDirectory    = ".neuron"
-	buildRecordFile    = "build.json"
-	buildsDirectory    = "builds"
-	currentPointerFile = "current.json"
+	neuronDirectory     = ".neuron"
+	buildRecordFile     = "build.json"
+	buildsDirectory     = "builds"
+	assembliesDirectory = "assemblies"
+	manifestFile        = "manifest.json"
+	currentPointerFile  = "current.json"
 )
 
 // BuildRecord is the persisted outcome of a successful `neuron build`.
 // It is stored immutably under .neuron/builds/<fingerprint>/build.json.
 // `neuron run` reads the current build via .neuron/current.json which points
 // to the fingerprint of the active build.
+//
+// One project build holds the complete set of its Assemblies. Each Assembly
+// carries its own build identity (its per-Assembly fingerprint, registered key,
+// and frozen capability runtime set) so a change to one Assembly does not
+// rewrite the identity of the others.
 type BuildRecord struct {
-	// Fingerprint is the content hash of the authoring inputs at build time
-	// (config file, Assembly entry, project sources, local capability runtime roots).
+	// Fingerprint is the content hash of the project's authoring inputs at
+	// build time (config file, every Assembly entry, project sources, local
+	// capability runtime roots).
+	Fingerprint string `json:"fingerprint"`
+
+	// BuiltAt is when the build completed.
+	BuiltAt time.Time `json:"builtAt"`
+
+	// Assemblies is the set of Assemblies produced by this build.
+	Assemblies []AssemblyBuild `json:"assemblies"`
+
+	// LegacyKey and LegacyCapabilityRuntimes are read-only compatibility fields
+	// for build records written before a project could hold multiple
+	// Assemblies. A record carrying them is migrated to a single AssemblyBuild
+	// by LoadBuildRecord. They exist only to read an already-persisted record;
+	// they are never written (nil is omitted). Removal condition: once 0.1.x
+	// migration is complete and no pre-multi-Assembly build records remain.
+	LegacyKey                *protocol.InstanceKey                    `json:"key,omitempty"`
+	LegacyCapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes,omitempty"`
+}
+
+// AssemblyBuild is the build outcome of one named Assembly of a project.
+type AssemblyBuild struct {
+	// Name is the Assembly identity, unique within the project.
+	Name string `json:"name"`
+
+	// ManifestPath is the project-relative path of the Assembly's canonical
+	// manifest artifact (.neuron/assemblies/<name>/manifest.json).
+	ManifestPath string `json:"manifestPath"`
+
+	// Fingerprint is the content hash of this Assembly's authoring inputs
+	// (the project config, its own entry, and the shared project sources).
 	Fingerprint string `json:"fingerprint"`
 
 	// Key is the registered assembly key N.O.R.E. assigned.
 	Key protocol.InstanceKey `json:"key"`
 
-	// BuiltAt is when the build completed.
-	BuiltAt time.Time `json:"builtAt"`
+	// CapabilityRuntimes is the frozen capability runtime set resolved and
+	// installed for this Assembly's requirements. Empty when built-in only.
+	CapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes,omitempty"`
 
-	// CapabilityRuntimes is the frozen capability runtime set resolved and installed for the
-	// Assembly's capability runtime requirements. Empty when the Assembly is built-in only.
-	CapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes"`
+	// Providers is the frozen provider identity set resolved from the
+	// installed store for this Assembly's capability runtime kinds. Empty
+	// when only in-process built-in capability runtimes are used.
+	Providers []providertypes.ResolvedProvider `json:"providers,omitempty"`
+}
+
+// FindAssembly returns the build entry for a named Assembly.
+func (r BuildRecord) FindAssembly(name string) (AssemblyBuild, bool) {
+	for _, a := range r.Assemblies {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return AssemblyBuild{}, false
 }
 
 // CurrentPointer points to the currently active build fingerprint.
@@ -99,7 +149,28 @@ func LoadBuildRecord(projectRoot, fingerprint string, out *BuildRecord) error {
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("decode build record: %w", err)
 	}
+	out.migrateLegacy()
 	return nil
+}
+
+// migrateLegacy upgrades a pre-multi-Assembly build record in place. Such a
+// record stored a single assembly key and frozen capability runtime set and no
+// `assemblies` list; it is presented as one AssemblyBuild named by the recorded
+// key, so consumers do not need a second code path for old records. The legacy
+// fields are cleared so a subsequent save writes only the current shape.
+func (r *BuildRecord) migrateLegacy() {
+	if len(r.Assemblies) > 0 || r.LegacyKey == nil {
+		return
+	}
+	name := r.LegacyKey.AssemblyID
+	r.Assemblies = []AssemblyBuild{{
+		Name:               name,
+		ManifestPath:       filepath.ToSlash(filepath.Join(neuronDirectory, assembliesDirectory, name, manifestFile)),
+		Key:                *r.LegacyKey,
+		CapabilityRuntimes: r.LegacyCapabilityRuntimes,
+	}}
+	r.LegacyKey = nil
+	r.LegacyCapabilityRuntimes = nil
 }
 
 // SaveCurrentPointer atomically updates the current build pointer.

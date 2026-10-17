@@ -96,11 +96,11 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
-	// The backends keep process-global state -- the process backend's worker pools
-	// and the WASM backend's sandbox runtime -- that outlives any single test, so
-	// the whole set is released once when the process is done with them.
+	// The providers keep process-global state -- the process provider's worker
+	// pools and the WASM provider's sandbox runtime -- that outlives any single
+	// test, so the whole set is released once when the process is done with them.
 	if reg, regerr := sharedRuntimes(); regerr == nil {
-		_ = reg.CloseBackends(context.Background())
+		_ = reg.Close(context.Background())
 	}
 	os.Exit(code)
 }
@@ -210,7 +210,7 @@ func TestNewAdapterRejectsUnknownRuntime(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported runtime kind")
 	}
-	if !strings.Contains(err.Error(), "no runtime backend registered") {
+	if !strings.Contains(err.Error(), "no provider registered") {
 		t.Errorf("error = %q, want unsupported runtime kind", err)
 	}
 }

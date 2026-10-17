@@ -2,26 +2,23 @@ package capabilityruntime
 
 import (
 	"fmt"
-	"sort"
-	"sync"
+
+	"github.com/neuron-runtime/neuron/application/internal/sourceregistry"
 )
 
-// Registry is the catalog of registry providers configured for resolution. It
-// is not the installed capability runtime catalog (that is the store); it only answers
-// "which providers can I ask for packages".
+// Registry is the catalog of registry sources configured for resolution. It
+// is not the installed capability runtime catalog (that is the store); it only
+// answers "which sources can I ask for packages".
 type Registry struct {
-	mu      sync.RWMutex
-	sources map[string]Provider
+	sources *sourceregistry.Registry[Source]
 }
 
 func NewRegistry() *Registry {
-	return &Registry{
-		sources: make(map[string]Provider),
-	}
+	return &Registry{sources: sourceregistry.New[Source]()}
 }
 
-// NewRegistryFrom builds a catalog from an initial set of providers.
-func NewRegistryFrom(registries ...Provider) (*Registry, error) {
+// NewRegistryFrom builds a catalog from an initial set of sources.
+func NewRegistryFrom(registries ...Source) (*Registry, error) {
 	r := NewRegistry()
 	for _, reg := range registries {
 		if reg == nil {
@@ -34,42 +31,18 @@ func NewRegistryFrom(registries ...Provider) (*Registry, error) {
 	return r, nil
 }
 
-func (r *Registry) Add(registry Provider) error {
+func (r *Registry) Add(registry Source) error {
 	if registry == nil {
 		return fmt.Errorf("registry is nil")
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	name := registry.Name()
-
-	if _, exists := r.sources[name]; exists {
-		return fmt.Errorf("capability runtime registry %q already registered", name)
-	}
-
-	r.sources[name] = registry
-
-	return nil
+	return r.sources.Add(registry.Name(), registry)
 }
 
-func (r *Registry) Get(name string) (Provider, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	registry, ok := r.sources[name]
-	return registry, ok
+func (r *Registry) Get(name string) (Source, bool) {
+	return r.sources.Get(name)
 }
 
 // Names returns the configured registry names in sorted order.
 func (r *Registry) Names() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	names := make([]string, 0, len(r.sources))
-	for name := range r.sources {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return r.sources.Names()
 }

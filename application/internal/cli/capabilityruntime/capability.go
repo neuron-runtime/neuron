@@ -3,23 +3,21 @@ package capabilityruntime
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/config"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/progress"
+	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/neuron-runtime/neuron/application/internal/runtimectl"
 	"github.com/neuron-runtime/neuron/application/project"
 	"github.com/spf13/cobra"
 )
 
 // splitRef parses "name@version" into (name, version). Version is optional.
-func splitRef(ref string) (typ, version string, err error) {
-	typ, version, _ = strings.Cut(strings.TrimSpace(ref), "@")
-	typ = strings.TrimSpace(typ)
-	version = strings.TrimSpace(version)
-	if typ == "" {
+func splitRef(s string) (typ, version string, err error) {
+	typ, version, ok := ref.Parse(s)
+	if !ok {
 		return "", "", fmt.Errorf("capability runtime name is required (e.g. %s)", command.Add)
 	}
 	return typ, version, nil
