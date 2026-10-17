@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -56,6 +57,56 @@ func TestBuildRecordRoundTrip(t *testing.T) {
 	}
 	if !got.BuiltAt.Equal(rec.BuiltAt) {
 		t.Errorf("builtAt = %v, want %v", got.BuiltAt, rec.BuiltAt)
+	}
+}
+
+// A frozen provider identity must survive the build record round trip so a
+// later run addresses the exact provider artifact the build selected, by
+// version and digest, without any host-specific path.
+func TestBuildRecordRoundTripsFrozenProviders(t *testing.T) {
+	root := t.TempDir()
+	fingerprint := "prov123"
+	rec := BuildRecord{
+		Fingerprint: fingerprint,
+		Assemblies: []AssemblyBuild{{
+			Name: "demo",
+			Key: protocol.InstanceKey{
+				AssemblyID: "demo",
+				Version:    "1.0.0",
+				Hash:       "h1",
+				Env:        "default",
+			},
+			Providers: []providertypes.ResolvedProvider{{
+				Name:            "process",
+				ResolvedVersion: "0.1.0",
+				ProtocolVersion: providertypes.ProtocolVersion,
+				Registry:        "bootstrap",
+				Digest:          "sha256:abc",
+				RuntimeKinds:    []string{"process"},
+			}},
+		}},
+		BuiltAt: time.Now().UTC(),
+	}
+
+	if err := SaveBuildRecord(root, fingerprint, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	var got BuildRecord
+	if err := LoadBuildRecord(root, fingerprint, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assemblies) != 1 {
+		t.Fatalf("got %d assemblies, want 1", len(got.Assemblies))
+	}
+	providers := got.Assemblies[0].Providers
+	if len(providers) != 1 {
+		t.Fatalf("frozen providers = %+v, want one entry", providers)
+	}
+	p := providers[0]
+	if p.Name != "process" || p.ResolvedVersion != "0.1.0" || p.Digest != "sha256:abc" ||
+		p.ProtocolVersion != providertypes.ProtocolVersion || p.Registry != "bootstrap" {
+		t.Fatalf("frozen provider did not survive the round trip: %+v", p)
 	}
 }
 

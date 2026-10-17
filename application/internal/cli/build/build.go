@@ -6,6 +6,7 @@
 //	    → catalog.BuildLocal       → installed local capability runtimes (immutable store)
 //	    → compiler.Compile         → core.Assembly
 //	    → resolve + freeze         → locked capability runtime set
+//	    → freeze providers         → locked provider identities (store-only)
 //	    → register                 → N.O.R.E.
 //	    → project.SaveBuildRecord  → .neuron/builds/<fingerprint>/build.json
 //
@@ -33,12 +34,15 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/progress"
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
+	"github.com/neuron-runtime/neuron/application/internal/providerctl"
 	"github.com/neuron-runtime/neuron/application/internal/runtimectl"
 	"github.com/neuron-runtime/neuron/application/language"
 	"github.com/neuron-runtime/neuron/application/project"
+	"github.com/neuron-runtime/neuron/application/provider"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -224,7 +228,7 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 			return fmt.Errorf("persist assembly %q manifest: %w", decl.Name, err)
 		}
 
-		result, resolved, err := register(ctx, c, cfg, m, opts.Force)
+		result, resolved, providers, err := register(ctx, c, cfg, m, opts.Force)
 		if err != nil {
 			return fmt.Errorf("register assembly %q: %w", decl.Name, err)
 		}
@@ -235,6 +239,7 @@ func ExecuteWith(cmd *cobra.Command, opts Options) error {
 			Fingerprint:        fingerprint,
 			Key:                result.Key,
 			CapabilityRuntimes: resolved,
+			Providers:          providers,
 		})
 	}
 
@@ -360,22 +365,23 @@ func saveBuildRecord(root, fingerprint string, assemblies []project.AssemblyBuil
 }
 
 // register compiles one Assembly manifest, resolves and freezes its capability
-// runtime set, and registers it with N.O.R.E. through the shared client. It
-// returns the registration response and the frozen capability runtime set used
-// to serve executions.
-func register(ctx context.Context, c *client.Client, cfg config.Config, m *manifest.Assembly, force bool) (*protocol.RegisterResponse, []capabilityrt.ResolvedCapabilityRuntime, error) {
+// runtime set and provider identities, and registers it with N.O.R.E. through
+// the shared client. It returns the registration response, the frozen
+// capability runtime set, and the frozen provider set used to serve
+// executions.
+func register(ctx context.Context, c *client.Client, cfg config.Config, m *manifest.Assembly, force bool) (*protocol.RegisterResponse, []capabilityrt.ResolvedCapabilityRuntime, []providertypes.ResolvedProvider, error) {
 	// Compile the manifest into the runtime core.Assembly representation.
 	comp := compiler.New()
 	sys, err := comp.Compile(m)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compile manifest: %w", err)
+		return nil, nil, nil, fmt.Errorf("compile manifest: %w", err)
 	}
 
 	// Compute the instance key from the manifest + compiled assembly. The execution
 	// environment comes from the effective config, not the manifest.
 	key, err := comp.InstanceKey(m, cfg.Runtime.Execution.Mode)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compute instance key: %w", err)
+		return nil, nil, nil, fmt.Errorf("compute instance key: %w", err)
 	}
 
 	configs := buildExecutionConfigurations(cfg, m)
@@ -385,9 +391,18 @@ func register(ctx context.Context, c *client.Client, cfg config.Config, m *manif
 	// Instances without resolving or installing anything itself.
 	resolved, err := resolveFrozenCapabilityRuntimes(ctx, cfg, configs.CapabilityRuntimeRequirements, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	configs.ResolvedCapabilityRuntimes = resolved
+
+	// Freeze the provider identities hosting the frozen capability runtimes'
+	// runtime kinds. This is strictly store-only: a normal build never
+	// downloads, installs, or silently updates a provider.
+	providers, err := freezeProviders(ctx, cfg, resolved)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	configs.ResolvedProviders = providers
 
 	request := protocol.RegisterRequest{
 		Key:                     key,
@@ -398,12 +413,12 @@ func register(ctx context.Context, c *client.Client, cfg config.Config, m *manif
 
 	result, err := c.Register(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	printRegistration(result)
 
-	return &result, resolved, nil
+	return &result, resolved, providers, nil
 }
 
 // printRegistration writes the registration record (assembly, version, frozen
@@ -501,4 +516,37 @@ func resolveFrozenCapabilityRuntimes(ctx context.Context, cfg config.Config, req
 		frozen = append(frozen, *installed.Frozen(requested[installed.Type]))
 	}
 	return frozen, nil
+}
+
+// freezeProviders maps the frozen capability runtime set's runtime kinds to
+// their installed provider identities and freezes them for the register
+// payload and the build record.
+//
+// Freezing is strictly store-only: providers are resolved against the
+// installed host store and never downloaded, installed, or silently updated
+// during a normal build. A kind with no installed host fails with an
+// actionable error naming the development bootstrap and install commands.
+// Assemblies that use only in-process built-in capability runtimes freeze no
+// providers at all.
+func freezeProviders(ctx context.Context, cfg config.Config, resolved []capabilityrt.ResolvedCapabilityRuntime) ([]providertypes.ResolvedProvider, error) {
+	kinds := make([]string, 0, len(resolved))
+	for _, cr := range resolved {
+		kinds = append(kinds, cr.Runtime.Type)
+	}
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+
+	catalog, err := providerctl.BuildCatalog(providerctl.CatalogConfig{
+		ProvidersConfig: cfg.Providers,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build provider catalog: %w", err)
+	}
+
+	providers, err := provider.FreezeForKinds(ctx, catalog.Store, kinds)
+	if err != nil {
+		return nil, fmt.Errorf("freeze providers: %w", err)
+	}
+	return providers, nil
 }

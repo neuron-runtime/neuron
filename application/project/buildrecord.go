@@ -15,6 +15,7 @@ import (
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
+	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
 )
 
 const (
@@ -76,6 +77,11 @@ type AssemblyBuild struct {
 	// CapabilityRuntimes is the frozen capability runtime set resolved and
 	// installed for this Assembly's requirements. Empty when built-in only.
 	CapabilityRuntimes []capabilityrt.ResolvedCapabilityRuntime `json:"capabilityRuntimes,omitempty"`
+
+	// Providers is the frozen provider identity set resolved from the
+	// installed store for this Assembly's capability runtime kinds. Empty
+	// when only in-process built-in capability runtimes are used.
+	Providers []providertypes.ResolvedProvider `json:"providers,omitempty"`
 }
 
 // FindAssembly returns the build entry for a named Assembly.
