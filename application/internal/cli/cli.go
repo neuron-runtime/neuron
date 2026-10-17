@@ -13,7 +13,9 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/daemon"
 	"github.com/neuron-runtime/neuron/application/internal/cli/initcmd"
+	installcmd "github.com/neuron-runtime/neuron/application/internal/cli/installcmd"
 	"github.com/neuron-runtime/neuron/application/internal/cli/newcmd"
+	providercmd "github.com/neuron-runtime/neuron/application/internal/cli/provider"
 	"github.com/neuron-runtime/neuron/application/internal/cli/register"
 	"github.com/neuron-runtime/neuron/application/internal/cli/run"
 	versioncmd "github.com/neuron-runtime/neuron/application/internal/cli/version"
@@ -71,6 +73,8 @@ func init() {
 		capabilityruntime.NewRemoveCmd(),
 		newcmd.New(),
 		versioncmd.New(),
+		installcmd.New(),
+		providercmd.New(),
 	)
 }
 
