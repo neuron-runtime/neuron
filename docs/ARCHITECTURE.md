@@ -522,6 +522,8 @@ In the running process there is a single **shared** registry, built lazily and s
 - the WASM provider owns process-global compiled-module state that every WASM adapter must share;
 - the process provider tracks its worker pools by capability runtime identity, so two instances of the same assembly legitimately share one pool per capability runtime.
 
+Providers are themselves installed artifacts. They are obtained with `neuron install --provider <name>@<version>`, which resolves, verifies, and installs one from the configured registries into the machine-global provider store (`~/.neuron/providers`, laid out as `<name>/<version>/<digest>/`). For local development, `neuron provider build` bootstraps descriptor-only first-party `process` and `wasm` provider artifacts into the same store, marked with `source: bootstrap` provenance. The provider contract itself never resolves, downloads, or installs anything — obtaining a provider is a CLI concern. See [Provider installation](./MODULES.md#provider-installation) for the artifact comparison.
+
 ## Core and external capability runtimes
 
 There are two ways a capability type gets a capability runtime.

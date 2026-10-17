@@ -26,7 +26,7 @@ flowchart LR
 | **Built-in modules** | In-process inside N.O.R.E. | Never resolved or installed | `neuron:core:set` |
 | **External modules** | Out-of-process by N.O.R.E. | Resolved, verified, installed by the CLI | `example:echo`, `neuron-runtime:github:read` |
 
-This document is about the second family.
+This document is about the second family. Providers — the hosts that run external modules — are a separate artifact type, covered in [Provider installation](#provider-installation).
 
 ---
 
@@ -247,6 +247,47 @@ neuron capability runtime list --type process      # filtered by runtime type
 neuron capability runtime inspect example:echo@1.0.0  # detail for one installed module
 neuron remove example:echo@1.0.0                   # uninstall
 ```
+
+---
+
+## Provider installation
+
+A **Capability Runtime** is the executable module that implements a capability. A **provider** is the host or engine that runs that module — the process provider runs one as an OS child process, the WASM provider runs one as a `wasm32-wasi` module. They are two different artifact types with different manifests, different install commands, and different stores.
+
+| | Capability Runtime | Provider |
+| --- | --- | --- |
+| Archive | `<name>-<version>-capability-runtime.neuron.tar.gz` | `<name>-<version>-provider.neuron.tar.gz` |
+| Manifest | `runtime.json` (`apiVersion: neuron/v1`, `kind: CapabilityRuntime`) | `provider.runtime.json` (`apiVersion: neuron/provider/v1`, `kind: ProviderRuntime`) |
+| Install command | `neuron add <name@version>` (pinned into the project) | `neuron install --provider <name@version>` (machine-global) |
+| Store | `~/.neuron/capabilityRuntimes` | `~/.neuron/providers` |
+| Role | Implements a capability; hosted by a provider | Hosts and supervises Capability Runtime artifacts |
+
+Provider artifacts are resolved through the same configured registries (`github`, `local`), verified by content digest, and installed immutably into the machine-global provider store. The installed layout is `<name>/<version>/<digest>/`:
+
+```bash
+neuron install --provider process@1.0.0
+```
+
+```text
+installed process@1.0.0 (a1b2c3d4e5f6a7b8, from local)
+```
+
+The first-party providers `process` and `wasm` can also be bootstrapped locally for development, with no registry, network, or executable payload:
+
+```bash
+neuron provider build
+```
+
+```text
+bootstrap: process@0.1.0 (a1b2c3d4e5f6a7b8)
+bootstrap: wasm@0.1.0 (b8a7f6e5d4c3b2a1)
+bootstrap: providers available in /home/user/.neuron/providers
+```
+
+`neuron provider build` installs descriptor-only artifacts (a valid `provider.runtime.json` with no executable payload) through the same installer, marking each install record with `source: bootstrap` so a bootstrap install is never mistaken for a registry install. The default version is `0.1.0`; `--out` overrides the target store root. The `container` and `remote` providers are planned and are not available yet.
+
+> [!WARNING]
+> Provider artifacts and Capability Runtime artifacts are **different types** stored in different namespaces (`~/.neuron/providers` vs `~/.neuron/capabilityRuntimes`) and are never interchangeable. Use `neuron install --provider` for a provider and `neuron add` for a capability runtime.
 
 ---
 
