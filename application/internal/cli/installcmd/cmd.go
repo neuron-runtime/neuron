@@ -11,16 +11,15 @@ import (
 
 	"github.com/neuron-runtime/neuron/application/config"
 	"github.com/neuron-runtime/neuron/application/internal/providerctl"
+	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/spf13/cobra"
 )
 
 // splitRef parses "name@version" into (name, version). Version is optional
 // and may be an exact pin ("1.0.0") or a constraint ("^1.0.0").
-func splitRef(ref string) (name, version string, err error) {
-	name, version, _ = strings.Cut(strings.TrimSpace(ref), "@")
-	name = strings.TrimSpace(name)
-	version = strings.TrimSpace(version)
-	if name == "" {
+func splitRef(s string) (name, version string, err error) {
+	name, version, ok := ref.Parse(s)
+	if !ok {
 		return "", "", fmt.Errorf("provider name is required (e.g. process)")
 	}
 	return name, version, nil

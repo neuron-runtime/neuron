@@ -22,6 +22,18 @@ func IsExactVersion(version string) bool {
 	return err == nil
 }
 
+// ValidateConstraint reports whether constraint is a valid semver constraint
+// ("^1.0.0", "~1.2", ">=1.0.0 <2.0.0"). An empty constraint is valid (it means
+// "any"). It is used to reject malformed user input before resolution, so a
+// typo is reported as an invalid reference rather than as a missing version.
+func ValidateConstraint(constraint string) error {
+	if constraint == "" {
+		return nil
+	}
+	_, err := semver.NewConstraint(constraint)
+	return err
+}
+
 // SelectVersion returns the highest version in versions that satisfies
 // constraint. An empty constraint selects the highest valid semver version.
 // Versions that do not parse as semver are ignored.

@@ -17,6 +17,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
 	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/nore/internal/invoke"
 	"github.com/neuron-runtime/neuron/nore/internal/planner"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
@@ -42,6 +43,7 @@ func main() {
 		detachedDrainTimeout time.Duration
 		capabilityStore      string
 		showVer              bool
+		invokeMode           bool
 		projectMode          bool
 		projectRoot          string
 		host                 string
@@ -55,6 +57,7 @@ func main() {
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
 	flag.BoolVar(&showVer, "version", false, "print the N.O.R.E. version and exit")
+	flag.BoolVar(&invokeMode, "invoke", false, "one-shot direct invocation: read an InvokeRequest from stdin and write an InvokeResponse to stdout")
 	flag.BoolVar(&projectMode, "project", false, "run in project runtime mode (foreground, loopback TCP, auto port)")
 	flag.StringVar(&projectRoot, "project-root", "", "project root directory (required with --project)")
 	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
@@ -62,6 +65,18 @@ func main() {
 
 	if showVer {
 		fmt.Println(version.String())
+		return
+	}
+
+	// Direct invocation mode: host a single installed Capability Runtime for one
+	// execution and exit. No storage, assemblies, or API are involved.
+	if invokeMode {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := invoke.Run(ctx, capabilityStore, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 

@@ -206,26 +206,13 @@ func (r *Resolver) installedSatisfying(ctx context.Context, req Requirement) (*I
 		return nil, false, nil
 	}
 
-	// Constraint or floating: pick the best installed version.
-	installed, err := r.store.List(ctx, req.Type)
-	if err != nil || len(installed) == 0 {
-		return nil, false, nil
-	}
-
-	versions := make([]string, 0, len(installed))
-	for _, in := range installed {
-		versions = append(versions, in.Version)
-	}
-
-	best, err := semverselect.SelectVersion(req.Version, versions)
+	// Constraint: pick the best installed version satisfying the constraint.
+	installed, ok, err := bestInstalled(ctx, r.store, req.Type, req.Version)
 	if err != nil {
+		// A store read error is treated as "not installed locally" so
+		// resolution falls through to the registries, matching the
+		// network-independent fast-path contract.
 		return nil, false, nil
 	}
-
-	for _, in := range installed {
-		if in.Version == best {
-			return &in, true, nil
-		}
-	}
-	return nil, false, nil
+	return installed, ok, nil
 }

@@ -52,8 +52,12 @@ func init() {
 
 	// Load the effective configuration once flags are parsed and inject it on
 	// the command context so every subcommand can read it without touching
-	// Viper itself.
+	// Viper itself. Direct Capability Runtime invocation is deliberately
+	// project-independent and must not load neuron.config.*, so it opts out.
 	RootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if run.DirectMode(cmd) {
+			return nil
+		}
 		cfg, err := loadConfig(cmd)
 		if err != nil {
 			return err
