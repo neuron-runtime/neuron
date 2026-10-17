@@ -40,6 +40,10 @@ var (
 			path:   "capabilityRuntimes.storeDir",
 			reason: "is managed by Neuron and cannot be configured here",
 		},
+		{
+			path:   "providers.storeDir",
+			reason: "is managed by Neuron and cannot be configured here",
+		},
 	}
 
 	deniedInProjectFile = []deniedKey{

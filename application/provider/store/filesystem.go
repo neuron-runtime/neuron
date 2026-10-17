@@ -65,7 +65,7 @@ func (s *FileSystemStore) Commit(ctx context.Context, stage, name, version, dige
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
-	return &providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, RootDir: final, ManifestPath: filepath.Join(final, providerapp.ManifestFile), Manifest: m}, nil
+	return &providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, Registry: rec.Source, RootDir: final, ManifestPath: filepath.Join(final, providerapp.ManifestFile), Manifest: m}, nil
 }
 
 func (s *FileSystemStore) Get(ctx context.Context, name, version string) (*providerapp.Installed, error) {
@@ -96,7 +96,7 @@ func (s *FileSystemStore) Get(ctx context.Context, name, version string) (*provi
 			continue
 		}
 		m, _ := providerapp.ReadManifest(mPath)
-		return &providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, RootDir: d, ManifestPath: mPath, Manifest: m}, nil
+		return &providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, Registry: rec.Source, RootDir: d, ManifestPath: mPath, Manifest: m}, nil
 	}
 	return nil, fmt.Errorf("%w: %s@%s", providerapp.ErrNotFound, name, version)
 }
@@ -110,7 +110,7 @@ func (s *FileSystemStore) List(ctx context.Context, name string) ([]providerapp.
 				continue
 			}
 			m, _ := providerapp.ReadManifest(filepath.Join(dir, providerapp.ManifestFile))
-			out = append(out, providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, RootDir: dir, ManifestPath: filepath.Join(dir, providerapp.ManifestFile), Manifest: m})
+			out = append(out, providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, Registry: rec.Source, RootDir: dir, ManifestPath: filepath.Join(dir, providerapp.ManifestFile), Manifest: m})
 		}
 	} else {
 		base, err := s.typeDir(name)
@@ -132,7 +132,7 @@ func (s *FileSystemStore) List(ctx context.Context, name string) ([]providerapp.
 					continue
 				}
 				m, _ := providerapp.ReadManifest(filepath.Join(d, providerapp.ManifestFile))
-				out = append(out, providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, RootDir: d, ManifestPath: filepath.Join(d, providerapp.ManifestFile), Manifest: m})
+				out = append(out, providerapp.Installed{Name: rec.Provider, Version: rec.Version, Digest: rec.Digest, Registry: rec.Source, RootDir: d, ManifestPath: filepath.Join(d, providerapp.ManifestFile), Manifest: m})
 			}
 		}
 	}

@@ -55,6 +55,7 @@ type Config struct {
 	Daemon             DaemonConfig             `yaml:"daemon" mapstructure:"daemon"`
 	Storage            StorageConfig            `yaml:"storage" mapstructure:"storage"`
 	CapabilityRuntimes CapabilityRuntimesConfig `yaml:"capabilityRuntimes" mapstructure:"capabilityRuntimes"`
+	Providers          ProvidersConfig          `yaml:"providers" mapstructure:"providers"`
 	Inspector          InspectorConfig          `yaml:"inspector" mapstructure:"inspector"`
 
 	// Dev controls developer-experience options.
@@ -212,6 +213,47 @@ func DefaultStoreDir() string {
 		return ".neuron/capabilityRuntimes"
 	}
 	return filepath.Join(home, ".neuron", "capabilityRuntimes")
+}
+
+// ProvidersConfig lists the registries Neuron can resolve provider artifacts
+// against. A provider requirement declares name/version; the registry
+// resolution determines where the provider artifact comes from. Providers are
+// machine-global: unlike capability runtime localRoots, there is no implicit
+// project root.
+type ProvidersConfig struct {
+	// Registries lists the registry providers Neuron can resolve provider
+	// artifacts against (github, local).
+	Registries []ProviderRegistry `yaml:"registries,omitempty" mapstructure:"registries"`
+
+	// LocalRoots lists machine-global provider search roots served by the
+	// "local" registry.
+	LocalRoots []string `yaml:"localRoots,omitempty" mapstructure:"localRoots"`
+
+	// StoreDir is the local installed provider directory. Defaults to
+	// ~/.neuron/providers. Like storage and capabilityRuntimes.storeDir, it
+	// is internal and rejected from configuration files.
+	StoreDir string `yaml:"storeDir,omitempty" mapstructure:"storeDir"`
+
+	// DefaultRegistries is the ordered list of registry names a provider
+	// Requirement uses when it declares no registries of its own. Defaults
+	// to ["local"].
+	DefaultRegistries []string `yaml:"defaultRegistries,omitempty" mapstructure:"defaultRegistries"`
+}
+
+// DefaultProviderStoreDir returns the provider store directory used when
+// none is configured.
+func DefaultProviderStoreDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".neuron/providers"
+	}
+	return filepath.Join(home, ".neuron", "providers")
+}
+
+// ProviderRegistry identifies a source of provider artifacts.
+type ProviderRegistry struct {
+	Name string `yaml:"name,omitempty" mapstructure:"name"`
+	URL  string `yaml:"url,omitempty" mapstructure:"url"`
 }
 
 // CapabilityRuntimeRegistry identifies a source of capability runtime definitions.

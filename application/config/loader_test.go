@@ -39,6 +39,15 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.CapabilityRuntimes.DefaultRegistries) != 1 || cfg.CapabilityRuntimes.DefaultRegistries[0] != "local" {
 		t.Errorf("default defaultRegistries = %v, want [local]", cfg.CapabilityRuntimes.DefaultRegistries)
 	}
+	if len(cfg.Providers.Registries) != 0 {
+		t.Errorf("default provider registries = %d, want 0 (none compiled in)", len(cfg.Providers.Registries))
+	}
+	if len(cfg.Providers.DefaultRegistries) != 1 || cfg.Providers.DefaultRegistries[0] != "local" {
+		t.Errorf("default providers.defaultRegistries = %v, want [local]", cfg.Providers.DefaultRegistries)
+	}
+	if cfg.Providers.StoreDir != DefaultProviderStoreDir() {
+		t.Errorf("default providers.storeDir = %q, want %q", cfg.Providers.StoreDir, DefaultProviderStoreDir())
+	}
 }
 
 func TestProjectPartialOverridePreservesGlobal(t *testing.T) {

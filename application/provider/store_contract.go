@@ -36,11 +36,13 @@ type Store interface {
 
 // Installed is a locally installed, immutable provider artifact.
 type Installed struct {
-	Name         string
-	Version      string
-	Digest       string
+	Name    string
+	Version string
+	Digest  string
+	// Registry is the provenance recorded at install time (the source
+	// registry name, or the bootstrap marker). It is informational and
+	// never part of the artifact identity.
 	Registry     string
-	Platform     string
 	RootDir      string
 	ManifestPath string
 	Manifest     *providertypes.Manifest

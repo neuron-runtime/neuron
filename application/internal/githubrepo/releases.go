@@ -5,6 +5,12 @@ import (
 	"sort"
 )
 
+// RepoRef identifies a GitHub repository as owner/name.
+type RepoRef struct {
+	Owner string
+	Repo  string
+}
+
 // Release is the subset of the GitHub Releases API record registries need.
 type Release struct {
 	TagName    string  `json:"tag_name"`

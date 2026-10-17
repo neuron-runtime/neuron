@@ -226,3 +226,13 @@ func TestGlobalFileDeniesStoreDir(t *testing.T) {
 		t.Errorf("error = %v, want it to mention `capabilityRuntimes.storeDir`", err)
 	}
 }
+
+func TestGlobalFileDeniesProviderStoreDir(t *testing.T) {
+	_, err := loadGlobalConfig(t, "providers:\n  storeDir: /somewhere\n")
+	if err == nil {
+		t.Fatal("Load succeeded, want `providers.storeDir` denied in global config")
+	}
+	if !strings.Contains(err.Error(), "providers.storeDir") {
+		t.Errorf("error = %v, want it to mention `providers.storeDir`", err)
+	}
+}

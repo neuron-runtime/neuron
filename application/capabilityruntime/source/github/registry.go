@@ -10,10 +10,7 @@ import (
 )
 
 // RepoRef identifies a GitHub repository as owner/name.
-type RepoRef struct {
-	Owner string
-	Repo  string
-}
+type RepoRef = githubrepo.RepoRef
 
 // Option configures a GitHub registry.
 type Option func(*Registry)

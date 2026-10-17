@@ -21,7 +21,7 @@ func newInstaller(t *testing.T) (*provider.Installer, *providerstore.FileSystemS
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	return &provider.Installer{Store: store}, store
+	return &provider.Installer{Store: store, Downloader: provider.NewHTTPDownloader()}, store
 }
 
 func writeSource(t *testing.T, name, version string, files map[string]string) string {

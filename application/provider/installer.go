@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/neuron-runtime/neuron/application/internal/artifact"
@@ -15,9 +16,16 @@ import (
 // Installer installs provider artifacts into the store.
 type Installer struct {
 	Store Store
+
+	// Downloader fetches Artifact URLs. It is required when a Package
+	// carries no local Source; a nil Downloader rejects remote packages.
+	Downloader Downloader
 }
 
-// Package describes a provider artifact to install.
+// Package describes a provider artifact to install. Exactly one distribution
+// path must be present: a local Source (directory or archive), an Artifact
+// URL the installer downloads, or raw Manifest bytes describing a Source
+// tree that already contains the payload.
 type Package struct {
 	Name    string
 	Version string
@@ -30,11 +38,26 @@ type Package struct {
 	// materialized source must already contain the manifest file.
 	Manifest []byte
 	// Source is the path to a directory or a .tar.gz archive to install.
+	// It wins over Artifact when both are set.
 	Source string
+	// Artifact locates a remote or file:// package (usually the canonical
+	// <name>-<version>-provider.neuron.tar.gz archive) the installer
+	// downloads before installation.
+	Artifact Artifact
 	// Digest, when set, is the expected content digest of the staged tree.
 	// A declared digest that does not match the staged content fails the
 	// install; it is never trusted blindly.
 	Digest string
+}
+
+// Artifact locates a downloadable provider package payload.
+type Artifact struct {
+	// URL is an http(s) or file:// location of the package payload.
+	URL string
+	// Name is the payload file name (e.g. the canonical archive name).
+	Name string
+	// SHA256, when set, is the expected digest of the downloaded bytes.
+	SHA256 string
 }
 
 // InstallResult reports the result of installing a provider.
@@ -67,7 +90,7 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	}
 	defer os.RemoveAll(stage)
 
-	if err := materialize(pkg, stage); err != nil {
+	if err := i.materialize(pkg, stage); err != nil {
 		return nil, fmt.Errorf("install provider %s@%s: %w", pkg.Name, pkg.Version, err)
 	}
 
@@ -151,19 +174,43 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	return &InstallResult{Installed: installed}, nil
 }
 
-func materialize(pkg *Package, stage string) error {
-	if pkg.Source == "" {
-		return fmt.Errorf("provider source is required")
+func (i *Installer) materialize(pkg *Package, stage string) error {
+	if pkg.Source != "" {
+		info, err := os.Stat(pkg.Source)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return artifact.CopyDir(pkg.Source, stage)
+		}
+		if artifact.IsArchive(pkg.Source) {
+			return artifact.ExtractTarGz(pkg.Source, stage)
+		}
+		return fmt.Errorf("unsupported provider source: %s", pkg.Source)
 	}
-	info, err := os.Stat(pkg.Source)
-	if err != nil {
-		return err
+
+	if strings.TrimSpace(pkg.Artifact.URL) != "" {
+		if i.Downloader == nil {
+			return fmt.Errorf("provider %s@%s: artifact %s requires a downloader", pkg.Name, pkg.Version, pkg.Artifact.URL)
+		}
+		downloaded, err := i.Downloader.Download(context.Background(), pkg.Artifact.URL, pkg.Artifact.SHA256)
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(filepath.Dir(downloaded))
+		if artifact.IsArchive(downloaded) {
+			return artifact.ExtractTarGz(downloaded, stage)
+		}
+		name := pkg.Artifact.Name
+		if name == "" {
+			name = filepath.Base(downloaded)
+		}
+		data, err := os.ReadFile(downloaded)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(stage, name), data, 0o644)
 	}
-	if info.IsDir() {
-		return artifact.CopyDir(pkg.Source, stage)
-	}
-	if artifact.IsArchive(pkg.Source) {
-		return artifact.ExtractTarGz(pkg.Source, stage)
-	}
-	return fmt.Errorf("unsupported provider source: %s", pkg.Source)
+
+	return fmt.Errorf("provider source is required")
 }
