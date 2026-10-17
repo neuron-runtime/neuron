@@ -1,25 +1,29 @@
+// Package provider implements `neuron provider`, the development and
+// bootstrap surface for first-party provider artifacts. Providers obtained
+// from a registry use `neuron install --provider`; this command exists so a
+// development environment can obtain the built-in provider identities
+// without any registry, network, or fabricated executable payload.
 package provider
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 
-	"github.com/neuron-runtime/neuron/application/provider"
-	providerstore "github.com/neuron-runtime/neuron/application/provider/store"
-	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
-	providertypes "github.com/neuron-runtime/neuron/shared/types/provider"
+	"github.com/neuron-runtime/neuron/application/config"
+	"github.com/neuron-runtime/neuron/application/internal/providerctl"
+	providerpkg "github.com/neuron-runtime/neuron/application/provider"
 	"github.com/spf13/cobra"
 )
 
+// New returns the top-level `neuron provider` command.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "provider",
-		Short:  "Provider artifact management (advanced)",
-		Hidden: true,
+		Use:   "provider",
+		Short: "Provider development and bootstrap",
+		Long: `Manage first-party provider artifacts for local development.
+
+Providers resolved from a registry are installed with
+'neuron install --provider'. The 'provider build' subcommand is a local
+bootstrap mechanism that performs no registry resolution.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -30,72 +34,64 @@ func New() *cobra.Command {
 
 func newBuildCmd() *cobra.Command {
 	var outDir string
+	var version string
+
 	cmd := &cobra.Command{
-		Use:    "build",
-		Short:  "Build first-party provider artifacts into the store layout",
-		Hidden: true,
+		Use:   "build",
+		Short: "Bootstrap descriptor-only first-party providers into the store",
+		Long: `Build the descriptor-only first-party provider artifacts (process, wasm) and
+install them into the provider store through the real installer.
+
+This is a local development/bootstrap mechanism, not a registry install. It
+performs no registry resolution and no download, and the artifacts carry no
+executable payload: each one is a valid provider.runtime.json identity that
+project builds and invocations resolve exactly like a registry-installed
+provider. The install record marks every artifact with the bootstrap source
+so it is never mistaken for a registry install.
+
+The build is deterministic and repeatable: identical inputs produce the same
+content digest, and rebuilding over an existing identical artifact reports
+'already present'.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			root := provider.DefaultStoreDir()
-			if outDir != "" {
-				root = outDir
+
+			cfg, ok := config.FromContext(ctx)
+			if !ok {
+				return fmt.Errorf("configuration not loaded")
 			}
-			store, err := providerstore.NewFileSystemStore(root)
+			if outDir != "" {
+				cfg.Providers.StoreDir = outDir
+			}
+
+			catalog, err := providerctl.BuildCatalog(providerctl.CatalogConfig{
+				ProvidersConfig: cfg.Providers,
+			})
 			if err != nil {
 				return err
 			}
-			installer := &provider.Installer{Store: store}
-			if err := buildAndInstall(ctx, installer, "process", "0.1.0", capabilityrt.RuntimeKindProcess); err != nil {
+
+			results, err := providerpkg.Bootstrap(ctx, catalog.Installer, version)
+			if err != nil {
 				return err
 			}
-			if err := buildAndInstall(ctx, installer, "wasm", "0.1.0", capabilityrt.RuntimeKindWasm); err != nil {
-				return err
+			for _, res := range results {
+				digest := res.Digest
+				if len(digest) > 16 {
+					digest = digest[:16]
+				}
+				if res.AlreadyPresent {
+					fmt.Printf("bootstrap: %s@%s already present (%s)\n", res.Name, res.Version, digest)
+				} else {
+					fmt.Printf("bootstrap: %s@%s (%s)\n", res.Name, res.Version, digest)
+				}
 			}
-			fmt.Printf("built provider artifacts in %s\n", store.Root())
+			fmt.Printf("bootstrap: providers available in %s\n", catalog.StoreDir())
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&outDir, "out", "o", "", "output store root (defaults to ~/.neuron/providers)")
+
+	cmd.Flags().StringVarP(&outDir, "out", "o", "", "override the target provider store root (defaults to providers.storeDir)")
+	cmd.Flags().StringVar(&version, "provider-version", providerpkg.FirstPartyVersion, "version assigned to the bootstrapped providers")
 	return cmd
-}
-
-func buildAndInstall(ctx context.Context, installer *provider.Installer, name, version, kind string) error {
-	tmp := os.TempDir()
-	staged, err := os.MkdirTemp(tmp, "provider-build-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(staged)
-
-	host := runtime.GOOS + "-" + runtime.GOARCH
-	if kind == capabilityrt.RuntimeKindWasm {
-		host = capabilityrt.PlatformWasm
-	}
-
-	m := &providertypes.Manifest{
-		APIVersion:   providertypes.APIVersion,
-		Kind:         providertypes.Kind,
-		Metadata:     providertypes.ManifestMetadata{Name: name, Version: version},
-		RuntimeKinds: []string{kind},
-		Protocols:    []string{capabilityrt.ProtocolV1, capabilityrt.ProtocolJSONV1},
-		Platforms:    map[string]providertypes.Platform{host: {Artifact: "provider"}},
-	}
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(staged, "provider.runtime.json"), data, 0o644); err != nil {
-		return err
-	}
-	pkg := &provider.Package{Name: name, Version: version, Manifest: data, Source: staged}
-	res, err := installer.Install(ctx, pkg)
-	if err != nil {
-		return err
-	}
-	if res.AlreadyPresent {
-		fmt.Printf("provider %s@%s already present\n", name, version)
-	} else {
-		fmt.Printf("installed provider %s@%s\n", name, version)
-	}
-	return nil
 }
