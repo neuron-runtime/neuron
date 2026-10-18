@@ -84,13 +84,17 @@ func (s *FileassemblyStore) Commit(ctx context.Context, stage, typ, version, dig
 
 // Get returns the installed capability runtime for an exact version. The
 // store layout is content-addressed (<type>/<version>/<digest>/), so Get
-// scans the version directory for any committed install.json.
+// scans the version directory for any committed install.json. A stale
+// flat-layout install found under the version directory is migrated before
+// the scan; if it cannot be migrated and no content-addressed copy exists,
+// the migration error is surfaced instead of a misleading not-found.
 func (s *FileassemblyStore) Get(ctx context.Context, typ, version string) (*capabilityruntime.Installed, error) {
 	base, err := s.typeDir(typ)
 	if err != nil {
 		return nil, err
 	}
 	versionDir := filepath.Join(base, strings.TrimSpace(version))
+	_, migrateErr := migrateFlatInstall(versionDir)
 	entries, err := os.ReadDir(versionDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -112,6 +116,9 @@ func (s *FileassemblyStore) Get(ctx context.Context, typ, version string) (*capa
 		}
 		return rec.Installed(), nil
 	}
+	if migrateErr != nil {
+		return nil, migrateErr
+	}
 	return nil, fmt.Errorf("%w: %s@%s", capabilityruntime.ErrNotFound, typ, version)
 }
 
@@ -120,12 +127,21 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 
 	if strings.TrimSpace(typ) == "" {
 		// List everything: find every install.json under the store root.
+		// Stale flat-layout records are migrated in place first; a record that
+		// cannot be migrated is skipped rather than failing the whole
+		// inventory, matching the lenient scan below.
+		seen := make(map[string]bool)
 		for _, dir := range s.walkInstallDirs(s.root) {
-			rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(dir, capabilityrt.InstallFile))
+			finalDir, err := migrateFlatInstall(dir)
+			if err != nil || seen[finalDir] {
+				continue
+			}
+			seen[finalDir] = true
+			rec, err := capabilityruntime.ReadInstallRecord(filepath.Join(finalDir, capabilityrt.InstallFile))
 			if err != nil {
 				continue
 			}
-			rec.Installed().RootDir = dir
+			rec.Installed().RootDir = finalDir
 			out = append(out, *rec.Installed())
 		}
 	} else {
@@ -134,6 +150,13 @@ func (s *FileassemblyStore) List(ctx context.Context, typ string) ([]capabilityr
 			return nil, err
 		}
 		for _, versionDir := range s.listVersionDirs(base) {
+			// Migrate a stale flat install first so typed listings and the
+			// content-addressed scan see the same layout. An unmigratable
+			// version is skipped: it is unusable either way, and an exact
+			// lookup surfaces the precise migration error from Get.
+			if _, err := migrateFlatInstall(versionDir); err != nil {
+				continue
+			}
 			entries, err := os.ReadDir(versionDir)
 			if err != nil {
 				continue
@@ -178,6 +201,8 @@ func (s *FileassemblyStore) walkInstallDirs(root string) []string {
 
 // Remove deletes every committed digest directory for an exact version,
 // making removal a cache/garbage-collection operation rather than an update.
+// Stale flat-layout files (pre-content-addressed installs) are deleted along
+// with the digest directories so removal always empties the version.
 func (s *FileassemblyStore) Remove(ctx context.Context, typ, version string) error {
 	base, err := s.typeDir(typ)
 	if err != nil {
@@ -192,10 +217,14 @@ func (s *FileassemblyStore) Remove(ctx context.Context, typ, version string) err
 		return err
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		target := filepath.Join(versionDir, e.Name())
+		if e.IsDir() {
+			if err := os.RemoveAll(target); err != nil {
+				return err
+			}
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(versionDir, e.Name())); err != nil {
+		if err := os.Remove(target); err != nil {
 			return err
 		}
 	}

@@ -7,10 +7,15 @@
 // Layout:
 //
 //	<root>/
-//	    <owner>/<...segments>/<version>/
+//	    <owner>/<...segments>/<version>/<digest>/
 //	        runtime.json
 //	        install.json
 //	        <extracted artifact files>
+//
+// The layout is content-addressed: the digest directory holds exactly the
+// artifact the install.json record commits to, so identity derives the path.
+// Installs left flat directly under <version>/ by pre-content-addressed
+// versions of the store are migrated in place on first read (see migrate.go).
 //
 // The Store interface consumed by the resolve/install pipeline is declared in
 // application/capabilityruntime (consumer side); this package supplies the concrete
