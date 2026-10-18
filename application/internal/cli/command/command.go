@@ -22,7 +22,8 @@ var (
 
 	Daemon = "daemon"
 
-	CapabilityRuntime        = "capability runtime"
+	Capability               = "capability"
+	CapabilityRuntime        = "runtime"
 	CapabilityRuntimeList    = "list"
 	CapabilityRuntimeInspect = "inspect [name@version]"
 

@@ -43,9 +43,13 @@ func catalogFromConfigObserver(ctx context.Context, observer capabilityruntime.O
 	})
 }
 
+// New returns the `neuron capability` command group. Its `runtime` child owns
+// the installed-store inspection surface (`neuron capability runtime list`,
+// `neuron capability runtime inspect`); `add` and `remove` are top-level
+// commands because they change what a project pins, not just what is stored.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   command.CapabilityRuntime,
+		Use:   command.Capability,
 		Short: "Manage capability runtime packages",
 		Long: `Resolve, install, and inspect capability runtime packages in the local store.
 
@@ -57,10 +61,22 @@ against the configured registries (github, local) and installed immutably under
 		},
 	}
 
-	cmd.AddCommand(
+	runtimeCmd := &cobra.Command{
+		Use:   command.CapabilityRuntime,
+		Short: "Inspect installed capability runtime packages",
+		Long: `Inspect the capability runtime packages installed in the local store.
+
+Installed packages are content-addressed under ~/.neuron/capabilityRuntimes and
+can be run directly with ` + "`neuron run -c <name>[@<version>]`" + `.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	runtimeCmd.AddCommand(
 		newListCmd(),
 		newInspectCmd(),
 	)
+	cmd.AddCommand(runtimeCmd)
 
 	return cmd
 }
