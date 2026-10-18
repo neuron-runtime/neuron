@@ -7,7 +7,6 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/coder/websocket v1.8.15
-	github.com/gosuri/uilive v0.0.4
 	github.com/mattn/go-isatty v0.0.24
 	github.com/neuron-runtime/neuron/shared v0.0.0-20260905200234-63564fa7a003
 	github.com/spf13/cobra v1.10.2
