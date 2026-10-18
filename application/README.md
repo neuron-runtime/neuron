@@ -218,7 +218,7 @@ Flags:
       --remote string      Remote N.O.R.E. endpoint (e.g., http://host:port)
 ```
 
-`neuron run` is a client of the project runtime. It discovers the runtime that bare `neuron` started, sends one synchronous execution request to `POST /v1/run`, and prints the Assembly result to stdout. It does not start or stop the runtime, stream events, or return execution handles — starting, observing, streaming, and cancelling executions are advanced inspection concerns exposed through the API, not the normal `run` output.
+`neuron run` is a client of the project runtime. It discovers the runtime that bare `neuron` started, sends one synchronous execution request to `POST /v1/run`, and prints the Assembly result to stdout. It does not start or stop the runtime, stream events, or return execution handles — advanced execution inspection is exposed through the API rather than the normal `run` output.
 
 The Assembly is addressed by the `assembly` selector on the request URL, never inside the params payload, so the same command works whether the runtime hosts one Assembly or many. Without an argument, `neuron run` uses the key of the current project build — the one `neuron build` recorded in `.neuron/current.json`. With a target argument it addresses that Assembly instead:
 

@@ -224,10 +224,10 @@ You never interact with N.O.R.E. directly. The `neuron` CLI starts it, checks it
 ```mermaid
 flowchart LR
     A[Define an Assembly<br/>TypeScript or YAML] --> B[Register with neuron<br/>build → compile → resolve → freeze]
-    B --> C[N.O.R.E. persists the compiled assembly]
+    B --> C[The runtime stores<br/>the compiled Assembly]
     C --> D[Run: create an Instance]
     D --> E[N.O.R.E. plans & executes]
-    E --> F[Live execution events streamed back]
+    E --> F[Result returned]
 ```
 
 
@@ -251,7 +251,9 @@ git clone https://github.com/neuron-runtime/neuron.git
 cd neuron/examples/ecommerce_order_ts
 pnpm install
 neuron build            # build the TS project, compile, register with the runtime
-neuron run              # create an instance and stream live execution events
+# start project runtime in one terminal: `neuron`
+# in another terminal: run the Assembly
+neuron run --params '{"order":{...}}'
 ```
 
 Walk through it in detail in [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md).
@@ -376,7 +378,7 @@ Implemented, tested, and intended to work in 0.1.0.
 
 | Area | Surface |
 | --- | --- |
-| **CLI** | `init`, `build`, `run` (live event streaming over WebSocket with an SSE fallback), `add` / `remove`, `capability runtime list` / `inspect`, `instance list` / `remove` / `clear`, `daemon stop`, `version` — plus global configuration and `NEURON_*` environment overrides |
+| **CLI** | `init`, `build`, `run` (synchronous execution returning the Assembly result), `add` / `remove`, `capability runtime list` / `inspect`, `instance list` / `remove` / `clear`, `daemon stop`, `version` — plus global configuration and `NEURON_*` environment overrides |
 | **Authoring** | Full YAML authoring (the canonical, zero-tooling surface) and the `@neuron/sdk` typed TypeScript surface, converging on the same canonical manifest |
 | **Runtime** | Registration of compiled assemblies with a frozen, resolved capability runtime set; per-capability runtime configuration (execution mode and timeout, retry policy and backoff, reserved resource constraints) declared on the capability runtime and defaulted by N.O.R.E.; instances (create, list, remove, clear) with restoration on restart; execution planning, scheduling, CEL mappings and validations, cancellation, deadlines, and terminal execution states; persisted and live-streamed events; built-in capability runtimes in-process; external capability runtimes out-of-process as process workers or WASM modules; graceful shutdown |
 | **Capability runtimes** | The unified module model with semantic-version resolution; `github` and `local` registries; canonical `<name>-<version>-capability-runtime.neuron.tar.gz` archives with digest verification; immutable installation into `~/.neuron/capabilityRuntimes`; both protocols (`neuron/capability-runtime-v1` over gRPC, `neuron/capability-runtime-v1-json` over stdio); the reference `example:echo` module compiled for both runtimes from one Go source |

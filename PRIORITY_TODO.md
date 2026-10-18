@@ -606,7 +606,7 @@ Keep the public product model small and consistent. Neuron is the public product
 - [ ] Use consistent public terms: Assembly, Capability, Capability Runtime, provider, `params`, and `result`; explain each once and avoid introducing unnecessary public abstractions.
 - [ ] Explain that an Assembly can be packaged as a Capability Runtime only when it is packaged with the required runtime manifest, invocation contract, and dependencies; do not imply every source Assembly is automatically installable.
 - [ ] Prefer JSON over YAML in READMEs, getting-started material, primary configuration examples, and CLI examples. Keep YAML secondary where it demonstrates supported YAML syntax or YAML-authored Assemblies.
-- [ ] Ensure examples use current command forms, including `neuron run`, `--params`, `--params-file`, `-c`/`--capability-runtime`, and explicit Assembly selection where supported.
+- [x] Ensure examples use current command forms, including `neuron run`, `--params`, `--params-file`, `-c`/`--capability-runtime`, and explicit Assembly selection where supported.
 - [ ] Remove stale daemon/global-instance instructions from public docs unless a specific advanced use case still requires them.
 - [ ] Keep provider protocol documentation focused on provider authors; keep the Capability Runtime protocol documentation focused on runtime authors.
 - [ ] Update CLI help and error messages to distinguish project Assembly execution from direct Capability Runtime invocation.
@@ -626,7 +626,7 @@ These items extend §17 and §18; they do not replace the existing migration and
 - [ ] Verify two foreground runtime sessions for the same project cannot overwrite or remove each other's discovery metadata.
 - [ ] Verify `neuron install --provider ...` resolves and installs a provider artifact immutably, and that the development bootstrap command produces artifacts the same resolver can consume.
 - [x] Verify Process and WASM are resolved as providers through the common provider registry rather than through special invocation paths. **Done.** `nore/internal/plugin` uses `mechanism.Registry` to register and start process/wasm providers. No special direct invocation paths bypass the registry.
-- [ ] Verify `neuron run -c neuron-runtime:http --params ...` works without project configuration or a running project runtime.
+- [x] Verify `neuron run -c neuron-runtime:http --params ...` works without project configuration or a running project runtime. (Verified: runs from /tmp/opencode.)
 - [ ] Verify direct Capability Runtime invocation does not install or compile missing dependencies as a side effect.
 - [ ] Verify project Assembly invocation and direct Capability Runtime invocation reject conflicting selectors and return consistent structured errors.
 - [ ] Verify public documentation uses Neuron-facing language, prefers JSON in primary examples, and does not require users to understand N.O.R.E.
