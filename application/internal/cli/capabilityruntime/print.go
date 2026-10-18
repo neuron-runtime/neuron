@@ -27,8 +27,8 @@ func printInspect(i *capabilityruntime.Installed) {
 	if len(i.Capabilities) > 0 {
 		fmt.Printf("Capabilities:\n  %s\n", strings.Join(i.Capabilities, "\n  "))
 	}
-	if len(i.Capabilities) > 0 {
-		fmt.Printf("Capabilities:\n  %s\n", strings.Join(i.Capabilities, "\n  "))
+	if len(i.Features) > 0 {
+		fmt.Printf("Features:\n  %s\n", strings.Join(i.Features, "\n  "))
 	}
 }
 

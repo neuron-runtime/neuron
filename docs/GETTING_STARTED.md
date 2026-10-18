@@ -1,13 +1,13 @@
 # Getting Started with Neuron
 
-This guide takes you from a fresh checkout to a running system in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, built with the runtime, and executed with live event streaming. No prior Neuron knowledge is assumed: building, validation, compilation, module resolution, and starting the runtime engine are all automatic.
+This guide takes you from a fresh checkout to a running system in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, built with the CLI, hosted by the project runtime, and executed with `neuron run`. No prior Neuron knowledge is assumed: building, validation, compilation, and module resolution are all automatic — the one manual step is starting the project runtime that hosts executions.
 
 ```mermaid
 flowchart LR
     A[Define an Assembly<br/>in TypeScript] --> B[neuron build<br/>build → compile → resolve → freeze]
-    B --> C[N.O.R.E. stores the compiled assembly]
-    C --> D[neuron run<br/>create an instance]
-    D --> E[Execution events streamed live]
+    B --> C[The runtime stores<br/>the compiled Assembly]
+    C --> D[neuron<br/>start the project runtime]
+    D --> E[neuron run<br/>execute → print the result]
 ```
 
 ## Prerequisites
@@ -28,7 +28,7 @@ flowchart LR
   pnpm build:sdk
   ```
 
-  No daemon setup is required. The runtime engine (N.O.R.E.) is started and stopped for you by the CLI.
+  No daemon setup is required. `neuron build` starts and stops the local runtime it needs for registration itself; running an Assembly uses the project runtime that bare `neuron` hosts for you.
 
 ---
 
@@ -56,29 +56,33 @@ The output ends with a registration key:
 order-processing-ts@2.0.0#<key>:development
 ```
 
-> N.O.R.E. was started automatically. You never start or stop it yourself.
+> Registration is self-contained: `neuron build` starts the local runtime it needs, registers the Assembly, and stops it again.
 
-Now run it. The assembly expects a typed input of `{ order: {...} }`, so pass one explicitly:
+Now run it. `neuron run` is a client of the **project runtime** — the process bare `neuron` hosts for the current project. Start it in one terminal, from the example directory:
+
+```bash
+neuron
+```
+
+```text
+N.O.R.E. project runtime started on http://localhost:45387
+Project root: .../examples/ecommerce_order_ts
+Press Ctrl-C to stop
+```
+
+Leave it running. In a second terminal, from the same directory, execute the Assembly. It expects a typed input of `{ order: {...} }`, so pass one explicitly:
 
 ```bash
 neuron run --params '{"order":{"id":"ord_1001","customerId":"cus_42","customerEmail":"ada@acme.io","currency":"USD","total":4250,"items":[{"sku":"SKU-AG-1","name":"Wireless Mouse","qty":1,"priceCents":4250}],"shippingAddress":{"street":"1 Market St","city":"San Francisco","zip":"94105"}}}'
 ```
 
-The CLI asks N.O.R.E. to create an instance and execute the assembly, streaming live execution events:
+The command sends one synchronous execution request and prints the Assembly result when execution reaches a terminal state. This pipeline declares no Assembly result mapping, so the result is `null` — success is the zero exit code:
 
 ```text
-execution.started       instance created
-capability.started      validate-order
-capability.completed    validate-order
-capability.started      parse-order
-capability.completed    parse-order
-...
-execution.completed     status: completed
+null
 ```
 
-The command returns when execution reaches a terminal state (`execution.completed`, `execution.failed`, or `execution.cancelled`).
-
-Press Ctrl-C while it runs and it cancels the execution: the CLI asks N.O.R.E. to stop the work, keeps streaming until the cancellation is reported, and exits non-zero. A second Ctrl-C force-quits.
+Stop the project runtime with Ctrl-C in the terminal that hosts it.
 
 Look at what you just ran:
 
@@ -237,25 +241,23 @@ Point the project configuration at the entry file (it must default-export the ma
 ### Build and run
 
 ```bash
-# from the repository root, link the workspace packages
-pnpm install
-pnpm build:sdk
-
 cd examples/my-first-system
 neuron build
-neuron run --params '{"order":{"id":"ord_2001","customerId":"cus_7","customerEmail":"grace@acme.io","currency":"EUR","total":2250,"items":[{"sku":"SKU-RG-2","name":"Keyboard","qty":1,"priceCents":2250}],"shippingAddress":{"street":"2 Rue de Paris","city":"Lyon","zip":"69002"}}}'
 ```
 
-Watch the events stream:
+Start this project's runtime the same way as in Part 1 — bare `neuron`, from `examples/my-first-system`, left running in its own terminal:
 
-```text
-execution.started       instance created
-capability.started      order.validate
-capability.completed    order.validate
-capability.started      payment.authorize
-capability.completed    payment.authorize
-execution.completed     status: completed
+```bash
+neuron
 ```
+
+Then execute the Assembly:
+
+```bash
+neuron run --params '{"message":"hello"}'
+```
+
+As in Part 1, one synchronous request runs the whole Assembly and the result is printed (`null` — the scaffold's `say-hello` Assembly declares no Assembly result mapping).
 
 ### Inspect what is running
 
@@ -388,7 +390,7 @@ Now run:
 neuron run --params '{"order":{"id":"ord_3001","customerId":"cus_11","customerEmail":"leo@acme.io","currency":"USD","total":1900,"items":[{"sku":"SKU-WB-3","name":"Webcam","qty":1,"priceCents":1900}],"shippingAddress":{"street":"3 King St","city":"London","zip":"EC2A 4BX"}}}'
 ```
 
-The execution launches the installed module **out-of-process**, passes your input through the capability runtime protocol, and streams the events back.
+The execution launches the installed module **out-of-process**, passes your input through the capability runtime protocol, and returns its result. For the echo module, the result mirrors the params: `neuron run --params '{"message":"hi"}'` prints `{"params":{"message":"hi"},"protocol":"neuron/capability-runtime-v1-json","type":"example:echo","version":"1.0.0"}`. Start the project runtime (`neuron` in one terminal) and run from another as before; in this example you can also run it **directly** without a project runtime using `neuron run -c example:echo --params '{"message":"hi"}'`.
 
 ---
 
