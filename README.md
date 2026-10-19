@@ -1,5 +1,7 @@
 # Neuron
 
+![Neuron](https://raw.githubusercontent.com/neuron-runtime/.github/main/profile/brand.png)
+
 A runtime for building and operating complex software systems from composable, executable capabilities.
 
 Neuron composes software from capabilities connected by explicit relationships. The runtime schedules and executes those capabilities without needing to understand their business logic.
@@ -17,6 +19,23 @@ A **capability runtime** provides the machinery that runs capabilities. Neuron s
 Neuron is not a workflow engine. A workflow is one thing an assembly can represent. The core abstraction is composition: capabilities with explicit relationships.
 
 ## How it works
+
+```mermaid
+flowchart TD
+    A["Capability Runtime"]
+    A --> B["Independent Execution"]
+    A --> C["Assembly"]
+    C --> D["Larger Application"]
+
+    E["Neuron Runtime"] -. "executes" .-> B
+    E -. "executes" .-> C
+
+    style A fill:#171717,stroke:#888,color:#fff
+    style B fill:#171717,stroke:#666,color:#fff
+    style C fill:#171717,stroke:#666,color:#fff
+    style D fill:#171717,stroke:#888,color:#fff
+    style E fill:#252525,stroke:#aaa,color:#fff
+```
 
 An assembly can be authored in any programming language that produces the Neuron Assembly manifest — the canonical representation every authoring surface converges on. Neuron ships two first-class authoring surfaces today, TypeScript and YAML, and a new language only needs to emit the canonical manifest.
 
@@ -49,7 +68,7 @@ neuron run --params '{"name":"World"}'
 
 - [Getting started](./docs/GETTING_STARTED.md)
 - [Architecture](./docs/ARCHITECTURE.md)
-- [Modules and capability runtimes](./docs/MODULES.md)
+- [Assemblies and capability runtimes](./docs/MODULES.md)
 - [Installation](./docs/INSTALLATION.md)
 - [TypeScript SDK](./packages/assembly-sdks/typescript/README.md)
 - [Go capability runtime SDK](./packages/executor-sdks/golang/README.md)
