@@ -39,7 +39,7 @@ Requirements:
 
 ## Success on both runtimes
 
-The same Go source works in both execution modes N.O.R.E. supports, selected automatically at startup from the environment the runtime provides:
+The same Go source works in both execution modes the Neuron runtime supports, selected automatically at startup from the environment the runtime provides:
 
 - as a **long-lived gRPC worker** speaking `neuron/capability-runtime-v1` over a Unix domain socket, and
 - as a **one-shot command** speaking `neuron/capability-runtime-v1-json` on stdin/stdout.
@@ -237,7 +237,7 @@ func main() {
 The SDK picks the transport at startup by inspecting the environment it was launched with:
 ```mermaid
 flowchart TD
-    A[capability runtime launched by N.O.R.E.] --> B{NEURON_CAPABILITY_RUNTIME_SOCKET set?}
+    A[capability runtime launched by Neuron] --> B{NEURON_CAPABILITY_RUNTIME_SOCKET set?}
     B -->|yes| C[gRPC worker<br/>neuron/capability-runtime-v1]
     C --> D[create readiness file<br/>NEURON_CAPABILITY_RUNTIME_READY]
     D --> F[long-lived worker pool]
@@ -335,7 +335,7 @@ To distribute both artifacts as one versioned unit, pack each pair into a canoni
 
 ## Smoke-testing locally
 
-You do not need N.O.R.E. to exercise the JSON path. A one-shot capability runtime reads a single `{"input": {...}}` document on stdin and writes `{"output": {...}}` to stdout:
+You do not need the Neuron runtime to exercise the JSON path. A one-shot capability runtime reads a single `{"input": {...}}` document on stdin and writes `{"output": {...}}` to stdout:
 
 ```text
 printf '{"input":{"document":{"name":"report.md","content":"# Q3 Revenue\n\nRevenue increased by 18%."}}}' | ./document-metadata

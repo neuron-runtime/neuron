@@ -7,7 +7,7 @@ flowchart LR
     A[TypeScript<br/>define capabilities, contracts, connections] --> B[@neuron/sdk]
     B --> C[AssemblyManifest<br/>canonical JSON]
     C --> D[neuron compiler]
-    D --> E[N.O.R.E. runtime]
+    D --> E[Neuron runtime]
 ```
 
 > [!IMPORTANT]
@@ -65,7 +65,7 @@ const validateOrder = Capability("order.validate")
 
 ### Runtime configuration
 
-A capability runtime declares **what** runs a capability. A `runtimeConfig` declares **how N.O.R.E. should drive** it: execution mode, timeout, retry behavior, and (reserved) resource constraints.
+A capability runtime declares **what** runs a capability. A `runtimeConfig` declares **how the runtime should drive** it: execution mode, timeout, retry behavior, and (reserved) resource constraints.
 
 ```ts
 const callPartner = Capability("partner.call")
@@ -81,7 +81,7 @@ const callPartner = Capability("partner.call")
   .paramsSchema<{ url: string }>();
 ```
 
-Every field is optional and every group is optional. Anything left unset is supplied by N.O.R.E.'s own defaults, so a capability that does not care can omit `runtimeConfig` entirely.
+Every field is optional and every group is optional. Anything left unset is supplied by the runtime's own defaults, so a capability that does not care can omit `runtimeConfig` entirely.
 
 | Group | Field | Meaning |
 | --- | --- | --- |
@@ -104,7 +104,7 @@ Capability("partner.notify").runtime({ ...artifact, runtimeConfig: { execution: 
 > [!IMPORTANT]
 > A `runtimeConfig` is an instruction to the runtime engine, not capability input. It is never merged into params or `config`, and is never sent to the capability runtime — the capability only ever receives the params you declare.
 
-What you declare is compiled, validated, and frozen into the registered assembly, so it participates in the assembly's identity hash. N.O.R.E.'s defaults are applied when an execution plan is built and do not change the hash, so changing a default never rewrites a deployed assembly.
+What you declare is compiled, validated, and frozen into the registered assembly, so it participates in the assembly's identity hash. The runtime's defaults are applied when an execution plan is built and do not change the hash, so changing a default never rewrites a deployed assembly.
 
 ---
 

@@ -365,47 +365,14 @@ flowchart TB
 
 A provider owns starting the capability runtime, connecting to it, health checking, executing requests, cancellation, deadlines, termination, and restart. The registry, installer, and compiler own none of that.
 
-## Running N.O.R.E.
+## N.O.R.E. transport and lifecycle
 
-In normal use you never run N.O.R.E. directly — the `neuron` CLI starts it automatically and talks to it over a Unix domain socket. The binary lives alongside the CLI in the same distribution archive.
+N.O.R.E. is the runtime process. The `neuron` CLI starts it for you; direct operation is not required for normal use. It runs in two modes:
 
-To run it by hand (for development or debugging):
+- **Project runtime** — the normal mode, started by bare `neuron` for the current project (`nore --project`). It binds loopback TCP (`runtime.host`, default `localhost`; `runtime.port`, default auto) and writes a discovery record under `<project>/.neuron/runtime/`, so later CLI commands and `neuron run` find the same endpoint.
+- **Standalone daemon** — started without a project. It binds a Unix domain socket (`~/.neuron/nore.sock`, mode `0600`) by default and uses `~/.neuron/nore` as its data directory. Flows that run outside a project context (for example `neuron build` registration) use this mode.
 
-```bash
-go build -o nore ./nore/cmd/nore
-./nore
-```
-
-With no flags this binds a Unix socket (`~/.neuron/nore.sock`) and uses `~/.neuron/nore` as its data directory. The process is a plain foreground process and shuts down cleanly on `SIGINT`/`SIGTERM`.
-
-### Flags
-
-| Flag | Meaning |
-| --- | --- |
-| `-port` | TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only) |
-| `-socket` | Unix socket for local CLI clients; empty disables Unix socket (default: `$NEURON_SOCKET` or `~/.neuron/nore.sock`) |
-| `-workers` | Capability runtime worker count (default 8) |
-| `-data-dir` | Persistent data directory (default: `$NEURON_DATA_DIR` or `~/.neuron/nore`) |
-| `-token` | API token for authenticating requests; empty loads the token from the socket's token file |
-| `-version` | Print the N.O.R.E. version and exit |
-
-At least one of `-port` or `-socket` must be configured.
-
-> [!NOTE]
-> The default configuration is **Unix socket only** — no TCP listener is opened unless `-port` is supplied explicitly. The socket is created with mode `0600`, so only the owning user can connect to the runtime API.
->
-> Exposing N.O.R.E. over TCP is opt-in and intended for development and remote operation where the deployment enforces its own network-level protection. A TCP listener refuses to start without a token.
-
-### Configuration & environment
-
-| Variable | Meaning |
-| --- | --- |
-| `NEURON_SOCKET` | Override the daemon Unix socket path |
-| `NEURON_DATA_DIR` | Override the daemon persistent data directory |
-| `NEURON_API_TOKEN` | API token presented by a client that cannot read the socket's token file |
-| `NEURON_API_TOKEN_FILE` | Relocate the token file from `<socket>.token` |
-
-Command-line flags take precedence over environment variables.
+A TCP listener refuses to start without an API token; local clients obtain the token from the socket's token file when possible. The process runs in the foreground and shuts down cleanly on `SIGINT`/`SIGTERM`.
 
 ### API surface
 
@@ -833,7 +800,7 @@ The transport is decided entirely by the frozen record's `protocol`:
 | empty | Normalized by the adapter layer to `neuron/capability-runtime-v1-json` for legacy compatibility |
 
 > [!TIP]
-> If the entrypoint does not exist, `Start` fails fast with a missing-entrypoint error instead of a confusing spawn failure.
+> If the entrypoint does not exist, `Start` fails fast with a missing-entrypoint error.
 
 ## The WASM runtime
 

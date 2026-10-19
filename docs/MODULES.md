@@ -4,16 +4,6 @@
 
 Modules are the executable spine of Neuron. A **Capability** is the logical capability; a **Capability Runtime** is the machinery that makes it operate. Both travel together as a **module** — one named, immutable, distributable unit.
 
-```mermaid
-flowchart LR
-    SRV[Capability<br/>logical capability] --> MOD[Module]
-    EXE[Capability Runtime<br/>operating machinery] --> MOD
-    MOD --> REG[Registry]
-    REG --> PKG[Package archive]
-    PKG --> STORE[Immutable store]
-    STORE --> RT[Provider<br/>process · wasm]
-```
-
 > [!NOTE]
 > Whether a capability is a logical operation or the machinery that executes it, to every other part of Neuron it is a module: something with a name, a contract, and a way to be run.
 
@@ -23,8 +13,8 @@ flowchart LR
 
 | Family | Hosting | Resolution | Examples |
 | --- | --- | --- | --- |
-| **Built-in modules** | In-process inside N.O.R.E. | Never resolved or installed | `neuron:core:set` |
-| **External modules** | Out-of-process by N.O.R.E. | Resolved, verified, installed by the CLI | `example:echo`, `neuron-runtime:github:read` |
+| **Built-in modules** | In-process inside the Neuron runtime | Never resolved or installed | `neuron:core:set` |
+| **External modules** | Out-of-process, hosted by the Neuron runtime | Resolved, verified, installed by the CLI | `example:echo`, `neuron-runtime:github:read` |
 
 This document is about the second family. Providers — the hosts that run external modules — are a separate artifact type, covered in [Provider installation](#provider-installation).
 
@@ -43,7 +33,7 @@ flowchart TB
     E --> F[Installation<br/>install immutably into the store]
     F --> G[Store<br/>~/.neuron/capabilityRuntimes/&lt;owner&gt;/&lt;path&gt;/&lt;version&gt;]
     G --> H[Freezing<br/>exact versions recorded into the registered Assembly]
-    H --> I[Runtime<br/>N.O.R.E. launches the frozen capability runtimes]
+    H --> I[Runtime<br/>the Neuron runtime launches the frozen capability runtimes]
     I --> J[Instance<br/>a live running realization]
 ```
 
@@ -215,19 +205,7 @@ With no `capabilityRuntimes.registries` block, only built-in capability runtimes
 
 ## Resolution & installation
 
-Resolution is performed by the CLI during `neuron add` and `neuron build`:
-
-```mermaid
-flowchart TB
-    A[Requirement<br/>name + constraint + allowed registries] --> B{Already satisfied<br/>in the store?}
-    B -->|yes| C[Use installed version<br/>no network]
-    B -->|no| D[Per configured registry: list available versions]
-    D --> E[SelectVersion constraint + versions<br/>semver chosen by the resolver]
-    E --> F[Package type + version<br/>immutable package from the registry]
-    F --> G[Verify<br/>declared digests + manifest re-validation]
-    G --> H[Install immutably into the store]
-    H --> I[Installed capability runtime]
-```
+Resolution is performed by the CLI during `neuron add` and `neuron build`. If the requirement is already satisfied in the store, the installed version is used with no network access; otherwise each configured registry is queried for available versions, the best semver match is selected, verified against its declared digests and re-validated manifest, and installed immutably into the store.
 
 Installation is atomic: artifacts are staged, verified, and reconciled against the inner manifest before the final immutable record is written (`install.json`). The installed layout mirrors the logical name:
 
@@ -293,7 +271,7 @@ bootstrap: providers available in /home/user/.neuron/providers
 
 ## Freezing into registered assemblies
 
-When you `neuron build` an assembly that references external capability runtimes, the CLI resolves every requirement and records the **exact** resolved version, artifact digest, and launch details into the registration payload handed to N.O.R.E.
+When you `neuron build` an assembly that references external capability runtimes, the CLI resolves every requirement and records the **exact** resolved version, artifact digest, and launch details into the registration payload handed to the Neuron runtime.
 
 The runtime therefore never resolves anything — it receives a closed set of frozen capability runtimes and launches instances from them. This gives three guarantees:
 
@@ -305,7 +283,7 @@ The runtime therefore never resolves anything — it receives a closed set of fr
 
 ## Executing installed modules
 
-N.O.R.E. hosts external modules out-of-process. The runtime dispatches on `runtime.type`:
+The Neuron runtime hosts external modules out-of-process. It dispatches on `runtime.type`:
 
 - **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [the process runtime](./ARCHITECTURE.md#the-process-runtime).
 - **WASM runtime** — a WASI module loaded into an embedded, sandboxed runtime, with a fresh module instance per request. See [the WASM runtime](./ARCHITECTURE.md#the-wasm-runtime).
@@ -356,6 +334,9 @@ The runtime also injects execution context as environment variables, so a capabi
 ## Authoring a module
 
 Authoring an external module means producing a directory that satisfies the capability runtime contract and then distributing it through a registry. There is no constraint on the language — only on the protocol.
+
+> [!NOTE]
+> An Assembly can be packaged as a Capability Runtime only when it is packaged with the required runtime manifest, invocation contract, and dependencies. Assemblies are authored in any language that produces the canonical assembly manifest (TypeScript and YAML today); the authoring source alone does not make an Assembly installable. Every other Assembly remains a source artifact until it is packaged with the contract above.
 
 ### The easy path — the Go SDK
 
@@ -430,10 +411,10 @@ neuron capability runtime inspect example:echo@1.0.0
 
 ## Built-in modules
 
-N.O.R.E. ships a small set of built-in modules for common operations. They run **in-process** inside the runtime engine and require no resolution or installation — referencing one in a Capability is a plain module reference, and the runtime dispatches it directly to the in-process implementation.
+The Neuron runtime ships a small set of built-in modules for common operations. They run **in-process** inside the runtime engine and require no resolution or installation — referencing one in a Capability is a plain module reference, and the runtime dispatches it directly to the in-process implementation.
 
 > [!IMPORTANT]
-> Built-ins are the deliberate exception to out-of-process hosting: they are part of N.O.R.E. itself (and thereby of the trusted, tested runtime). Everything else follows the external-module path above, with verification and process/WASM isolation.
+> Built-ins are the deliberate exception to out-of-process hosting: they are part of the Neuron runtime itself (and thereby of the trusted, tested runtime). Everything else follows the external-module path above, with verification and process/WASM isolation.
 
 ---
 
@@ -444,7 +425,7 @@ N.O.R.E. ships a small set of built-in modules for common operations. They run *
 
 - Artifacts are verified by digest whenever the manifest declares a SHA-256. A digest declaration is not proof of trustworthiness — it proves the artifact is the one the publisher shipped.
 - GitHub is a **distribution source, not a security boundary**. A release asset is not automatically trustworthy.
-- Hosting is out-of-process; arbitrary external code never runs inside the N.O.R.E. address space.
+- Hosting is out-of-process; arbitrary external code never runs inside the Neuron runtime's address space.
 - Features are metadata. The runtime enforces permissions, never the manifest.
 
 ---

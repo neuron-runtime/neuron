@@ -600,18 +600,18 @@ Defects surfaced while implementing §22. Each finding is checked when the defec
 
 Keep the public product model small and consistent. Neuron is the public product name; N.O.R.E. is an internal implementation name and should not be required knowledge for users.
 
-- [ ] Audit README files, CLI help, generated messages, examples, and user-facing docs for internal names such as `N.O.R.E.`; replace them with `Neuron runtime` or simply `Neuron` where the implementation detail is irrelevant.
-- [ ] Keep internal package/process names where they are technically useful; do not perform a broad internal rename solely for aesthetics.
-- [ ] Describe Neuron as a platform for composable software, not primarily as a workflow engine.
-- [ ] Use consistent public terms: Assembly, Capability, Capability Runtime, provider, `params`, and `result`; explain each once and avoid introducing unnecessary public abstractions.
-- [ ] Explain that an Assembly can be packaged as a Capability Runtime only when it is packaged with the required runtime manifest, invocation contract, and dependencies; do not imply every source Assembly is automatically installable.
-- [ ] Prefer JSON over YAML in READMEs, getting-started material, primary configuration examples, and CLI examples. Keep YAML secondary where it demonstrates supported YAML syntax or YAML-authored Assemblies.
+- [x] Audit README files, CLI help, generated messages, examples, and user-facing docs for internal names such as `N.O.R.E.`; replace them with `Neuron runtime` or simply `Neuron` where the implementation detail is irrelevant. **Done.** Root `README.md`, `docs/`, `application/README.md`, and the package SDK READMEs now use Neuron-facing language; `N.O.R.E.` remains only in `AGENTS.md`, `docs/ARCHITECTURE.md` (internal architecture), and this task record.
+- [x] Keep internal package/process names where they are technically useful; do not perform a broad internal rename solely for aesthetics. **Done.** Packages, the `nore` runtime binary, and the `executor-sdks` paths are unchanged.
+- [x] Describe Neuron as a platform for composable software, not primarily as a workflow engine. **Done.**
+- [x] Use consistent public terms: Assembly, Capability, Capability Runtime, provider, `params`, and `result`; explain each once and avoid introducing unnecessary public abstractions. **Done.**
+- [x] Explain that an Assembly can be packaged as a Capability Runtime only when it is packaged with the required runtime manifest, invocation contract, and dependencies; do not imply every source Assembly is automatically installable. **Done.** See the note in `docs/MODULES.md`.
+- [x] Prefer JSON over YAML in READMEs, getting-started material, primary configuration examples, and CLI examples. Keep YAML secondary where it demonstrates supported YAML syntax or YAML-authored Assemblies. **Done.**
 - [x] Ensure examples use current command forms, including `neuron run`, `--params`, `--params-file`, `-c`/`--capability-runtime`, and explicit Assembly selection where supported.
-- [ ] Remove stale daemon/global-instance instructions from public docs unless a specific advanced use case still requires them.
-- [ ] Keep provider protocol documentation focused on provider authors; keep the Capability Runtime protocol documentation focused on runtime authors.
-- [ ] Update CLI help and error messages to distinguish project Assembly execution from direct Capability Runtime invocation.
-- [ ] Remove duplicated explanations, stale examples, dead documentation, and terminology that no longer maps to a real implementation.
-- [ ] Add documentation checks or targeted tests for key public command/config examples where practical.
+- [x] Remove stale daemon/global-instance instructions from public docs unless a specific advanced use case still requires them. **Done.** Public docs describe the per-project runtime; `neuron daemon`/`neuron instance` are documented only as advanced surfaces.
+- [x] Keep provider protocol documentation focused on provider authors; keep the Capability Runtime protocol documentation focused on runtime authors. **Done.** Provider artifacts are documented in `docs/MODULES.md` "Provider installation"; the capability runtime protocol is documented in the executor SDK READMEs.
+- [x] Update CLI help and error messages to distinguish project Assembly execution from direct Capability Runtime invocation. **Done.**
+- [x] Remove duplicated explanations, stale examples, dead documentation, and terminology that no longer maps to a real implementation. **Done.**
+- [ ] Add documentation checks or targeted tests for key public command/config examples where practical. _(Deferred: no docs guard test added; existing example/integration tests cover command behavior. Revisit if regressions appear.)_
 
 ## 24. Migration and Acceptance Additions
 

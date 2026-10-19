@@ -31,7 +31,7 @@ Requirements:
 
 ## How the SDK hosts a capability runtime
 
-This SDK implements the **`neuron/capability-runtime-v1`** wire protocol only: a long-lived gRPC server on a Unix domain socket, matching the worker model of the N.O.R.E. process runtime.
+This SDK implements the **`neuron/capability-runtime-v1`** wire protocol only: a long-lived gRPC server on a Unix domain socket, matching the worker model of the Neuron process runtime.
 
 The legacy `neuron/capability-runtime-v1-json` stdin/stdout transport is deliberately **not** provided. A capability runtime built with this SDK must be launched by the process runtime (the runtime injects `NEURON_CAPABILITY_RUNTIME_SOCKET`); the SDK fails fast if that contract is missing.
 
@@ -134,7 +134,7 @@ return await ExecutorServer.RunAsync(handler);
 
 ## Transport and environment
 
-The SDK reads its transport contract from the environment injected by the N.O.R.E. process runtime:
+The SDK reads its transport contract from the environment injected by the Neuron process runtime:
 
 | Variable                   | When set / meaning                                                                                   |
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |

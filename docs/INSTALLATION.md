@@ -1,14 +1,8 @@
 # Installation
 
-**One product, one binary.** The `neuron` CLI and the N.O.R.E. runtime engine ship together in a single archive. You install `neuron`, and the CLI locates and starts the bundled runtime engine for you — there is nothing else to install, start, or maintain.
+**One product, one binary.** The `neuron` CLI and the `nore` runtime ship together in a single archive. You install `neuron`, and the CLI locates and starts the bundled runtime for you — there is nothing else to install, start, or maintain.
 
-```mermaid
-flowchart LR
-    A[Release archive] --> B[neuron CLI]
-    A --> C[nore runtime engine]
-    B -->|starts on demand| C
-    B -->|local Unix socket| C
-```
+There is no daemon to install and no service to manage. The CLI runs the Neuron runtime as needed: it starts a project runtime bound to loopback TCP, and later commands find it again through the project's runtime discovery record under `<project>/.neuron/runtime/`.
 
 ---
 
@@ -22,7 +16,7 @@ Release archives are published for the following platforms:
 | macOS | `amd64`, `arm64` |
 | Windows | `amd64` |
 
-Each archive contains both the `neuron` CLI and the `nore` runtime engine. On every platform the product is used the same way: you invoke `neuron`, and the CLI runs the engine.
+Each archive contains both the `neuron` CLI and the `nore` runtime. On every platform the product is used the same way: you invoke `neuron`, and the CLI runs the runtime.
 
 ---
 
@@ -74,7 +68,7 @@ sudo mv neuron/neuron /usr/local/bin/neuron
 On Windows, add the extracted folder to your `PATH` environment variable, or move `neuron.exe` into a directory already on your `PATH`.
 
 > [!TIP]
-> Keep the `nore` binary next to `neuron` in the same directory. When the runtime engine is not found on the system `PATH`, the CLI falls back to a `nore` executable sitting beside itself — which is exactly the layout the release archive ships.
+> Keep the `nore` binary next to `neuron` in the same directory. When the runtime is not found on the system `PATH`, the CLI falls back to a `nore` executable sitting beside itself — which is exactly the layout the release archive ships.
 
 ### 4. Verify
 
@@ -82,7 +76,7 @@ On Windows, add the extracted folder to your `PATH` environment variable, or mov
 neuron version
 ```
 
-That is the entire install. There is no daemon to configure, no service to start, and no environment to initialize — the runtime engine ships with the CLI and is started on demand.
+That is the entire install. No daemon to configure, no service to start, no environment to initialize — the CLI starts the runtime on demand.
 
 ---
 
@@ -103,7 +97,7 @@ cd neuron
 go build -o neuron ./application/cmd/neuron
 ```
 
-`application` and `nore` are separate Go modules in a workspace; the command above builds the CLI from within the workspace. The CLI locates the runtime engine by falling back to a `nore` executable in its own directory, a `nore` build inside the source tree, or the system `PATH`; you can pin a specific runtime with `--nore-path` or `daemon.norePath`.
+`application` and `nore` are separate Go modules in a workspace; the command above builds the CLI from within the workspace. The CLI locates the runtime by falling back to a `nore` executable in its own directory, a `nore` build inside the source tree, or the system `PATH`; you can pin a specific runtime explicitly with `--nore-path <path>`.
 
 Install the built binary wherever you keep executables:
 
@@ -111,7 +105,7 @@ Install the built binary wherever you keep executables:
 sudo mv neuron /usr/local/bin/neuron
 ```
 
-### Build the runtime engine separately
+### Build the runtime separately
 
 The CLI and the runtime are separate binaries. To build both for development:
 
@@ -195,11 +189,13 @@ Remove the binary from your PATH:
 sudo rm /usr/local/bin/neuron
 ```
 
-If you want to remove local state created by the CLI and the runtime (registered assemblies, instances, installed modules, and the daemon socket/data), delete the Neuron directory under your home folder:
+If you want to remove local state created by the CLI and the runtime (registered assemblies, instances, installed modules, and per-project runtime records), delete the Neuron directory under your home folder:
 
 ```bash
 rm -r ~/.neuron
 ```
+
+Also delete any project-local `.neuron/` directories in projects you no longer need.
 
 > [!WARNING]
 > Removing `~/.neuron` destroys installed modules, registered assemblies, and execution history. Do it only if you really want a clean slate.
@@ -218,7 +214,7 @@ External modules are hosted out-of-process by the runtime; executing them has th
 
 ## Notes for Linux users
 
-Release archives are built for glibc-based Linux distributions (`amd64` and `arm64`). If you are on a minimal distribution, verify the runtime engine starts as part of the [smoke test](#smoke-test-the-full-flow).
+Release archives are built for glibc-based Linux distributions (`amd64` and `arm64`). If you are on a minimal distribution, verify the runtime starts as part of the [smoke test](#smoke-test-the-full-flow).
 
 ---
 
@@ -246,22 +242,9 @@ External modules must be resolvable through a configured registry. The shipped e
 </details>
 
 <details>
-<summary><strong>The runtime engine cannot be found</strong></summary>
+<summary><strong>The runtime cannot be found</strong></summary>
 
-The CLI looks for the `nore` runtime binary beside itself, then in the source tree, then on the system `PATH`. If none is found it reports `nore runtime not found`. Set `daemon.norePath` in config or pass `--nore-path <path>` to point at the runtime binary explicitly.
-
-</details>
-
-<details>
-<summary><strong>A stale daemon socket</strong></summary>
-
-If a previous CLI run was killed unusually and `neuron` reports a socket error, remove the stale socket file:
-
-```bash
-rm ~/.neuron/nore.sock
-```
-
-The CLI recreates it on the next run.
+The CLI looks for the `nore` runtime binary beside itself, then in the source tree, then on the system `PATH`. If none is found it reports `nore runtime not found`. Keep `nore` next to `neuron` as the release archive ships it, or pass `--nore-path <path>` to point at the runtime binary explicitly.
 
 </details>
 
@@ -276,7 +259,7 @@ Each distributable artifact has its own version line and its own tag prefix, so 
 
 | Artifact | Registry | Tag | Workflow | Credentials |
 | --- | --- | --- | --- | --- |
-| `neuron` CLI + N.O.R.E. binaries | GitHub Releases | `v*` | `.github/workflows/release.yml` | `GITHUB_TOKEN` (built in) |
+| `neuron` CLI + Neuron runtime binaries | GitHub Releases | `v*` | `.github/workflows/release.yml` | `GITHUB_TOKEN` (built in) |
 | `@neuron/sdk` | npm | `sdk-v*` | `.github/workflows/publish-sdk.yml` | npm trusted publishing (OIDC) |
 | `Neuron.Executor` | NuGet | `dotnet-v*` | `.github/workflows/publish-executor-dotnet.yml` | NuGet trusted publishing (OIDC) |
 | `shared` Go module | Go module proxy | `shared/v*` | `.github/workflows/publish-go-sdk.yml` | none (tags only) |
