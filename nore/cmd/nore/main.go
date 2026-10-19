@@ -147,7 +147,7 @@ func main() {
 			log.Fatalf("listen on %s: %v", port, err)
 		}
 		listeners = append(listeners, listenerEntry{"tcp", l})
-		fmt.Printf("N.O.R.E. listening on %s\n", port)
+		fmt.Printf("Neuron runtime listening on %s\n", port)
 	}
 
 	if socket != "" {
@@ -171,7 +171,7 @@ func main() {
 			log.Fatalf("secure unix socket %s: %v", socket, err)
 		}
 		listeners = append(listeners, listenerEntry{"unix", l})
-		fmt.Printf("N.O.R.E. local socket: %s\n", socket)
+		fmt.Printf("Neuron runtime socket: %s\n", socket)
 	}
 
 	if len(listeners) == 0 {
@@ -354,7 +354,7 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	}
 
 	// Print the canonical URL for the user
-	fmt.Printf("N.O.R.E. project runtime started on http://%s:%s\n", host, portStr)
+	fmt.Printf("Neuron project runtime started on http://%s:%s\n", host, portStr)
 	fmt.Printf("Project root: %s\n", absRoot)
 	fmt.Printf("Press Ctrl-C to stop\n")
 

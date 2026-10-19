@@ -1,5 +1,5 @@
-// Package client provides the official SDK for interacting with the N.O.R.E. API.
-// It abstracts the underlying transport (local socket or remote HTTP) and
+// Package client provides the Go client for interacting with the Neuron runtime
+// API. It abstracts the underlying transport (local socket or remote HTTP) and
 // handles protocol serialization for assemblies, instances, and executions.
 package client
 

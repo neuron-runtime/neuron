@@ -63,7 +63,7 @@ func SetupClient(ctx context.Context, opts Options) (*client.Client, func(), err
 	// If daemon.Endpoint is set, we simply ping the remote server and skip the daemon!
 	if err := rtManager.Ensure(ctx, cfg.Daemon.Endpoint != ""); err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("failed to ensure N.O.R.E runtime: %w", err)
+		return nil, nil, fmt.Errorf("failed to ensure Neuron runtime: %w", err)
 	}
 
 	// A daemon generates its API token when it starts, so a client that
@@ -146,7 +146,7 @@ func resolveNoreBinary(custom, exe string) (string, error) {
 	}
 
 	return "", errors.New(
-		"nore runtime not found: set daemon.norePath (or --nore-path) to the N.O.R.E. daemon binary",
+		"Neuron runtime binary not found: set --nore-path (or daemon.norePath) to the runtime binary",
 	)
 }
 

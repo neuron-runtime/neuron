@@ -10,8 +10,8 @@ var instanceID string
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Instance,
-		Short: "Manage N.O.R.E. assemblies instances",
-		Long:  `Create, list, and manage running assemblies instances.`,
+		Short: "Manage Assembly instances and their executions",
+		Long:  `Advanced: list and manage running Assembly instances and inspect their executions.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

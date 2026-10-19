@@ -46,9 +46,9 @@ func Execute() error {
 func init() {
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "project config file (defaults to neuron.config.json, then neuron.config.yaml/yml)")
 	RootCmd.PersistentFlags().String("log-level", "info", "Set the assemblies logging level")
-	RootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output (shows N.O.R.E. daemon logs)")
-	RootCmd.PersistentFlags().String("remote", "", "Remote N.O.R.E. endpoint (e.g., https://api.nore.example.com)")
-	RootCmd.PersistentFlags().String("nore-path", "", "Path to the nore daemon binary")
+	RootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output (shows runtime logs)")
+	RootCmd.PersistentFlags().String("remote", "", "Remote Neuron runtime endpoint (e.g., https://api.neuron.example.com)")
+	RootCmd.PersistentFlags().String("nore-path", "", "Path to the Neuron runtime binary")
 	RootCmd.PersistentFlags().Bool("force", false, "Force replacement (clear existing state before the command acts)")
 
 	// Load the effective configuration once flags are parsed and inject it on

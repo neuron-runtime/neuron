@@ -16,7 +16,7 @@ import (
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Daemon,
-		Short: "Manage the local N.O.R.E. daemon",
+		Short: "Manage the local background runtime process",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -30,7 +30,7 @@ func New() *cobra.Command {
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the background N.O.R.E. daemon",
+		Short: "Stop the background runtime process",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
 			defer cancel()
@@ -47,7 +47,7 @@ func newStopCmd() *cobra.Command {
 			rep := ui.New(cmd.ErrOrStderr())
 			defer rep.Stop()
 
-			rep.Info("Stopping N.O.R.E. daemon...")
+			rep.Info("Stopping background runtime process...")
 
 			if err := manager.Stop(ctx); err != nil {
 				if errors.Is(err, noredaemon.ErrNotRunning) {

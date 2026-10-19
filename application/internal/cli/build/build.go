@@ -76,11 +76,11 @@ type Options struct {
 func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Build,
-		Short: "Build the project and register its Assemblies with N.O.R.E.",
+		Short: "Build the project and register its Assemblies with the Neuron runtime.",
 		Long: "Build every declared Assembly for the given authoring language, compile each " +
 			"manifest to a core.Assembly, build and install any local capability runtimes, " +
 			"resolve and freeze each Assembly's exact capability runtime set, and register the " +
-			"compiled Assemblies with N.O.R.E. The outcome is persisted in .neuron/builds, which " +
+			"compiled Assemblies with the Neuron runtime. The outcome is persisted in .neuron/builds, which " +
 			"`neuron run` uses to address a registered Assembly.",
 		RunE: Handler,
 	}
@@ -365,8 +365,8 @@ func saveBuildRecord(root, fingerprint string, assemblies []project.AssemblyBuil
 }
 
 // register compiles one Assembly manifest, resolves and freezes its capability
-// runtime set and provider identities, and registers it with N.O.R.E. through
-// the shared client. It returns the registration response, the frozen
+// runtime set and provider identities, and registers it with the Neuron runtime
+// through the shared client. It returns the registration response, the frozen
 // capability runtime set, and the frozen provider set used to serve
 // executions.
 func register(ctx context.Context, c *client.Client, cfg config.Config, m *manifest.Assembly, force bool) (*protocol.RegisterResponse, []capabilityrt.ResolvedCapabilityRuntime, []providertypes.ResolvedProvider, error) {
