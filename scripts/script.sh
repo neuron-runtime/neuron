@@ -10,7 +10,7 @@ go_modules=(
   "./nore"
   "./shared"
   "./application"
-"./packages/executor-sdks/golang"
+  "./packages/executor-sdks/golang"
 )
 
 for mod in "${go_modules[@]}"; do
@@ -21,6 +21,18 @@ for mod in "${go_modules[@]}"; do
   echo "== Go: $mod =="
   (
     cd "$mod" || exit 1
+    # Module integrity: tidy each module with GOWORK=off so the workspace's
+    # implicit `shared` substitution cannot hide a stale go.mod/go.sum. This
+    # mirrors CI's module-integrity job; a non-tidy module fails here instead
+    # of only in CI. The tidy result must be committed.
+    GOWORK=off go mod tidy || {
+      echo "FAILED: $mod go mod tidy" >&2
+      exit 1
+    }
+    if ! git diff --exit-code -- go.mod go.sum >/dev/null; then
+      echo "FAILED: $mod go.mod/go.sum not tidy; commit the tidy result" >&2
+      exit 1
+    fi
     # Build into a scratch directory so `go build ./...` never drops binaries
     # into the source tree. Library-only modules (no package main) have nothing
     # to link, so build them without -o; the scratch dir only applies when there
