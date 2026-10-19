@@ -1,9 +1,8 @@
 # Neuron Command Line Reference
 
-The `neuron` CLI is the single user-facing interface to Neuron: author projects, build and register assemblies, manage external modules, create instances, execute assemblies, and stream execution events while it manages the N.O.R.E. runtime engine (the daemon) for you in the background.
+The `neuron` CLI is the single user-facing interface to Neuron: author projects, build and register assemblies, manage capability runtimes and providers, and execute assemblies.
 
-> [!IMPORTANT]
-> You never interact with the N.O.R.E. daemon directly. The CLI starts it, checks its health, talks to it over a local Unix socket, and stops it. From the user's perspective there is a single product: `neuron`.
+The CLI runs the Neuron runtime as needed. There is no global background daemon to manage in the normal workflow: each project has its own runtime endpoint (loopback TCP by default, `runtime.host` / `runtime.port` in the project config), and the CLI discovers it through the project's `.neuron/` state (for example `.neuron/runtime/`). You run commands; the runtime lifecycle follows the project.
 
 Everything in the [command reference](#command-reference) is generated from the actual command definitions in this module (`application/cmd/neuron` and `application/internal/cli`), so it stays accurate as long as it is kept in sync with the code.
 
@@ -11,27 +10,21 @@ Everything in the [command reference](#command-reference) is generated from the 
 sequenceDiagram
     participant U as User
     participant C as neuron CLI
-    participant D as N.O.R.E. daemon
-    participant S as Capability Runtime Store
+    participant R as Project runtime (loopback TCP)
 
     U->>C: neuron build
     C->>C: build project → canonical manifest
     C->>C: compile → resolve modules → freeze versions
-    C->>D: daemon healthy?
-    alt not running
-        C->>D: start bundled nore (Unix socket + data dir)
-    end
-    C->>D: POST /v1/register (compiled assembly + frozen capability runtimes)
-    D-->>C: assembly key
+    C->>R: start project runtime if needed (discovered via .neuron/runtime/)
+    C->>R: register compiled assembly + frozen capability runtimes
+    R-->>C: assembly key
     C-->>U: built and registered with key
 
     U->>C: neuron run --params '{...}'
-    C->>D: POST /v1/run?assembly=<key>
-    D-->>C: Assembly result
+    C->>R: synchronous run request (discovered endpoint)
+    R-->>C: Assembly result
     C-->>U: result on stdout (JSON or text)
 ```
-
-
 
 [Version](https://github.com/neuron-runtime/neuron/releases)
 [Go](https://go.dev)
@@ -39,23 +32,19 @@ sequenceDiagram
 
 ---
 
-
-
 ## Table of Contents
 
 - [Install & Verify](#install--verify)
-- [How the CLI Talks to N.O.R.E.](#how-the-cli-talks-to-nore)
 - [Global Flags](#global-flags)
 - [Command Reference](#command-reference)
+- [Advanced](#advanced)
 - [Configuration Reference](#configuration-reference)
 - [Module Resolution](#module-resolution)
 - [Building the CLI](#building-the-cli)
 
-
-
 ## Install & Verify
 
-Neuron is distributed as a single archive containing the `neuron` CLI and the N.O.R.E. runtime. You only place `neuron` on your `PATH`.
+Neuron is distributed as a single archive containing the `neuron` CLI and the Neuron runtime. You only place `neuron` on your `PATH`.
 
 ```bash
 neuron version
@@ -63,50 +52,22 @@ neuron version
 
 See [docs/INSTALLATION.md](../docs/INSTALLATION.md) for the full installation guide.
 
-## How the CLI Talks to N.O.R.E.
-
-The CLI communicates with the N.O.R.E. daemon over a local Unix domain socket. When you run a command that needs the runtime, the CLI automatically:
-
-1. Checks whether the daemon is already healthy.
-2. If not, starts it from the bundled `nore` binary with the effective configuration (socket path, data directory, worker count).
-3. Talks to it over the socket.
-
-The daemon runs as a persistent background process: it survives the CLI process and keeps serving instances until you stop it with `neuron daemon stop`. The socket defaults to `~/.neuron/nore.sock` and can be overridden with the `NEURON_SOCKET` environment variable or the `daemon.socket` value in the machine-level global configuration (`~/.config/neuron/config.yaml`) — `daemon.*` is rejected from project configuration. A remote daemon can be used instead with the `--remote` flag.
-
-The API requires a bearer token on every request except the health probe. The daemon generates one at startup and publishes it beside its socket in `nore.sock.token` (mode `0600`), so a local client authenticates automatically; `neuron` reads it from there, or from `NEURON_API_TOKEN` when the token file is not reachable (for example against `--remote`). The token is removed on graceful shutdown, because a credential outliving the process that issued it is a credential nobody rotated.
-
-
-| Transport            | Purpose                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| JSON over HTTP       | Regular requests — registration, instance and execution management |
-| WebSocket (`/v1/ws`) | Live execution event streaming                                     |
-| Server-Sent Events   | Streaming fallback for transports without WebSocket support        |
-
-
-
-
 ## Global Flags
 
 The following flags are available on every `neuron` command.
-
 
 | Flag                 | Description                                                      |
 | -------------------- | ---------------------------------------------------------------- |
 | `--config string`    | Project config file (one of `neuron.config.json` / `.yaml` / `.yml`; auto-discovered) |
 | `--log-level string` | Logging level (default `"info"`)                                 |
-| `-v, --verbose`      | Enable verbose output (shows N.O.R.E. daemon logs)               |
-| `--remote string`    | Remote N.O.R.E. endpoint (e.g., `https://api.nore.example.com`)  |
-| `--nore-path string` | Path to the `nore` daemon binary                                 |
+| `-v, --verbose`      | Enable verbose output                                            |
+| `--remote string`    | Remote Neuron runtime endpoint (e.g., `https://api.example.com`) |
+| `--nore-path string` | Path to the runtime binary                                       |
 | `--force`            | Force replacement (clear existing state before the command acts) |
 | `-h, --help`         | Help for the command                                             |
 | `--version`          | Print the CLI version and exit                                   |
 
-
-
-
 ## Command Reference
-
-
 
 ### `neuron version`
 
@@ -161,7 +122,7 @@ The scaffolded config declares the project identity (`name` / `version`, which m
 
 ### `neuron build`
 
-Build the current project and register the assembly with N.O.R.E.
+Build the current project and register the assembly with the runtime.
 
 ```
 Usage:
@@ -178,8 +139,8 @@ Flags:
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Build**    | The project (YAML or TypeScript) is resolved into the canonical `.neuron/manifest.json`                                                                                                                                                    |
 | **Compile**  | The canonical manifest is compiled into a runtime assembly representation                                                                                                                                                                   |
-| **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the build record. Built-in modules are skipped — they run in-process inside N.O.R.E. |
-| **Register** | The compiled assembly and its frozen module set are sent to N.O.R.E., which persists it and returns an assembly key                                                                                                                          |
+| **Resolve**  | External module requirements are resolved through the configured registries, installed into the local store, and the exact versions are frozen into the build record. Built-in modules are skipped — they run in-process inside the Neuron runtime |
+| **Register** | The compiled assembly and its frozen module set are registered with the runtime, which persists it and returns an assembly key                                                                                                               |
 
 The CLI records the registration key in `.neuron/register.json` and prints it on success:
 
@@ -215,10 +176,10 @@ Flags:
       --params string      JSON params payload for execution (e.g., '{"key":"value"}')
       --params-file string Path to JSON file with params payload
       --port string        Override local runtime port (default: auto-discover from project)
-      --remote string      Remote N.O.R.E. endpoint (e.g., http://host:port)
+      --remote string      Remote Neuron runtime endpoint (e.g., http://host:port)
 ```
 
-`neuron run` is a client of the project runtime. It discovers the runtime that bare `neuron` started, sends one synchronous execution request to `POST /v1/run`, and prints the Assembly result to stdout. It does not start or stop the runtime, stream events, or return execution handles — advanced execution inspection is exposed through the API rather than the normal `run` output.
+`neuron run` is a client of the project runtime. It discovers the project's runtime endpoint (from `.neuron/` state or the project config), sends one synchronous execution request, and prints the Assembly result to stdout. It does not stream events or return execution handles — advanced execution inspection is exposed through the API rather than the normal `run` output.
 
 The Assembly is addressed by the `assembly` selector on the request URL, never inside the params payload, so the same command works whether the runtime hosts one Assembly or many. Without an argument, `neuron run` uses the key of the current project build — the one `neuron build` recorded in `.neuron/current.json`. With a target argument it addresses that Assembly instead:
 
@@ -248,9 +209,9 @@ neuron run order-processing
 neuron run --format text
 ```
 
-stdout contains only the Assembly result in the selected `--format`; logs, diagnostics, and execution errors go to stderr, and a failed or cancelled execution exits non-zero. The result comes from one synchronous `POST /v1/run` request — the command does not stream events, expose execution handles, or list execution history.
+stdout contains only the Assembly result in the selected `--format`; logs, diagnostics, and execution errors go to stderr, and a failed or cancelled execution exits non-zero. The result comes from one synchronous request — the command does not stream events, expose execution handles, or list execution history.
 
-Starting, observing, streaming, and cancelling executions remain available as advanced API operations: `POST /v1/instances/{id}/executions` starts an execution (optionally detached), its event stream is served over `WS /v1/ws` or `GET .../events/stream`, and `POST /v1/instances/{id}/executions/{execID}/cancel` stops one — answering `404` if there is no such instance or execution, `409` if it already reached a terminal state, and `200` if this call stopped it.
+Starting, observing, streaming, and cancelling executions remain available as advanced API operations: starting an execution (optionally detached), streaming its events, and cancelling a specific execution.
 
 ### `neuron add`
 
@@ -289,25 +250,21 @@ Usage:
 neuron remove example:echo@1.0.0
 ```
 
+### `neuron capability runtime`
 
-
-### `neuron capability-runtime`
-
-Manage external capability runtime (module) packages installed in the local store.
+Inspect capability runtime packages installed in the local store. (Installing or removing a package is done with the top-level `neuron add` and `neuron remove` commands, since those change what a project pins.)
 
 ```
 Usage:
-  neuron capability-runtime [flags]
-  neuron capability-runtime [command]
+  neuron capability runtime [flags]
+  neuron capability runtime [command]
 
 Available Commands:
   inspect     Inspect an installed capability runtime
   list        List installed capability runtimes
 ```
 
-
-
-#### `neuron capability-runtime list`
+#### `neuron capability runtime list`
 
 List installed capability runtimes.
 
@@ -318,28 +275,24 @@ Flags:
 
 ```bash
 # List everything installed
-neuron capability-runtime list
+neuron capability runtime list
 
 # Only show capability runtimes of one type
-neuron capability-runtime list --type process
+neuron capability runtime list --type process
 ```
 
-
-
-#### `neuron capability-runtime inspect`
+#### `neuron capability runtime inspect`
 
 Inspect an installed capability runtime.
 
 ```
 Usage:
-  neuron capability-runtime inspect [name@version] [flags]
+  neuron capability runtime inspect [name@version] [flags]
 ```
 
 ```bash
-neuron capability-runtime inspect example:echo@1.0.0
+neuron capability runtime inspect example:echo@1.0.0
 ```
-
-
 
 ### `neuron install`
 
@@ -423,6 +376,19 @@ bootstrap: providers available in /home/user/.neuron/providers
 
 Rebuilding over an identical artifact reports `already present` instead of failing or duplicating.
 
+### `neuron completion`
+
+Generate the autocompletion script for your shell (bash, zsh, fish, or powershell).
+
+```bash
+# Example: install bash completion
+source <(neuron completion bash)
+```
+
+## Advanced
+
+The commands in this section are auxiliary. They are not part of the normal build-and-run flow.
+
 ### `neuron instance`
 
 Create, list, and manage running assembly instances.
@@ -468,8 +434,6 @@ neuron instance list --status running
 neuron instance list --target <instance-id>
 ```
 
-
-
 #### `neuron instance remove`
 
 Remove an instance and its executions and events.
@@ -487,8 +451,6 @@ neuron instance remove <instance-id>
 neuron instance rm <instance-id>
 ```
 
-
-
 #### `neuron instance clear`
 
 Remove **all** instances and their executions and events.
@@ -502,11 +464,9 @@ Usage:
 neuron instance clear
 ```
 
-
-
 ### `neuron daemon`
 
-Manage the local N.O.R.E. daemon.
+Manage a Neuron runtime process directly.
 
 ```
 Usage:
@@ -514,35 +474,17 @@ Usage:
   neuron daemon [command]
 
 Available Commands:
-  stop        Stop the background N.O.R.E. daemon
+  stop        Stop a running Neuron runtime process
 ```
 
-The daemon is normally started automatically on first use and keeps running in the background until you stop it. `neuron daemon stop` shuts it down gracefully; it is not tied to any single CLI process.
-
-```bash
-# Stop the background daemon
-neuron daemon stop
-```
-
-
-
-### `neuron completion`
-
-Generate the autocompletion script for your shell (bash, zsh, fish, or powershell).
-
-```bash
-# Example: install bash completion
-source <(neuron completion bash)
-```
-
-
+This command exists for environments where the runtime process must be managed explicitly. In the normal flow the CLI runs the runtime as needed per project; you do not need `neuron daemon` to build or run assemblies.
 
 ## Configuration Reference
 
 The effective configuration is assembled from five layers, later layers overriding earlier ones:
 
 1. Built-in defaults (compiled in).
-2. The machine-level global configuration — `~/.config/neuron/config.yaml` (runtime defaults for this machine; during the transition this is also the only file that may carry `daemon.*`).
+2. The machine-level global configuration — `~/.config/neuron/config.yaml` (runtime defaults for this machine).
 3. The project's `neuron.config.json` / `neuron.config.yaml` / `neuron.config.yml` (or the file passed with `--config`).
 4. Environment variables (`NEURON_*`).
 5. Command-line flags.
@@ -577,10 +519,7 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
 }
 ```
 
-
-
 ### Key configuration values
-
 
 | Key                         | Default               | Meaning                                                                                                    |
 | --------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -611,21 +550,16 @@ Project configuration is strict: unknown keys are rejected with an error, so a t
 | `dev.maxWorkers`            | `1`                   | How many capability runtime builds may run in parallel during `neuron build`                                |
 
 > [!NOTE]
-> Project configuration (`neuron.config.*`) rejects engine plumbing outright: `daemon.*` (daemon endpoint, socket, PID file, N.O.R.E. binary path), `storage.provider` / `storage.directory`, `capabilityRuntimes.storeDir`, and `providers.storeDir` are managed by Neuron, and unknown keys fail validation with an error. Address the engine endpoint with `--remote` / `--nore-path` (or `NEURON_*` variables) instead; `daemon.*` remains settable only in the machine-level global `~/.config/neuron/config.yaml` during the transition. The daemon data directory is controlled with `NEURON_DATA_DIR`.
-
-
-
+> Project configuration (`neuron.config.*`) rejects engine plumbing outright: runtime endpoint plumbing, storage provider/directory, and store directories (`capabilityRuntimes.storeDir`, `providers.storeDir`) are managed by Neuron, and unknown keys fail validation with an error. Address the runtime endpoint with `--remote` / `--nore-path` (or `NEURON_*` variables) instead.
 
 ### Environment variables
 
-
 | Variable          | Meaning                                       |
 | ----------------- | --------------------------------------------- |
-| `NEURON_SOCKET`         | Override the daemon Unix socket path          |
-| `NEURON_DATA_DIR`       | Override the daemon persistent data directory |
-| `NEURON_API_TOKEN`      | API token used to authenticate requests      |
-| `NEURON_API_TOKEN_FILE` | Override the token file path                 |
-
+| `NEURON_SOCKET`         | Override the runtime socket path              |
+| `NEURON_DATA_DIR`       | Override the runtime data directory           |
+| `NEURON_API_TOKEN`      | API token used to authenticate requests       |
+| `NEURON_API_TOKEN_FILE` | Override the token file path                  |
 
 Environment variables can also be used for any configuration value with the `NEURON_` prefix pattern (for example `NEURON_LOG_LEVEL`), and command-line flags always take precedence.
 
@@ -647,23 +581,13 @@ The assembly file lists its capabilities either by `entry:` reference or inline,
 
 When an assembly references an external module (for example `example:echo@1.0.0`), the CLI resolves it as follows:
 
-```mermaid
-flowchart LR
-    A[Requirement<br/>logical name + version constraint] --> B[Resolution<br/>registries queried · semver match]
-    B --> C[Verification<br/>canonical archive + digest]
-    C --> D[Installation<br/>immutable capability runtime store]
-    D --> E[Freezing<br/>exact versions pinned in the assembly]
-```
-
-
-
 1. **Requirement** — the assembly declares the module by logical name (`owner:path`) and optionally a version constraint.
 2. **Resolution** — the configured registries are queried for available versions; the best matching version is chosen using semantic versioning (an empty constraint selects the latest version).
 3. **Verification** — the selected package archive is verified (canonical archive `<name>-<version>-capability-runtime.neuron.tar.gz`, cryptographic digest).
 4. **Installation** — the artifact is installed immutably into the capability runtime store.
 5. **Freezing** — the exact resolved versions are frozen into the registered assembly, so the runtime can launch instances without resolving anything itself.
 
-Built-in modules shipped inside N.O.R.E. are skipped during resolution; they run in-process. Everything else travels the resolution + installation + freezing path.
+Built-in modules shipped inside the Neuron runtime are skipped during resolution; they run in-process. Everything else travels the resolution + installation + freezing path.
 
 See [docs/MODULES.md](../docs/MODULES.md) for the complete module model and how to author a module.
 
@@ -680,16 +604,10 @@ The release pipeline passes the release version through `-ldflags` so `neuron ve
 
 ## Related documentation
 
-
-|                         |                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------- |
-| **Getting started**     | Run your first assembly — [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)             |
-| **Installation**        | Official release and from-source installs — [docs/INSTALLATION.md](../docs/INSTALLATION.md) |
-| **Modules & capability runtimes** | The unified module model — [docs/MODULES.md](../docs/MODULES.md)                    |
-| **Architecture**        | Canonical pipeline, boundaries, and the runtime engine in depth — [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) |
-
-
-
+- **Getting started** — run your first assembly: [docs/GETTING_STARTED.md](../docs/GETTING_STARTED.md)
+- **Installation** — official release and from-source installs: [docs/INSTALLATION.md](../docs/INSTALLATION.md)
+- **Modules and capability runtimes** — the unified module model: [docs/MODULES.md](../docs/MODULES.md)
+- **Architecture** — canonical pipeline, boundaries, and the runtime in depth: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
 
 ## License
 

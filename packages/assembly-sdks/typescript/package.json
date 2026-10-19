@@ -15,6 +15,9 @@
   "bin": {
     "neuron-sdk": "./dist/cli/command.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
