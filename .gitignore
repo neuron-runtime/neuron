@@ -75,6 +75,7 @@ Thumbs.db
 opencode.json
 AGENTS.md
 CURRENT.md
+PRIORITY_TODO.md
 .gitignore
 # Neuron runtime registration key
 **/.neuron/register.json
