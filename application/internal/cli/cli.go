@@ -135,8 +135,13 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check if we're in a project directory with neuron.config.*
-	if cfg.ProjectDir == "" {
+	// The bare `neuron` command starts a project runtime, so it must only run
+	// inside a project. ProjectDir always resolves to a usable root (falling
+	// back to the working directory for path resolution), so the real "is
+	// this a project" signal is ConfigFile — the project configuration
+	// (neuron.config.*) that was actually loaded, whether by discovery or
+	// via --config.
+	if cfg.ConfigFile == "" {
 		return fmt.Errorf("no Neuron project found in current directory or ancestors; run `neuron init` first")
 	}
 

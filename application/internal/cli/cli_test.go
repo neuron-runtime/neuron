@@ -1,8 +1,44 @@
 package cli
 
 import (
+	"io"
+	"os"
+	"strings"
 	"testing"
 )
+
+// TestBareNeuronRefusesOutsideProject pins the bare `neuron` command to
+// project directories only. The command starts the project runtime, so
+// running it outside a project must fail before any runtime is launched —
+// ProjectDir alone cannot decide this, because config.Load falls back to the
+// working directory for path resolution even when no neuron.config.* exists.
+func TestBareNeuronRefusesOutsideProject(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	// A fresh directory with no neuron.config.* anywhere between it and the
+	// filesystem root (findProjectConfig stops at $HOME, and t.TempDir is
+	// outside it).
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	RootCmd.SetArgs([]string{})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	err = RootCmd.Execute()
+	if err == nil {
+		t.Fatal("bare `neuron` outside a project succeeded; want the no-project error")
+	}
+	if !strings.Contains(err.Error(), "no Neuron project found") {
+		t.Errorf("bare `neuron` outside a project error = %q, want the no-project error", err)
+	}
+}
 
 // TestCommandTreeResolvesDocumentedSurfaces pins the cobra command tree to the
 // CLI surface the documentation promises. A Use string containing a space
