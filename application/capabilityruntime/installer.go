@@ -47,15 +47,23 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		return nil, fmt.Errorf("package is nil")
 	}
 
-	if existing, err := i.Store.Get(ctx, pkg.Type, pkg.Version); err == nil && existing != nil {
-		if existing.Digest == pkg.Digest {
-			notify(i.Observer, func(o Observer) {
-				o.Installed(InstallResult{Installed: existing, AlreadyPresent: true})
-			})
-			return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
+	// A locally sourced package may not carry a digest until its artifact is
+	// materialized. The conflict check therefore has to wait for the staged
+	// digest in that case; comparing an empty digest against the installed one
+	// would reject an idempotent reinstall of identical content.
+	var existing *Installed
+	if found, err := i.Store.Get(ctx, pkg.Type, pkg.Version); err == nil && found != nil {
+		if pkg.Digest != "" {
+			if found.Digest == pkg.Digest {
+				notify(i.Observer, func(o Observer) {
+					o.Installed(InstallResult{Installed: found, AlreadyPresent: true})
+				})
+				return &InstallResult{Installed: found, AlreadyPresent: true}, nil
+			}
+			return nil, fmt.Errorf("%w: %s@%s already installed with digest %s, refusing to replace with %s",
+				ErrIntegrityConflict, pkg.Type, pkg.Version, found.Digest, pkg.Digest)
 		}
-		return nil, fmt.Errorf("%w: %s@%s already installed with digest %s, refusing to replace with %s",
-			ErrIntegrityConflict, pkg.Type, pkg.Version, existing.Digest, pkg.Digest)
+		existing = found
 	}
 
 	notify(i.Observer, func(o Observer) { o.Installing(*pkg) })
@@ -78,6 +86,19 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 		if err := computeStagedDigest(pkg, stage); err != nil {
 			return nil, fmt.Errorf("compute digest for %s@%s: %w", pkg.Type, pkg.Version, err)
 		}
+	}
+
+	// The staged digest is now known, so a previously deferred store lookup can
+	// decide whether this is the same immutable artifact or a conflicting one.
+	if existing != nil {
+		if existing.Digest == pkg.Digest {
+			notify(i.Observer, func(o Observer) {
+				o.Installed(InstallResult{Installed: existing, AlreadyPresent: true})
+			})
+			return &InstallResult{Installed: existing, AlreadyPresent: true}, nil
+		}
+		return nil, fmt.Errorf("%w: %s@%s already installed with digest %s, refusing to replace with %s",
+			ErrIntegrityConflict, pkg.Type, pkg.Version, existing.Digest, pkg.Digest)
 	}
 
 	// 2. runtime.json must be present and authoritative.

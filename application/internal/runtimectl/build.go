@@ -93,17 +93,11 @@ func (c *Catalog) BuildLocal(ctx context.Context, opts BuildOptions) error {
 func (c *Catalog) ensureLocalCapabilityRuntime(ctx context.Context, job localJob, opts BuildOptions) error {
 	spec := job.spec
 
-	if !opts.Force {
-		if installed, err := c.Store.Get(ctx, spec.Type, spec.Version); err == nil && installed != nil {
-			notifyStatus(opts.Status, spec.Type, spec.Version, "using cached version")
-			return nil
-		}
-	}
-
-	if !payloadExists(spec.Artifact) {
-		if spec.BuildCommand == "" {
-			return fmt.Errorf("capability runtime %s@%s has no artifact to install and no build.command", spec.Type, spec.Version)
-		}
+	// The local payload must exist even when the store already holds this
+	// version: a later resolve reads the local package and materializes its
+	// artifact, so a cached skip without a payload fails registration. Build
+	// first, then decide whether the installed artifact can be reused.
+	if !payloadExists(spec.Artifact) && spec.BuildCommand != "" {
 		notifyStatus(opts.Status, spec.Type, spec.Version, "building")
 
 		if err := runCapabilityRuntimeBuild(ctx, spec, opts.ProjectRoot); err != nil {
@@ -126,6 +120,17 @@ func (c *Catalog) ensureLocalCapabilityRuntime(ctx context.Context, job localJob
 			}
 			return fmt.Errorf("build capability runtime %s@%s: command ran but %s", spec.Type, spec.Version, hint)
 		}
+	}
+
+	if !opts.Force && payloadExists(spec.Artifact) {
+		if installed, err := c.Store.Get(ctx, spec.Type, spec.Version); err == nil && installed != nil {
+			notifyStatus(opts.Status, spec.Type, spec.Version, "using cached version")
+			return nil
+		}
+	}
+
+	if !payloadExists(spec.Artifact) && spec.BuildCommand == "" {
+		return fmt.Errorf("capability runtime %s@%s has no artifact to install and no build.command", spec.Type, spec.Version)
 	}
 
 	if opts.Force {

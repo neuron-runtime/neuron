@@ -16,14 +16,14 @@
     "{{.CapabilityName}}"
   ],
   "features": [],
+  "build": {
+    "command": "./build.sh"
+  },
+  "artifact": {
+    "path": "{{.BinaryName}}"
+  },
   "platforms": {
-    "linux-amd64": {
-      "artifact": "{{.BinaryName}}"
-    },
-    "darwin-amd64": {
-      "artifact": "{{.BinaryName}}"
-    },
-    "darwin-arm64": {
+    "{{.Platform}}": {
       "artifact": "{{.BinaryName}}"
     }
   }
