@@ -21,8 +21,8 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
 	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/neuron-runtime/neuron/application/project"
-	core "github.com/neuron-runtime/neuron/shared/types/core"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
@@ -288,20 +288,35 @@ func loadExecParams() (map[string]any, error) {
 	return map[string]any{}, nil
 }
 
-// discoverLocalRuntime resolves the local project runtime for the project that
-// owns the current directory. It returns the runtime endpoint and the API token
-// its discovery record publishes.
+// projectRoot returns the project root the effective configuration was loaded
+// for. The loader resolves it from the nearest ancestor holding a
+// neuron.config.* file (falling back to the working directory), so a command
+// run from a subdirectory still addresses the project that owns it.
+func projectRoot(cfg config.Config) (string, error) {
+	if cfg.ProjectDir != "" {
+		return cfg.ProjectDir, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get current directory: %w", err)
+	}
+	return cwd, nil
+}
+
+// discoverLocalRuntime resolves the local project runtime for the project the
+// effective configuration belongs to. It returns the runtime endpoint and the
+// API token its discovery record publishes.
 //
 // An explicit --port overrides endpoint discovery but still adopts the token if
 // the project runtime published one, so an operator pointing at a known port is
-// not locked out by authentication. Otherwise the project root is found by
-// walking up from the current directory, and a missing runtime returns an empty
-// endpoint rather than an error -- not running is the normal state before
+// not locked out by authentication. Discovery walks up from the project root, so
+// a runtime started at any ancestor is found, and a missing runtime returns an
+// empty endpoint rather than an error -- not running is the normal state before
 // `neuron` starts.
 func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, token string, err error) {
-	cwd, err := os.Getwd()
+	root, err := projectRoot(cfg)
 	if err != nil {
-		return "", "", fmt.Errorf("get current directory: %w", err)
+		return "", "", err
 	}
 
 	if overridePort != "" {
@@ -311,13 +326,13 @@ func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, tok
 		}
 		// Best effort: an explicit port is authoritative even if no discovery
 		// record exists next to it.
-		if record, found, err := findRuntimeRecord(cwd); err == nil && found {
+		if record, found, err := findRuntimeRecord(root); err == nil && found {
 			token = record.Token
 		}
 		return fmt.Sprintf("http://%s:%s", host, overridePort), token, nil
 	}
 
-	record, found, err := findRuntimeRecord(cwd)
+	record, found, err := findRuntimeRecord(root)
 	if err != nil {
 		return "", "", err
 	}
@@ -402,9 +417,9 @@ func isProcessAlive(pid int) bool {
 // if target names a built Assembly, it returns its key colon form; otherwise it
 // normalizes the target as an instance key/selector (preserving legacy behavior).
 func resolveSelector(cfg config.Config, target string) (string, error) {
-	root, err := os.Getwd()
+	root, err := projectRoot(cfg)
 	if err != nil {
-		return "", fmt.Errorf("get current directory: %w", err)
+		return "", err
 	}
 
 	if target == "" {
