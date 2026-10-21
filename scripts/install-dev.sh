@@ -110,6 +110,22 @@ for name in neuron nore nore-daemon; do
   esac
 done
 
+# A stale `neuron`/`nore` file left in the checkout (e.g. from an old
+# `go build -o neuron`) shadows the installed command whenever the current
+# directory is on PATH — the shell prefers ./neuron over ~/.local/bin/neuron.
+# Warn rather than delete: files outside .neuron/dev are not owned by this
+# script.
+for name in neuron nore; do
+  if [ -f "$ROOT/$name" ] && [ -x "$ROOT/$name" ]; then
+    echo
+    echo "warning: $ROOT/$name exists and will shadow the installed command"
+    echo "  whenever you run 'neuron'/'$name' from a directory on PATH containing it"
+    echo "  (commonly the repo root when '.' is on PATH). Remove it:"
+    echo
+    echo "    rm $ROOT/$name"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # PATH hint
 # ---------------------------------------------------------------------------
