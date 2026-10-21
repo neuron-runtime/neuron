@@ -31,6 +31,9 @@ jobs:
       - name: Publish GitHub release
         env:
           VERSION: ${{ github.ref_name }}
+          # gh reads GH_TOKEN; without it `gh release create` fails the
+          # authentication check even though contents: write is granted.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           dist_dir="$RUNNER_TEMP/dist/$VERSION"

@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: ["**"]
-    tags-ignore: ["v*"]
+    # Release tags are validated by their dedicated publish workflows; CI
+    # stays a branch/pull-request gate.
+    tags-ignore: ["v*", "sdk-v*", "dotnet-v*", "shared/v*", "packages/executor-sdks/golang/v*"]
   pull_request:
 
 concurrency:
@@ -96,13 +98,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build SDK
-        run: pnpm --filter @neuron/sdk build
+        run: pnpm --filter @neuronruntime/sdk build
 
       - name: Test SDK
-        run: pnpm --filter @neuron/sdk test
+        run: pnpm --filter @neuronruntime/sdk test
 
       - name: Typecheck SDK
-        run: pnpm --filter @neuron/sdk typecheck
+        run: pnpm --filter @neuronruntime/sdk typecheck
 
   release-validation:
     name: Release build matrix
