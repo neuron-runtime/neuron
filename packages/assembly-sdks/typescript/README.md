@@ -1,10 +1,10 @@
-# `@neuron/sdk`
+# `@neuronruntime/sdk`
 
 A TypeScript SDK for defining **typed, composable Neuron assemblies** — describe capabilities, their contracts, and how they connect. The SDK compiles everything into a portable JSON **manifest** that the Neuron compiler and runtime consume.
 
 ```mermaid
 flowchart LR
-    A[TypeScript<br/>define capabilities, contracts, connections] --> B[@neuron/sdk]
+    A[TypeScript<br/>define capabilities, contracts, connections] --> B[@neuronruntime/sdk]
     B --> C[AssemblyManifest<br/>canonical JSON]
     C --> D[neuron compiler]
     D --> E[Neuron runtime]
@@ -23,7 +23,7 @@ flowchart LR
 ## Quick install
 
 ```bash
-pnpm add @neuron/sdk
+pnpm add @neuronruntime/sdk
 ```
 
 ---
@@ -50,7 +50,7 @@ Six capabilities, typed contracts, a conditional guard, and a final manifest. By
 A `Capability` is a named unit of work. Every capability has an **identity**, a **capability runtime** (the machinery that runs it), and typed **params/results contracts**.
 
 ```ts
-import { Capability } from "@neuron/sdk";
+import { Capability } from "@neuronruntime/sdk";
 
 const validateOrder = Capability("order.validate")
   .runtime({ name: "neuron:core:set" })
@@ -140,7 +140,7 @@ The generic form produces type-safe expressions everywhere: `validateOrder.resul
 For cases where runtime validation rules are needed — maximum lengths, required fields, format constraints — the SDK provides builder functions:
 
 ```ts
-import { string, number, boolean } from "@neuron/sdk";
+import { string, number, boolean } from "@neuronruntime/sdk";
 
 const authorizePayment = Capability("payment.authorize").paramsSchema({
   orderId: string().required(),
@@ -181,7 +181,7 @@ validateOrder.result.nonExistent
 Expressions carry comparison operators that build guard conditions:
 
 ```ts
-import { type Expression } from "@neuron/sdk";
+import { type Expression } from "@neuronruntime/sdk";
 
 const approved: Expression<boolean> =
   authorizePayment.result.approved.equals(true);
@@ -288,7 +288,7 @@ When automatic field-by-field binding isn't enough — different field names, a 
 `.connect()` is fully typed: the callback receives the source result, and the returned object is checked against the target's params schema:
 
 ```ts
-import { connect } from "@neuron/sdk";
+import { connect } from "@neuronruntime/sdk";
 
 // Map a GitHub-read result to an analyzer's expected params shape
 const githubToAnalyzer = connect<GitHubReadResult, AnalyzeParams>(
@@ -313,7 +313,7 @@ githubRead.bind(analyzeContent.withParams(githubToAnalyzer));
 Connections support `.when()` for conditional logic — useful when a filter should gate an entire mapping:
 
 ```ts
-import { connect } from "@neuron/sdk";
+import { connect } from "@neuronruntime/sdk";
 
 const verifiedOnly = connect<{ verified: boolean; id: string }, { id: string }>(
   (src) => ({ id: src.result.id })
@@ -372,7 +372,7 @@ A capability that reads from **multiple** capabilities is fan-in and is rejected
 An `Assembly` ties everything together. It declares an optional typed input contract and the capability composition. The Assembly identity — `name` and `version` — is owned by `neuron.config.*`, and `neuron build` injects it into the canonical manifest; the SDK never authors it:
 
 ```ts
-import { Assembly } from "@neuron/sdk";
+import { Assembly } from "@neuronruntime/sdk";
 
 const manifest = Assembly()
   .paramsSchema<{ order: Order }>()

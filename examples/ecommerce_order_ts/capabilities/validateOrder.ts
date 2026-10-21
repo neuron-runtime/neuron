@@ -1,4 +1,4 @@
-import { Capability } from "@neuron/sdk";
+import { Capability } from "@neuronruntime/sdk";
 import type { ValidateOrderParams, ValidateOrderResult } from "../types";
 
 export const validateOrder = Capability("validate-order")

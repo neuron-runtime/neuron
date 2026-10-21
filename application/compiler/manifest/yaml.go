@@ -35,7 +35,38 @@ func FromResolvedProject(rp *project.ResolvedProject) *Assembly {
 		s.Bindings = append(s.Bindings, bindingFrom(rc))
 	}
 
+	s.Result = assemblyResultFrom(rp.Assembly.Definition.Result)
+
 	return s
+}
+
+// assemblyResultFrom converts the YAML-authored result contract into its
+// canonical manifest shape. The YAML surface stores the shared canonical type
+// directly (no second schema to drift), so only the container conversion into
+// the manifest representation remains here.
+func assemblyResultFrom(r *core.AssemblyResult) *AssemblyResult {
+	if r == nil {
+		return nil
+	}
+
+	result := &AssemblyResult{
+		Schema: make([]Port, 0, len(r.Schema)),
+		Fields: make([]AssemblyResultField, 0, len(r.Fields)),
+	}
+	for _, p := range r.Schema {
+		result.Schema = append(result.Schema, Port{
+			Name:     p.Name,
+			Type:     string(p.Type),
+			Required: p.Required,
+		})
+	}
+	for _, f := range r.Fields {
+		result.Fields = append(result.Fields, AssemblyResultField{
+			Name:   f.Name,
+			Source: f.Source,
+		})
+	}
+	return result
 }
 
 func capabilityFrom(rs project.ResolvedCapability) Capability {

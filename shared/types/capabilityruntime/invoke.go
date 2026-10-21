@@ -19,7 +19,15 @@ type InvokeRequest struct {
 	// CapabilityRuntime is the frozen resolved record for the artifact to
 	// invoke. It pins the exact version, digest, runtime kind, invocation
 	// protocol, and entrypoint so the child needs no registry or manifest.
+	// Empty when CoreType is set: core runtimes are compiled into N.O.R.E.
+	// and are never resolved or installed as artifacts.
 	CapabilityRuntime ResolvedCapabilityRuntime `json:"capabilityRuntime"`
+
+	// CoreType, when set, names a built-in in-process core capability
+	// runtime (canonical neuron:core:<name> form) to execute instead of an
+	// installed artifact. The child resolves it from its core registry; no
+	// store, provider, or frozen identity is involved.
+	CoreType string `json:"coreType,omitempty"`
 
 	// Params are the invocation params handed to the capability runtime. Keys
 	// map to the capability's declared params.

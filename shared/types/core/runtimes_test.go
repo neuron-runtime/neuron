@@ -51,3 +51,21 @@ func TestIsCoreRuntimeType(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalCoreType(t *testing.T) {
+	cases := map[CapabilityRuntimeType]CapabilityRuntimeType{
+		"set":             "neuron:core:set",
+		"command":         "neuron:core:command",
+		"neuron:core:set": "neuron:core:set",
+		"neuron:core:ai":  "neuron:core:ai",
+	}
+	for in, want := range cases {
+		got := CanonicalCoreType(in)
+		if got != want {
+			t.Errorf("CanonicalCoreType(%q) = %q, want %q", in, got, want)
+		}
+		if !IsCoreRuntimeType(got) {
+			t.Errorf("CanonicalCoreType(%q) = %q is not a core runtime type", in, got)
+		}
+	}
+}

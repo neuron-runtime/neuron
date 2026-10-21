@@ -94,3 +94,35 @@ bindings:
         expression: "source.result.email"
       - target: grand_total
         expression: "execution.params.order.total"
+
+# The assembly result contract: a declared schema callers read after the run,
+# and the structured mapping that produces each field.
+result:
+  schema:
+    - name: order_id
+      type: string
+    - name: status
+      type: string
+    - name: grand_total
+      type: number
+    - name: email
+      type: string
+  fields:
+    - name: order_id
+      source:
+        kind: assemblyParams
+        path: [order, id]
+    - name: status
+      source:
+        kind: literal
+        value: confirmed
+    - name: grand_total
+      source:
+        kind: capabilityResult
+        capability: send-confirmation
+        path: [grand_total]
+    - name: email
+      source:
+        kind: capabilityResult
+        capability: send-confirmation
+        path: [email]

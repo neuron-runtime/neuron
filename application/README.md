@@ -92,7 +92,7 @@ Flags:
   -l, --lang string   project authoring language (ts, typescript, yaml, yml) (default "ts")
 ```
 
-`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and scaffolds a runnable project: a `neuron.config.json`, and — for the default TypeScript authoring surface — a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a starter `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`.
+`Target` is the directory to create (relative to the current directory). `neuron init` creates the directory and scaffolds a runnable project: a `neuron.config.json`, and — for the default TypeScript authoring surface — a `package.json` declaring `@neuronruntime/sdk`, a `tsconfig.json`, a starter `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`.
 
 ```bash
 # Create ./my-assembly as a TypeScript project (default)
@@ -172,11 +172,12 @@ Usage:
   neuron run [instance-id|assembly-key] [flags]
 
 Flags:
-      --format string      Output format for the Assembly result (json, text) (default "json")
-      --params string      JSON params payload for execution (e.g., '{"key":"value"}')
-      --params-file string Path to JSON file with params payload
-      --port string        Override local runtime port (default: auto-discover from project)
-      --remote string      Remote Neuron runtime endpoint (e.g., http://host:port)
+  -c, --capability-runtime string   run a Capability Runtime directly: a built-in core runtime (neuron:core:set) or an installed one (name[@version])
+      --format string              Output format for the result (json, text) (default "json")
+      --params string              JSON params payload for execution (e.g., '{"key":"value"}')
+      --params-file string         Path to JSON file with params payload
+      --port string                Override local runtime port (default: auto-discover from project)
+      --remote string              Remote Neuron runtime endpoint (e.g., http://host:port)
 ```
 
 `neuron run` is a client of the project runtime. It discovers the project's runtime endpoint (from `.neuron/` state or the project config), sends one synchronous execution request, and prints the Assembly result to stdout. It does not stream events or return execution handles — advanced execution inspection is exposed through the API rather than the normal `run` output.
@@ -210,6 +211,24 @@ neuron run --format text
 ```
 
 stdout contains only the Assembly result in the selected `--format`; logs, diagnostics, and execution errors go to stderr, and a failed or cancelled execution exits non-zero. The result comes from one synchronous request — the command does not stream events, expose execution handles, or list execution history.
+
+#### Direct Capability Runtime invocation
+
+With `-c` / `--capability-runtime`, `neuron run` executes a single Capability Runtime instead of an Assembly. Direct invocation needs no project, no build, and no running project runtime:
+
+```bash
+# A built-in core runtime, executed in-process by a one-shot local N.O.R.E. child
+neuron run -c neuron:core:set --params '{"message":"hi"}'
+
+# Legacy bare core names canonicalize to the neuron:core namespace
+neuron run -c set --params '{"message":"hi"}'
+
+# An installed capability runtime — exact pin or constraint
+neuron run -c example:echo --params '{"message":"hi"}'
+neuron run -c example:echo@1.0.0 --params '{"message":"hi"}'
+```
+
+Core runtimes (`set`, `ai`, `command`, `delay`, `http`, `log` under `neuron:core:`) are compiled into N.O.R.E. and are never installed, so they take no version — `neuron:core:set@1.0.0` is rejected — and resolve without touching the store. Installed artifacts resolve from the machine-global store only and are never fetched or installed implicitly. `--capability-runtime` cannot be combined with a target argument, `--remote`, or `--port`; the result prints to stdout in `--format` exactly as Assembly mode does.
 
 Starting, observing, streaming, and cancelling executions remain available as advanced API operations: starting an execution (optionally detached), streaming its events, and cancelling a specific execution.
 

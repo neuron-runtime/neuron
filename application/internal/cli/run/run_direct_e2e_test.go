@@ -218,6 +218,35 @@ func TestRunDirectParamsFile(t *testing.T) {
 	}
 }
 
+func TestRunDirectCoreRuntime(t *testing.T) {
+	// Core runtimes are built into N.O.R.E.: they resolve without any store
+	// fixture, and legacy bare names canonicalize to the neuron:core namespace.
+	cases := []struct {
+		name      string
+		reference string
+	}{
+		{name: "canonical", reference: "neuron:core:set"},
+		{name: "legacy bare", reference: "set"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runNeuron(t, "run", "-c", tc.reference, "--params", `{"value":"hello"}`)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+			}
+
+			var result map[string]any
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("stdout is not JSON: %v\nstdout: %s", err, stdout)
+			}
+			if result["value"] != "hello" {
+				t.Errorf("result.value = %v, want hello", result["value"])
+			}
+		})
+	}
+}
+
 func TestRunDirectFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -238,6 +267,16 @@ func TestRunDirectFailures(t *testing.T) {
 		{
 			name: "remote conflict",
 			args: []string{"run", "-c", "example:echo", "--remote", "http://127.0.0.1:1"},
+		},
+		{
+			// Core runtimes are never installed, so a version suffix is a
+			// contradiction the CLI rejects before touching the store.
+			name: "core runtime with version",
+			args: []string{"run", "-c", "neuron:core:set@1.0.0"},
+		},
+		{
+			name: "unknown core runtime",
+			args: []string{"run", "-c", "neuron:core:does-not-exist"},
 		},
 	}
 

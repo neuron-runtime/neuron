@@ -1,4 +1,4 @@
-import { type Expressionify } from "@neuron/sdk";
+import { type Expressionify } from "@neuronruntime/sdk";
 import {
   validateOrder,
   parseOrder,

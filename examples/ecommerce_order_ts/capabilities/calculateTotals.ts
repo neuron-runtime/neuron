@@ -1,4 +1,4 @@
-import { Capability } from "@neuron/sdk";
+import { Capability } from "@neuronruntime/sdk";
 import type { CalculateTotalsParams, CalculateTotalsResult } from "../types";
 
 export const calculateTotals = Capability("calculate-totals")

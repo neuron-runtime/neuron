@@ -27,6 +27,18 @@ func CoreName(name string) CapabilityRuntimeType {
 	return CapabilityRuntimeType(CoreOwner + ":" + CoreNamespace + ":" + name)
 }
 
+// CanonicalCoreType returns the canonical neuron:core:<name> form of a core
+// capability runtime type. Namespaced inputs pass through unchanged; legacy
+// bare names (such as "set") are namespaced. Callers must establish
+// IsCoreRuntimeType first — this function does not validate that <name> is a
+// registered core runtime.
+func CanonicalCoreType(t CapabilityRuntimeType) CapabilityRuntimeType {
+	if strings.Contains(string(t), ":") {
+		return t
+	}
+	return CoreName(string(t))
+}
+
 // IsCoreRuntimeType reports whether t denotes an in-process (core) capability
 // runtime: the canonical neuron:core:<name> namespace or a legacy bare core
 // name such as "set". "neuron:set" is NOT core; it is a regular package under

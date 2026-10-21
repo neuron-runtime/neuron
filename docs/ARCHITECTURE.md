@@ -82,7 +82,7 @@ The repository is a monorepo organized into strictly separated Go modules:
 | `application/` | The `neuron` CLI — authoring, building, module resolution, client, daemon bootstrap |
 | `nore/` | N.O.R.E. — the Neuron Operational Runtime Engine |
 | `shared/` | Canonical types, capability runtime contract, version — agreed on by both Go modules |
-| `packages/assembly-sdks/typescript/` | `@neuron/sdk` — TypeScript assembly-definition language |
+| `packages/assembly-sdks/typescript/` | `@neuronruntime/sdk` — TypeScript assembly-definition language |
 | `packages/executor-sdks/golang/` | Go SDK for authoring Neuron modules (capability runtimes) |
 | `packages/executor-sdks/dotnet/` | .NET SDK for authoring Neuron modules (`Neuron.Executor`) |
 | `examples/` | Runnable example assemblies and reference capability runtimes |
@@ -190,11 +190,11 @@ The YAML surface is the canonical, zero-tooling authoring experience. A project 
 
 ### TypeScript — the SDK
 
-The TypeScript SDK (`@neuron/sdk`) is the same capability: a typed, always-autocompleted way to describe assemblies in TypeScript, converging on the same canonical manifest.
+The TypeScript SDK (`@neuronruntime/sdk`) is the same capability: a typed, always-autocompleted way to describe assemblies in TypeScript, converging on the same canonical manifest.
 
 ```ts
 // assembly.ts
-import { Capability, Assembly } from "@neuron/sdk";
+import { Capability, Assembly } from "@neuronruntime/sdk";
 
 const validate = Capability("validate-order")
   .runtime({ name: "neuron:core:set" })
