@@ -2,6 +2,13 @@
 
 Neuron is a runtime for building and operating complex software systems from composable, executable capabilities. This document is the architecture reference for the whole platform: the canonical model every authoring surface converges on, the boundaries that must never blur, and — in depth — how N.O.R.E. turns a registered assembly into running capabilities.
 
+> [!NOTE]
+> **N.O.R.E.** (Neuron Operational Runtime Engine) is the internal name of the
+> project runtime. Using Neuron — authoring, building, running, and inspecting
+> assemblies — never requires knowing this name; the user-facing guides and the
+> CLI describe it as the project runtime. It is named here only because this
+> document is the architecture reference.
+
 > [!TIP]
 > Reading paths:
 >
