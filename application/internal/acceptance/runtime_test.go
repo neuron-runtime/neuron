@@ -1,6 +1,7 @@
 package acceptance
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,5 +113,36 @@ func TestSecondRuntimeForSameProjectCoexists(t *testing.T) {
 	}
 	if len(after) != 2 {
 		t.Fatalf("a run removed discovery metadata; %d sessions remain, want 2", len(after))
+	}
+}
+
+// One foreground runtime serves every Assembly declared and built by the
+// project, each with its own result contract.
+func TestMultipleAssembliesServeFromOneRuntime(t *testing.T) {
+	p := writeProject(t)
+	buildProject(t, p.root)
+	session := startRuntime(t, p.root)
+
+	first := runNeuron(t, p.root, nil, "run", p.assembly, "--params", `{"name":"Ada"}`)
+	if first.code != 0 {
+		t.Fatalf("run %s exit = %d\nstdout: %s\nstderr: %s", p.assembly, first.code, first.stdout, first.stderr)
+	}
+	second := runNeuron(t, p.root, nil, "run", p.alt, "--params", `{"name":"Ada"}`)
+	if second.code != 0 {
+		t.Fatalf("run %s exit = %d\nstdout: %s\nstderr: %s", p.alt, second.code, second.stdout, second.stderr)
+	}
+
+	full := decodeSingleJSON(t, first.stdout)
+	if full["echoed"] != "hello" || full["caller"] != "Ada" {
+		t.Errorf("first Assembly result = %#v", full)
+	}
+	alt := decodeSingleJSON(t, second.stdout)
+	want := map[string]any{"greeting": "hello", "caller": "Ada"}
+	if !reflect.DeepEqual(alt, want) {
+		t.Errorf("second Assembly result = %#v, want %#v", alt, want)
+	}
+
+	if err := health(session.record); err != nil {
+		t.Errorf("runtime is no longer healthy after serving both Assemblies: %v", err)
 	}
 }

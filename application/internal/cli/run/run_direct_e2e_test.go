@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -247,6 +248,56 @@ func TestRunDirectCoreRuntime(t *testing.T) {
 	}
 }
 
+// snapshotStore captures every file under the default capability runtime store
+// so a test can prove an invocation did not write to it.
+func snapshotStore(t *testing.T) map[string]string {
+	t.Helper()
+
+	root := filepath.Join(directE2E.home, ".neuron", "capabilityRuntimes")
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			out[rel+"/"] = ""
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out[rel] = string(data)
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertStoreUnchanged(t *testing.T, before map[string]string) {
+	t.Helper()
+	after := snapshotStore(t)
+	if len(before) != len(after) {
+		t.Fatalf("capability runtime store changed: %d entries before, %d after", len(before), len(after))
+	}
+	for path, content := range before {
+		got, ok := after[path]
+		if !ok {
+			t.Errorf("capability runtime store entry %q disappeared", path)
+			continue
+		}
+		if got != content {
+			t.Errorf("capability runtime store entry %q was rewritten", path)
+		}
+	}
+}
+
 func TestRunDirectFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -282,6 +333,7 @@ func TestRunDirectFailures(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			before := snapshotStore(t)
 			stdout, stderr, code := runNeuron(t, tc.args...)
 			if code == 0 {
 				t.Fatalf("exit = 0, want non-zero\nstdout: %s", stdout)
@@ -291,6 +343,10 @@ func TestRunDirectFailures(t *testing.T) {
 			}
 			if stderr == "" {
 				t.Errorf("stderr is empty, want a diagnostic")
+			}
+			assertStoreUnchanged(t, before)
+			if tc.name == "not installed" && !strings.Contains(stderr, "neuron add") {
+				t.Errorf("missing-dependency error must point at `neuron add`, got: %s", stderr)
 			}
 		})
 	}

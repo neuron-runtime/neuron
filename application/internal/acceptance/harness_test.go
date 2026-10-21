@@ -127,6 +127,7 @@ func stopDaemon() {
 type project struct {
 	root       string
 	assembly   string
+	alt        string
 	failing    string
 	capability string
 }
@@ -150,18 +151,22 @@ assemblies:
   - name: %s
     entry: assemblies/%s/assembly.yaml
     default: true
+  - name: %s-alt
+    entry: assemblies/%s-alt/assembly.yaml
   - name: %s-fail
     entry: assemblies/%s-fail/assembly.yaml
-`, name, name, name, name, name))
+`, name, name, name, name, name, name, name))
 
 	writeFile(t, filepath.Join(root, "capabilities", "greet.yaml"), greetCapability)
 	writeFile(t, filepath.Join(root, "capabilities", "punctuate.yaml"), punctuateCapability)
 	writeFile(t, filepath.Join(root, "assemblies", name, "assembly.yaml"), assemblyYAML(validBinding))
+	writeFile(t, filepath.Join(root, "assemblies", name+"-alt", "assembly.yaml"), altAssemblyYAML)
 	writeFile(t, filepath.Join(root, "assemblies", name+"-fail", "assembly.yaml"), assemblyYAML(failingBinding))
 
 	return project{
 		root:       root,
 		assembly:   name,
+		alt:        name + "-alt",
 		failing:    name + "-fail",
 		capability: "greet",
 	}
@@ -278,6 +283,34 @@ result:
         path: [name]
 `, validation)
 }
+
+// altAssemblyYAML is a second valid Assembly in the same project. It reuses the
+// same capabilities but declares a different result contract, so a test can
+// prove one project runtime serves each Assembly with its own result shape.
+const altAssemblyYAML = `apiVersion: neuron/v1
+kind: Assembly
+
+capabilities:
+  - ref: greet
+    entry: ../../capabilities/greet.yaml
+
+result:
+  schema:
+    - name: greeting
+      type: string
+    - name: caller
+      type: string
+  fields:
+    - name: greeting
+      source:
+        kind: capabilityResult
+        capability: greet
+        path: [greeting]
+    - name: caller
+      source:
+        kind: assemblyParams
+        path: [name]
+`
 
 // execResult is one completed `neuron` invocation.
 type execResult struct {
