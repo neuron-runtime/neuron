@@ -33,6 +33,19 @@ import (
 // rather than restrict it, and a configuration that wants that should say so
 // by not using the built-in.
 type Policy struct {
+	// ProjectRoot is the directory the assembly lives in.
+	//
+	// It is the root the built-ins are confined to: it is where a command
+	// runs by default, and it is always inside the reachable set. A runtime
+	// that runs a project sets it from the project it was started for, so
+	// the reach of the built-ins follows the assembly rather than the
+	// directory the runtime happened to be launched from.
+	//
+	// It is carried through the resolution unchanged, like
+	// AllowPrivateNetworks: it is the context of the run rather than a limit
+	// on it.
+	ProjectRoot string `json:"projectRoot,omitempty"`
+
 	// FilesystemRoots are the roots the filesystem and command built-ins may
 	// reach in addition to the project root.
 	//
@@ -205,6 +218,7 @@ func Effective(configured Policy) (Policy, error) {
 	effective.AllowedExecutables = normalizeList(configured.AllowedExecutables)
 	effective.AllowedHTTPHosts = normalizeList(configured.AllowedHTTPHosts)
 	effective.AllowPrivateNetworks = configured.AllowPrivateNetworks
+	effective.ProjectRoot = strings.TrimSpace(configured.ProjectRoot)
 
 	return effective, nil
 }

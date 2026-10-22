@@ -294,6 +294,7 @@ var builtinDescriptors = []BuiltinDescriptor{
 		},
 		Constraints: []string{
 			"Never runs a shell: the program and its arguments are passed to the operating system separately, so an argument can never become a command.",
+			"Runs only the programs the policy permits, when the policy names any.",
 			"Runs the program with an allowlisted environment, never the runtime's own environment.",
 			"Confines the working directory to an allowed root.",
 			"Bounds the retained output and reports truncation rather than hiding it.",

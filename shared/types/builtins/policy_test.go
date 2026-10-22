@@ -178,3 +178,15 @@ func TestEffectiveCarriesThePrivateNetworkAllowance(t *testing.T) {
 		t.Error("Effective dropped the private-network allowance")
 	}
 }
+
+// The project root is the context of the run rather than a limit on it, so it
+// survives the resolution unchanged.
+func TestEffectiveCarriesTheProjectRoot(t *testing.T) {
+	effective, err := Effective(Policy{ProjectRoot: "  /srv/project  "})
+	if err != nil {
+		t.Fatalf("Effective: %v", err)
+	}
+	if effective.ProjectRoot != "/srv/project" {
+		t.Errorf("ProjectRoot = %q, want %q", effective.ProjectRoot, "/srv/project")
+	}
+}

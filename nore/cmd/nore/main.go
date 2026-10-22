@@ -361,6 +361,12 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 		log.Fatalf("resolve project root: %v", err)
 	}
 
+	// The project root is the root the built-in capability runtimes are
+	// confined to. The runtime knows the project it was started for, so it
+	// states the root itself rather than trusting the one that arrived with
+	// the policy.
+	builtinPolicy.ProjectRoot = absRoot
+
 	// Generate an API token for this project runtime
 	token, err := generateProjectToken()
 	if err != nil {
