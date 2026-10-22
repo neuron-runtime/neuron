@@ -1,11 +1,18 @@
 package config
 
+import "github.com/neuron-runtime/neuron/shared/types/builtins"
+
 // Defaults returns the built-in Neuron configuration.
 //
 // These values are compiled into Neuron and are the base of every effective
 // configuration produced by Load. Lower layers (global, project, environment,
 // CLI) override them.
 func Defaults() Config {
+	// The built-in limits default to the ceilings compiled into the runtime,
+	// so the effective configuration states the limits that actually apply.
+	// A project may lower them; it can never raise them.
+	ceilings := builtins.DefaultPolicy()
+
 	return Config{
 		Lang: "typescript",
 
@@ -57,6 +64,17 @@ func Defaults() Config {
 
 		Dev: DevConfig{
 			MaxWorkers: 1,
+		},
+
+		Builtins: BuiltinsConfig{
+			Limits: BuiltinLimitsConfig{
+				MaxCommandOutputBytes:   ceilings.MaxCommandOutputBytes,
+				MaxHTTPRequestBodyBytes: ceilings.MaxHTTPRequestBodyBytes,
+				MaxHTTPResponseBytes:    ceilings.MaxHTTPResponseBytes,
+				MaxFileReadBytes:        ceilings.MaxFileReadBytes,
+				MaxDirectoryEntries:     ceilings.MaxDirectoryEntries,
+				DefaultTimeout:          ceilings.DefaultTimeout,
+			},
 		},
 	}
 }

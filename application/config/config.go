@@ -58,6 +58,10 @@ type Config struct {
 	Providers          ProvidersConfig          `yaml:"providers" mapstructure:"providers"`
 	Inspector          InspectorConfig          `yaml:"inspector" mapstructure:"inspector"`
 
+	// Builtins bounds the built-in capability runtimes N.O.R.E. provides.
+	// It can only narrow the limits compiled into the runtime.
+	Builtins BuiltinsConfig `yaml:"builtins,omitempty" mapstructure:"builtins"`
+
 	// Dev controls developer-experience options.
 	Dev DevConfig `yaml:"dev,omitempty" mapstructure:"dev"`
 
