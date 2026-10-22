@@ -129,6 +129,37 @@ func TestBuildLocalRunsBuildAndStages(t *testing.T) {
 	}
 }
 
+// A store-cached version must not short-circuit the local build when the
+// payload is absent: a later resolve reads the local package and needs the
+// artifact to exist.
+func TestBuildLocalRebuildsMissingPayloadDespiteCachedVersion(t *testing.T) {
+	root := t.TempDir()
+	writePoweredLocalCapabilityRuntime(t, root, "example:echo", "1.0.0",
+		"sh build.sh", "mkdir -p dist && printf '#!/bin/sh\\n' > dist/run.sh && chmod +x dist/run.sh", "./dist")
+
+	catalog := testCatalog(t, root)
+	if err := catalog.BuildLocal(context.Background(), BuildOptions{MaxWorkers: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "example", "echo", "1.0.0", "dist")); err != nil {
+		t.Fatal(err)
+	}
+
+	var statuses []string
+	opts := BuildOptions{MaxWorkers: 1, ProjectRoot: root, Status: func(typ, version, msg string) {
+		statuses = append(statuses, msg)
+	}}
+	if err := catalog.BuildLocal(context.Background(), opts); err != nil {
+		t.Fatalf("BuildLocal with cached version and missing payload: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "example", "echo", "1.0.0", "dist", "run.sh")); err != nil {
+		t.Errorf("payload was not rebuilt: %v", err)
+	}
+	if len(statuses) == 0 || !strings.Contains(statuses[0], "building") {
+		t.Errorf("statuses = %v, want a build because the payload was missing", statuses)
+	}
+}
+
 func TestBuildLocalMissingPayloadNoBuildIsFatal(t *testing.T) {
 	root := t.TempDir()
 	writePoweredLocalCapabilityRuntime(t, root, "example:broken", "1.0.0", "", "", "./dist")

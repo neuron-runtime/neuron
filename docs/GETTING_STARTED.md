@@ -1,6 +1,6 @@
 # Getting Started with Neuron
 
-This guide takes you from a fresh checkout to a running assembly in about fifteen minutes — authored in **TypeScript with `@neuron/sdk`**, built with the CLI, hosted by the project runtime, and executed with `neuron run`.
+This guide takes you from a fresh checkout to a running assembly in about fifteen minutes — authored in **TypeScript with `@neuronruntime/sdk`**, built with the CLI, hosted by the project runtime, and executed with `neuron run`.
 
 Assemblies can be authored in **any programming language that produces the Neuron Assembly manifest** (the canonical representation). Today, **TypeScript** and **YAML** are first-class authoring surfaces; this guide uses TypeScript.
 
@@ -21,7 +21,7 @@ The workflow has four steps: author the assembly, `neuron build` to compile and 
 - **Go, pnpm, and Node.js** for the walkthrough only if you build the examples and SDK from source:
 
   ```bash
-  # link the workspace and build @neuron/sdk (produces the neuron-sdk CLI)
+  # link the workspace and build @neuronruntime/sdk (produces the neuron-sdk CLI)
   pnpm install
   pnpm build:sdk
   ```
@@ -41,7 +41,7 @@ neuron build
 
 `neuron build` runs the whole authoring pipeline in one step:
 
-1. **Build** — the TypeScript assembly is compiled into the canonical manifest (`.neuron/manifest.json`).
+1. **Build** — the TypeScript assembly is compiled into the canonical manifest (`.neuron/assemblies/<name>/manifest.json`).
 2. **Compile** — the manifest is compiled into a runtime assembly representation.
 3. **Resolve** — capability runtime references are resolved. Built-in runtimes (`neuron:core:set`) are skipped; they run inside the runtime engine.
 4. **Register** — the compiled assembly is handed to the Neuron runtime, which persists it and returns an assembly key.
@@ -72,11 +72,16 @@ Leave it running. In a second terminal, from the same directory, execute the ass
 neuron run --params '{"name":"World"}'
 ```
 
-The command sends one synchronous execution request and prints the assembly result when execution reaches a terminal state. This assembly declares no result mapping, so the result is `null` — success is the zero exit code:
+The command sends one synchronous execution request and prints the assembly result when execution reaches a terminal state. The example declares a result contract — `name` read from the capability's result and `message` as a literal — so the run prints it rather than `null`:
 
 ```text
-null
+{
+  "message": "Hello, Neuron!",
+  "name": "World"
+}
 ```
+
+Success is the zero exit code.
 
 Stop the project runtime with Ctrl-C in the terminal that hosts it.
 
@@ -98,7 +103,7 @@ examples/hello/
 neuron init my-first-system
 ```
 
-`neuron init` creates the directory and scaffolds a **TypeScript** project by default: a `neuron.config.json` declaring the project identity (`name`, `version`) and `lang: typescript`, a `package.json` declaring `@neuron/sdk`, a `tsconfig.json`, a runnable `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
+`neuron init` creates the directory and scaffolds a **TypeScript** project by default: a `neuron.config.json` declaring the project identity (`name`, `version`) and `lang: typescript`, a `package.json` declaring `@neuronruntime/sdk`, a `tsconfig.json`, a runnable `assembly.ts`, and the canonical local capability runtime root `neuron/capabilityRuntimes/`. Move it under `examples/` so the pnpm workspace picks it up for the SDK:
 
 ```bash
 mv my-first-system examples/my-first-system
@@ -139,13 +144,13 @@ The project configuration (`neuron.config.json` | `neuron.config.yaml` | `neuron
 ```text
 examples/my-first-system/
 ├── neuron.config.json         ← config: name, version, lang, entry, runtime
-├── package.json               ← declares @neuron/sdk
+├── package.json               ← declares @neuronruntime/sdk
 ├── tsconfig.json              ← strict TypeScript, noEmit
 ├── assembly.ts                ← the Assembly definition (the entry)
 └── neuron/capabilityRuntimes/ ← home for locally-authored capability runtimes
 ```
 
-`package.json`: the scaffold declares `@neuron/sdk` (`^0.1.0`). Because this walkthrough lives inside the repository workspace, pin it to `workspace:*` so pnpm links the local SDK build:
+`package.json`: the scaffold declares `@neuronruntime/sdk` (`^0.1.0`). Because this walkthrough lives inside the repository workspace, pin it to `workspace:*` so pnpm links the local SDK build:
 
 ```json
 {
@@ -154,7 +159,7 @@ examples/my-first-system/
   "private": true,
   "type": "module",
   "dependencies": {
-    "@neuron/sdk": "workspace:*"
+    "@neuronruntime/sdk": "workspace:*"
   }
 }
 ```
@@ -165,13 +170,15 @@ A **Capability** is a named unit of work with an identity, a capability runtime,
 
 ```ts
 // assembly.ts
-import { Capability, Assembly } from "@neuron/sdk";
+import { Capability, Assembly, string } from "@neuronruntime/sdk";
 
 const sayHello = Capability("say-hello")
   .runtime({ name: "neuron:core:set" })
   .paramsSchema<{ message: string }>()
-  .resultSchema<{ message: string }>();
+  .resultSchema({ message: string() });
 ```
+
+`.resultSchema` in its runtime form declares the capability's **result ports** — the fields an assembly result contract can map from. (`neuron:core:set` echoes a capability's params, so this capability's result carries `message` back.)
 
 ### Compose the assembly
 
@@ -180,13 +187,19 @@ const sayHello = Capability("say-hello")
 ```ts
 const manifest = Assembly()
   .paramsSchema<{ message: string }>()
+  .resultSchema({ message: string() })
   .withParams((data) =>
     sayHello.withParams({ message: data.message })
   )
+  .result({
+    message: sayHello.result.message,
+  })
   .toManifest();
 
 export default manifest;
 ```
+
+`.resultSchema` declares the assembly's **result contract** — the schema a caller reads after a run — and `.result` maps each field to its source (here the capability's result). A run without `.result` returns `null`; declaring a contract makes the run print what the assembly produced.
 
 Capabilities can be chained with `.bind()`; execution edges are derived from the data each capability references — a capability that reads the previous step's result implies a chain, and capabilities that read the same source run in parallel. Part 3 chains a second capability; one is enough for now.
 
@@ -209,7 +222,13 @@ Then execute the assembly:
 neuron run --params '{"message":"hello"}'
 ```
 
-As in Part 1, one synchronous request runs the whole assembly; the result is `null` (no Assembly result mapping is declared), and success is the zero exit code.
+As in Part 1, one synchronous request runs the whole assembly and prints the declared result:
+
+```text
+{
+  "message": "hello"
+}
+```
 
 ### Inspecting executions
 
@@ -317,7 +336,7 @@ Now run:
 neuron run --params '{"message":"hi"}'
 ```
 
-The execution launches the installed module **out-of-process**, passes your input through the capability runtime protocol, and returns its result. For the echo module, the result mirrors the params: `neuron run -c example:echo --params '{"message":"hi"}'` prints `{"params":{"message":"hi"},"protocol":"neuron/capability-runtime-v1-json","type":"example:echo","version":"1.0.0"}`. Start the project runtime (`neuron` in one terminal) and run from another as before; you can also run the capability **directly** without a project runtime using the `-c` form shown above.
+The execution launches the installed module **out-of-process**, passes your input through the capability runtime protocol, and returns its result. For the echo module, the result mirrors the params: `neuron run -c example:echo --params '{"message":"hi"}'` prints `{"params":{"message":"hi"},"protocol":"neuron/capability-runtime-v1-json","type":"example:echo","version":"1.0.0"}`. Start the project runtime (`neuron` in one terminal) and run from another as before; you can also run the capability **directly** without a project runtime using the `-c` form shown above. Built-in core runtimes are directly invocable the same way — `neuron run -c neuron:core:set --params '{"message":"hi"}'` echoes the params back, needing no store, no install, and no running runtime.
 
 ---
 

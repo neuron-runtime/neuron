@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
+	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	"github.com/spf13/cobra"
 )
 
@@ -101,6 +102,7 @@ func generateCapabilityRuntime(ctx context.Context, name, dir, description, capa
 		"CapabilityName": capabilityName,
 		"Module":         "github.com/" + owner + "/" + runtimeName,
 		"BinaryName":     runtimeName,
+		"Platform":       capabilityrt.HostPlatform(),
 	}
 
 	// Template files to generate

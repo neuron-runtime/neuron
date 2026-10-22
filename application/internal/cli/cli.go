@@ -51,6 +51,12 @@ func init() {
 	RootCmd.PersistentFlags().String("nore-path", "", "Path to the Neuron runtime binary")
 	RootCmd.PersistentFlags().Bool("force", false, "Force replacement (clear existing state before the command acts)")
 
+	// --port applies to the project runtime that bare `neuron` starts. It is a
+	// local flag so `neuron run --port` keeps its own endpoint-override
+	// meaning, and the configuration loader owns the precedence and validation
+	// exactly once.
+	RootCmd.Flags().String("port", "", "Port for the project runtime (integer or \"auto\"; overrides runtime.port)")
+
 	// Load the effective configuration once flags are parsed and inject it on
 	// the command context so every subcommand can read it without touching
 	// Viper itself. Direct Capability Runtime invocation is deliberately
@@ -111,6 +117,15 @@ func loadConfig(cmd *cobra.Command) (config.Config, error) {
 	if path, _ := cmd.Flags().GetString("nore-path"); path != "" {
 		cli["daemon.norePath"] = path
 	}
+	// --port is defined only on the root command (bare `neuron`); subcommands
+	// such as `run` define their own --port with endpoint-override semantics.
+	// The root command is the only one without a parent; comparing against the
+	// RootCmd value here would create an initialization cycle.
+	if cmd.Parent() == nil {
+		if port, _ := cmd.Flags().GetString("port"); port != "" {
+			cli["runtime.port"] = port
+		}
+	}
 
 	opts := config.Options{
 		ProjectDir:  projectDir,
@@ -135,8 +150,13 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check if we're in a project directory with neuron.config.*
-	if cfg.ProjectDir == "" {
+	// The bare `neuron` command starts a project runtime, so it must only run
+	// inside a project. ProjectDir always resolves to a usable root (falling
+	// back to the working directory for path resolution), so the real "is
+	// this a project" signal is ConfigFile — the project configuration
+	// (neuron.config.*) that was actually loaded, whether by discovery or
+	// via --config.
+	if cfg.ConfigFile == "" {
 		return fmt.Errorf("no Neuron project found in current directory or ancestors; run `neuron init` first")
 	}
 

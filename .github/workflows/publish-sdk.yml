@@ -1,18 +1,17 @@
-# Publish @neuron/sdk to npm using Trusted Publishing (OIDC).
+# Publish @neuronruntime/sdk to npm.
 #
-# No tokens or secrets are stored in GitHub. npm verifies a short-lived OIDC
-# token issued by GitHub Actions against the Trusted Publisher configured for
-# the package on npmjs.com.
+# Authentication uses an npm automation/granular access token stored as a
+# GitHub Actions secret in the `release` environment. The workflow also
+# publishes with --provenance (id-token: write), so the npm registry records a
+# signed GitHub-backed attestation for every release.
 #
-# One-time setup (required, on npmjs.com):
-#   1. Sign in to https://www.npmjs.com and open the @neuron/sdk package.
-#   2. Settings -> Trusted Publisher -> GitHub Actions.
-#   3. Publisher:      GitHub
-#      Organization:   neuron-runtime
-#      Repository:     neuron
-#      Workflow name:  publish-sdk.yml   (must match this file exactly)
-#      Environment:    (leave empty unless a protected environment is used)
-#   4. Save.
+# One-time setup (required):
+#   1. Create an npm automation or granular access token with publish rights
+#      for the @neuronruntime scope: https://www.npmjs.com/settings → Access Tokens.
+#   2. In the GitHub repository: Settings → Environments → New environment
+#      named `release`.
+#   3. Under the `release` environment's secrets, add `NPM_TOKEN`
+#      holding the token from step 1.
 #
 # Release: push a tag named sdk-v<semver>, e.g. `git tag sdk-v0.1.0 && git push
 # origin sdk-v0.1.0`. The tag version overrides package.json before publishing.
@@ -30,9 +29,10 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @neuron/sdk
+    name: Publish @neuronruntime/sdk
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: pnpm
 
-      # Trusted publishing requires npm >= 11.5.1.
+      # --provenance is supported from npm >= 9.5; use the latest.
       - name: Upgrade npm
         run: npm install -g npm@latest
 
@@ -54,7 +54,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build SDK
-        run: pnpm --filter @neuron/sdk build
+        run: pnpm --filter @neuronruntime/sdk build
 
       - name: Set version from tag
         working-directory: packages/assembly-sdks/typescript
@@ -67,7 +67,8 @@ jobs:
           fi
           npm version "$version" --no-git-tag-version --allow-same-version
 
-      # OIDC is exchanged automatically; no NODE_AUTH_TOKEN is needed.
       - name: Publish
         working-directory: packages/assembly-sdks/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance --ignore-scripts

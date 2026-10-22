@@ -45,6 +45,22 @@ type AssemblyFile struct {
 	// Can be defined inline or referenced via entry.
 	Bindings []BindingReference `yaml:"bindings,omitempty"`
 
+	// Result declares the Assembly's public result contract: the schema a
+	// caller reads after a synchronous execution, and the structured
+	// mapping that produces each field. It reuses the shared canonical
+	// type so the YAML surface cannot drift from the representation the
+	// compiler and runtime resolve; path segments are canonical snake_case.
+	//
+	// Example:
+	//
+	// result:
+	//   schema:
+	//     - { name: status, type: string }
+	//   fields:
+	//     - name: status
+	//       source: { kind: capabilityResult, capability: send-confirmation, path: [status] }
+	Result *core.AssemblyResult `yaml:"result,omitempty"`
+
 	// Arbitrary assemblies-level configuration.
 	//
 	// This intentionally remains generic because the project

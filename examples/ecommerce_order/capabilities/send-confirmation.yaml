@@ -28,3 +28,25 @@ spec:
     - direction: input
       source: email
       target: email
+
+    # Declared outputs: the assembly's result contract maps these ports, and
+    # `neuron:core:set` echoes them back from the capability's params and
+    # config.
+    - direction: output
+      source: tracking_number
+      target: tracking_number
+    - direction: output
+      source: carrier
+      target: carrier
+    - direction: output
+      source: email
+      target: email
+    - direction: output
+      source: grand_total
+      target: grand_total
+    - direction: output
+      source: confirmation_sent
+      target: confirmation_sent
+    - direction: output
+      source: message_id
+      target: message_id

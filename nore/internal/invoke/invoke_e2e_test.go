@@ -232,6 +232,46 @@ func TestDirectInvocationWasmRuntime(t *testing.T) {
 	}
 }
 
+func TestDirectInvocationCoreRuntime(t *testing.T) {
+	req := capabilityrt.InvokeRequest{
+		CoreType: "neuron:core:set",
+		Params:   map[string]any{"value": "hello"},
+	}
+
+	stdout, _, code := runInvoke(t, invokeJSON(t, req))
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout: %s", code, stdout)
+	}
+
+	resp := decodeResponse(t, stdout)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if resp.Result["value"] != "hello" {
+		t.Errorf("result.value = %v, want hello", resp.Result["value"])
+	}
+}
+
+func TestDirectInvocationCoreRuntimeFailure(t *testing.T) {
+	req := capabilityrt.InvokeRequest{
+		CoreType: "neuron:core:does-not-exist",
+		Params:   map[string]any{},
+	}
+
+	stdout, stderr, code := runInvoke(t, invokeJSON(t, req))
+	if code == 0 {
+		t.Fatalf("exit code = 0, want non-zero\nstdout: %s", stdout)
+	}
+
+	resp := decodeResponse(t, stdout)
+	if resp.Error == "" {
+		t.Errorf("response.error is empty, want a structured error\nstdout: %s", stdout)
+	}
+	if stderr == "" {
+		t.Errorf("stderr is empty, want a diagnostic")
+	}
+}
+
 func TestDirectInvocationFailures(t *testing.T) {
 	cases := []struct {
 		name  string

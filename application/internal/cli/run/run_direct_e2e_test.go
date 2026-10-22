@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -218,6 +219,85 @@ func TestRunDirectParamsFile(t *testing.T) {
 	}
 }
 
+func TestRunDirectCoreRuntime(t *testing.T) {
+	// Core runtimes are built into N.O.R.E.: they resolve without any store
+	// fixture, and legacy bare names canonicalize to the neuron:core namespace.
+	cases := []struct {
+		name      string
+		reference string
+	}{
+		{name: "canonical", reference: "neuron:core:set"},
+		{name: "legacy bare", reference: "set"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runNeuron(t, "run", "-c", tc.reference, "--params", `{"value":"hello"}`)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+			}
+
+			var result map[string]any
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("stdout is not JSON: %v\nstdout: %s", err, stdout)
+			}
+			if result["value"] != "hello" {
+				t.Errorf("result.value = %v, want hello", result["value"])
+			}
+		})
+	}
+}
+
+// snapshotStore captures every file under the default capability runtime store
+// so a test can prove an invocation did not write to it.
+func snapshotStore(t *testing.T) map[string]string {
+	t.Helper()
+
+	root := filepath.Join(directE2E.home, ".neuron", "capabilityRuntimes")
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			out[rel+"/"] = ""
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out[rel] = string(data)
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertStoreUnchanged(t *testing.T, before map[string]string) {
+	t.Helper()
+	after := snapshotStore(t)
+	if len(before) != len(after) {
+		t.Fatalf("capability runtime store changed: %d entries before, %d after", len(before), len(after))
+	}
+	for path, content := range before {
+		got, ok := after[path]
+		if !ok {
+			t.Errorf("capability runtime store entry %q disappeared", path)
+			continue
+		}
+		if got != content {
+			t.Errorf("capability runtime store entry %q was rewritten", path)
+		}
+	}
+}
+
 func TestRunDirectFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -239,10 +319,21 @@ func TestRunDirectFailures(t *testing.T) {
 			name: "remote conflict",
 			args: []string{"run", "-c", "example:echo", "--remote", "http://127.0.0.1:1"},
 		},
+		{
+			// Core runtimes are never installed, so a version suffix is a
+			// contradiction the CLI rejects before touching the store.
+			name: "core runtime with version",
+			args: []string{"run", "-c", "neuron:core:set@1.0.0"},
+		},
+		{
+			name: "unknown core runtime",
+			args: []string{"run", "-c", "neuron:core:does-not-exist"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			before := snapshotStore(t)
 			stdout, stderr, code := runNeuron(t, tc.args...)
 			if code == 0 {
 				t.Fatalf("exit = 0, want non-zero\nstdout: %s", stdout)
@@ -252,6 +343,10 @@ func TestRunDirectFailures(t *testing.T) {
 			}
 			if stderr == "" {
 				t.Errorf("stderr is empty, want a diagnostic")
+			}
+			assertStoreUnchanged(t, before)
+			if tc.name == "not installed" && !strings.Contains(stderr, "neuron add") {
+				t.Errorf("missing-dependency error must point at `neuron add`, got: %s", stderr)
 			}
 		})
 	}

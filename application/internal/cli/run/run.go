@@ -22,6 +22,7 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/neuron-runtime/neuron/application/project"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
@@ -40,15 +41,16 @@ func New() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   command.Run,
 		Short: "Run a Neuron Assembly or an installed Capability Runtime",
-		Long: "Run a Neuron Assembly using the project runtime, or run an installed Capability Runtime\n" +
-			"directly with --capability-runtime. Assembly execution discovers the local runtime or\n" +
+		Long: "Run a Neuron Assembly using the project runtime, or run a Capability Runtime\n" +
+			"directly with --capability-runtime — a built-in core runtime (neuron:core:set) or an\n" +
+			"installed one (name[@version]). Assembly execution discovers the local runtime or\n" +
 			"connects to a remote endpoint; direct invocation needs no project or running runtime.",
 		RunE: runCmdHandler,
 	}
 
 	cmd.Flags().StringVar(&params, "params", "", "JSON params payload for execution (e.g., '{\"key\":\"value\"}')")
 	cmd.Flags().StringVar(&paramsFile, "params-file", "", "Path to JSON file with params payload")
-	cmd.Flags().StringVarP(&capabilityRuntime, "capability-runtime", "c", "", "run an installed Capability Runtime directly (name[@version])")
+	cmd.Flags().StringVarP(&capabilityRuntime, "capability-runtime", "c", "", "run a Capability Runtime directly: a built-in core runtime (neuron:core:set) or an installed one (name[@version])")
 	cmd.Flags().StringVar(&overridePort, "port", "", "Override local runtime port (default: auto-discover from project)")
 	cmd.Flags().StringVar(&format, "format", "json", "Output format for the result (json, text)")
 
@@ -156,23 +158,24 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 	return outputResult(cmd, result, format)
 }
 
-// runDirect runs a single installed Capability Runtime without a project, a
-// build, or a running project runtime. It resolves the artifact from the local
-// store only — never installing or fetching anything — and hosts it through a
-// one-shot `nore --invoke` child process, which selects the provider from the
-// artifact's declared runtime kind using the same registry as Assembly
-// execution.
+// runDirect runs a single Capability Runtime without a project, a build, or a
+// running project runtime. Built-in core runtimes (neuron:core:set) are
+// compiled into N.O.R.E. and are executed in-process by the child; installed
+// artifacts are resolved from the local store only — never installing or
+// fetching anything — and hosted through a one-shot `nore --invoke` child
+// process, which selects the provider from the artifact's declared runtime
+// kind using the same registry as Assembly execution.
 //
-// The reference is `name[@version]`. A version may be an exact pin, a
-// constraint, or `latest`; it is resolved to an exact installed identity before
-// invocation. The successful result is written to stdout; diagnostics and
-// failures go to stderr with a non-zero exit.
+// The reference is `name[@version]` (or a bare/core name such as `set`). A
+// version may be an exact pin, a constraint, or `latest`; it is resolved to an
+// exact installed identity before invocation. The successful result is written
+// to stdout; diagnostics and failures go to stderr with a non-zero exit.
 func runDirect(cmd *cobra.Command, reference string) error {
 	ctx := cmd.Context()
 
 	typ, version, ok := ref.Parse(reference)
 	if !ok {
-		return fmt.Errorf("capability runtime name is required (e.g. neuron-runtime:http)")
+		return fmt.Errorf("capability runtime name is required (e.g. neuron:core:set)")
 	}
 
 	execParams, err := loadExecParams()
@@ -180,19 +183,35 @@ func runDirect(cmd *cobra.Command, reference string) error {
 		return err
 	}
 
-	// Direct invocation is project-independent, so it resolves against the
-	// default machine-global store — exactly where `neuron add` installs when
-	// no store directory is configured. Requiring the artifact to be installed
-	// keeps direct invocation free of implicit resolution or installation.
-	storeDir := config.DefaultStoreDir()
-	fsStore, err := store.NewFileassemblyStore(storeDir)
-	if err != nil {
-		return err
-	}
+	var req capabilityrt.InvokeRequest
+	req.Params = execParams
 
-	installed, err := capabilityruntime.ResolveInstalled(ctx, fsStore, typ, version)
-	if err != nil {
-		return err
+	// Core capability runtimes are compiled into N.O.R.E., so they are never
+	// resolved from the store and never carry a version; installed artifacts
+	// resolve from the machine-global store only.
+	var storeDir string
+	if coreType := core.CapabilityRuntimeType(typ); core.IsCoreRuntimeType(coreType) {
+		if version != "" {
+			return fmt.Errorf("core capability runtime %s has no versions; drop @%s and invoke it as %q",
+				typ, version, core.CanonicalCoreType(coreType))
+		}
+		req.CoreType = string(core.CanonicalCoreType(coreType))
+	} else {
+		// Direct invocation is project-independent, so it resolves against the
+		// default machine-global store — exactly where `neuron add` installs when
+		// no store directory is configured. Requiring the artifact to be installed
+		// keeps direct invocation free of implicit resolution or installation.
+		storeDir = config.DefaultStoreDir()
+		fsStore, err := store.NewFileassemblyStore(storeDir)
+		if err != nil {
+			return err
+		}
+
+		installed, err := capabilityruntime.ResolveInstalled(ctx, fsStore, typ, version)
+		if err != nil {
+			return err
+		}
+		req.CapabilityRuntime = *installed.Frozen(version)
 	}
 
 	norePath, _ := cmd.Flags().GetString("nore-path")
@@ -201,15 +220,18 @@ func runDirect(cmd *cobra.Command, reference string) error {
 		return fmt.Errorf("find nore binary: %w", err)
 	}
 
-	requestJSON, err := json.Marshal(capabilityrt.InvokeRequest{
-		CapabilityRuntime: *installed.Frozen(version),
-		Params:            execParams,
-	})
+	requestJSON, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("encode invocation request: %w", err)
 	}
 
-	child := exec.CommandContext(ctx, noreBin, "--invoke", "--capability-runtime-store", storeDir)
+	// The store flag only matters for installed artifacts; the child's default
+	// store root is never consulted for a core runtime.
+	childArgs := []string{"--invoke"}
+	if storeDir != "" {
+		childArgs = append(childArgs, "--capability-runtime-store", storeDir)
+	}
+	child := exec.CommandContext(ctx, noreBin, childArgs...)
 	child.Stdin = bytes.NewReader(requestJSON)
 	child.Stderr = cmd.ErrOrStderr()
 
@@ -266,20 +288,35 @@ func loadExecParams() (map[string]any, error) {
 	return map[string]any{}, nil
 }
 
-// discoverLocalRuntime resolves the local project runtime for the project that
-// owns the current directory. It returns the runtime endpoint and the API token
-// its discovery record publishes.
+// projectRoot returns the project root the effective configuration was loaded
+// for. The loader resolves it from the nearest ancestor holding a
+// neuron.config.* file (falling back to the working directory), so a command
+// run from a subdirectory still addresses the project that owns it.
+func projectRoot(cfg config.Config) (string, error) {
+	if cfg.ProjectDir != "" {
+		return cfg.ProjectDir, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get current directory: %w", err)
+	}
+	return cwd, nil
+}
+
+// discoverLocalRuntime resolves the local project runtime for the project the
+// effective configuration belongs to. It returns the runtime endpoint and the
+// API token its discovery record publishes.
 //
 // An explicit --port overrides endpoint discovery but still adopts the token if
 // the project runtime published one, so an operator pointing at a known port is
-// not locked out by authentication. Otherwise the project root is found by
-// walking up from the current directory, and a missing runtime returns an empty
-// endpoint rather than an error -- not running is the normal state before
+// not locked out by authentication. Discovery walks up from the project root, so
+// a runtime started at any ancestor is found, and a missing runtime returns an
+// empty endpoint rather than an error -- not running is the normal state before
 // `neuron` starts.
 func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, token string, err error) {
-	cwd, err := os.Getwd()
+	root, err := projectRoot(cfg)
 	if err != nil {
-		return "", "", fmt.Errorf("get current directory: %w", err)
+		return "", "", err
 	}
 
 	if overridePort != "" {
@@ -289,13 +326,13 @@ func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, tok
 		}
 		// Best effort: an explicit port is authoritative even if no discovery
 		// record exists next to it.
-		if record, found, err := findRuntimeRecord(cwd); err == nil && found {
+		if record, found, err := findRuntimeRecord(root); err == nil && found {
 			token = record.Token
 		}
 		return fmt.Sprintf("http://%s:%s", host, overridePort), token, nil
 	}
 
-	record, found, err := findRuntimeRecord(cwd)
+	record, found, err := findRuntimeRecord(root)
 	if err != nil {
 		return "", "", err
 	}
@@ -380,9 +417,9 @@ func isProcessAlive(pid int) bool {
 // if target names a built Assembly, it returns its key colon form; otherwise it
 // normalizes the target as an instance key/selector (preserving legacy behavior).
 func resolveSelector(cfg config.Config, target string) (string, error) {
-	root, err := os.Getwd()
+	root, err := projectRoot(cfg)
 	if err != nil {
-		return "", fmt.Errorf("get current directory: %w", err)
+		return "", err
 	}
 
 	if target == "" {

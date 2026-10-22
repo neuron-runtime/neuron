@@ -1,4 +1,4 @@
-import { Capability } from "@neuron/sdk";
+import { Capability } from "@neuronruntime/sdk";
 import type { CreateShipmentParams, CreateShipmentResult } from "../types";
 
 export const createShipment = Capability("create-shipment")

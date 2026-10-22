@@ -1,4 +1,4 @@
-import { Capability } from "@neuron/sdk";
+import { Capability } from "@neuronruntime/sdk";
 import type { CapturePaymentParams, CapturePaymentResult } from "../types";
 
 export const capturePayment = Capability("capture-payment")

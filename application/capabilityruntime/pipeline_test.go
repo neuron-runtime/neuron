@@ -345,6 +345,118 @@ func TestResolveInstallPipeline(t *testing.T) {
 	}
 }
 
+// A local package carries no digest until staged, so reinstalling identical
+// content must still be idempotent rather than an integrity conflict.
+func TestReinstallIdenticalLocalContentIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+
+	regRoot := t.TempDir()
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	writeCapabilityRuntimePackage(t, regRoot, "github:read", "1.2.0")
+
+	reg, err := local.New(regRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsStore, err := execstore.NewFileassemblyStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := &capabilityruntime.Installer{Store: fsStore, Downloader: capabilityruntime.NewHTTPDownloader()}
+	catalog := capabilityruntime.NewRegistry()
+	if err := catalog.Add(reg); err != nil {
+		t.Fatal(err)
+	}
+	resolver := capabilityruntime.NewResolver(catalog, fsStore, installer)
+
+	req := capabilityruntime.Requirement{Type: "github:read", Version: "1.2.0", Registries: []string{"local"}}
+	installed, err := resolver.Resolve(ctx, req)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// A freshly constructed local package has no digest yet. Installing it
+	// again must compare the staged digest and become a no-op.
+	pkg, err := reg.Package(ctx, "github:read", "1.2.0")
+	if err != nil {
+		t.Fatalf("Package: %v", err)
+	}
+	again, err := installer.Install(ctx, pkg)
+	if err != nil {
+		t.Fatalf("Install identical content: %v", err)
+	}
+	if !again.AlreadyPresent {
+		t.Error("identical local content was not treated as already installed")
+	}
+	if again.Installed.Digest != installed.Digest {
+		t.Errorf("digest = %q, want %q", again.Installed.Digest, installed.Digest)
+	}
+
+	list, err := fsStore.List(ctx, "github:read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Errorf("store list = %d, want a single artifact", len(list))
+	}
+}
+
+// Installing different content under an already installed identity must fail
+// instead of silently replacing the immutable artifact.
+func TestReinstallRejectsChangedContentUnderSameIdentity(t *testing.T) {
+	ctx := context.Background()
+
+	regRoot := t.TempDir()
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	pkgDir := writeCapabilityRuntimePackage(t, regRoot, "github:read", "1.2.0")
+
+	reg, err := local.New(regRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsStore, err := execstore.NewFileassemblyStore(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := capabilityruntime.NewRegistry()
+	if err := catalog.Add(reg); err != nil {
+		t.Fatal(err)
+	}
+	installer := &capabilityruntime.Installer{Store: fsStore, Downloader: capabilityruntime.NewHTTPDownloader()}
+	resolver := capabilityruntime.NewResolver(catalog, fsStore, installer)
+
+	req := capabilityruntime.Requirement{Type: "github:read", Version: "1.2.0", Registries: []string{"local"}}
+	installed, err := resolver.Resolve(ctx, req)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	original, err := os.ReadFile(filepath.Join(installed.RootDir, "capabilityruntime.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Change the artifact in the registry while keeping the identity.
+	if err := os.WriteFile(filepath.Join(pkgDir, "capabilityruntime.sh"), []byte("#!/bin/sh\necho '{\"output\":{\"changed\":true}}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := reg.Package(ctx, "github:read", "1.2.0")
+	if err != nil {
+		t.Fatalf("Package: %v", err)
+	}
+	if _, err := installer.Install(ctx, changed); !errors.Is(err, capabilityruntime.ErrIntegrityConflict) {
+		t.Fatalf("reinstall error = %v, want ErrIntegrityConflict", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(installed.RootDir, "capabilityruntime.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Error("installed artifact was modified by the rejected reinstall")
+	}
+}
+
 func TestResolveUnconfiguredRegistry(t *testing.T) {
 	ctx := context.Background()
 

@@ -3,7 +3,9 @@ name: Executor .NET
 on:
   push:
     branches: ["**"]
-    tags-ignore: ["v*"]
+    # Release tags are validated by the publish workflow; this stays a
+    # branch/pull-request gate.
+    tags-ignore: ["v*", "dotnet-v*"]
   pull_request:
 
 concurrency:

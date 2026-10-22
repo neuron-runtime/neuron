@@ -1,5 +1,5 @@
 {
-  "name": "@neuron/sdk",
+  "name": "@neuronruntime/sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for defining Neuron systems",
   "license": "MIT",

@@ -10,7 +10,7 @@ importers:
 
   examples/ecommerce_order_ts:
     dependencies:
-      '@neuron/sdk':
+      '@neuronruntime/sdk':
         specifier: workspace:*
         version: link:../../packages/assembly-sdks/typescript
     devDependencies:
@@ -23,7 +23,7 @@ importers:
 
   examples/hello:
     dependencies:
-      '@neuron/sdk':
+      '@neuronruntime/sdk':
         specifier: file:../../packages/assembly-sdks/typescript
         version: link:../../packages/assembly-sdks/typescript
     devDependencies:

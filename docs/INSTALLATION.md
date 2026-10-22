@@ -255,21 +255,26 @@ The CLI looks for the `nore` runtime binary beside itself, then in the source tr
 > [!NOTE]
 > This section is for maintainers of the Neuron repository. End users never run it.
 
-Each distributable artifact has its own version line and its own tag prefix, so the layers move independently without overwriting each other's releases. Everything is published through **GitHub Actions with OIDC federation** — no long-lived registry tokens or API keys are stored in this repository. The only one-time setup is registering a *trusted publisher* on the registry side.
+Each distributable artifact has its own version line and its own tag prefix, so the layers move independently without overwriting each other's releases. Everything is published through **tag-driven GitHub Actions workflows**. Registry credentials live only in the GitHub `release` **environment** as secrets — never in this repository — and environment protection rules (required reviewers, wait timers) can gate every publish job.
 
 | Artifact | Registry | Tag | Workflow | Credentials |
 | --- | --- | --- | --- | --- |
 | `neuron` CLI + Neuron runtime binaries | GitHub Releases | `v*` | `.github/workflows/release.yml` | `GITHUB_TOKEN` (built in) |
-| `@neuron/sdk` | npm | `sdk-v*` | `.github/workflows/publish-sdk.yml` | npm trusted publishing (OIDC) |
-| `Neuron.Executor` | NuGet | `dotnet-v*` | `.github/workflows/publish-executor-dotnet.yml` | NuGet trusted publishing (OIDC) |
+| `@neuronruntime/sdk` | npm | `sdk-v*` | `.github/workflows/publish-sdk.yml` | `NPM_TOKEN` secret (`release` environment) |
+| `Neuron.Executor` | NuGet | `dotnet-v*` | `.github/workflows/publish-executor-dotnet.yml` | `NUGET_API_KEY` secret (`release` environment) |
 | `shared` Go module | Go module proxy | `shared/v*` | `.github/workflows/publish-go-sdk.yml` | none (tags only) |
 | `packages/executor-sdks/golang` | Go module proxy | `packages/executor-sdks/golang/v*` | `.github/workflows/publish-go-sdk.yml` | none (tags only) |
 
-The binary release (`v*`) is handled by `release.yml` together with `scripts/release.sh`. CI (`ci.yml`) validates Go, the TypeScript SDK, and the release build matrix on every push and pull request.
+One-time GitHub setup shared by npm and NuGet: **Settings → Environments → New environment** named `release`, then add the environment secrets `NPM_TOKEN` and `NUGET_API_KEY` described below. Because the publish jobs declare `environment: release`, GitHub scopes the secrets to those jobs only; any protection rules on the environment gate the publish.
 
-### npm — `@neuron/sdk`
+The binary release (`v*`) is handled by `release.yml` together with `scripts/release.sh`; its `gh release create` step runs with the built-in `GITHUB_TOKEN`. CI (`ci.yml`) validates Go, the TypeScript SDK, and the release build matrix on every branch push and pull request; release tags are excluded so each artifact's publish workflow owns its tag.
 
-npm authenticates the workflow with a short-lived OIDC token, but it must know which workflow may publish the package. One-time setup on [npmjs.com](https://www.npmjs.com): open `@neuron/sdk` → **Settings** → **Trusted Publisher** → **GitHub Actions**, then fill in organization `neuron-runtime`, repository `neuron`, workflow name `publish-sdk.yml` (must match the file name exactly), and leave the environment empty unless the workflow uses a protected environment. No `NPM_TOKEN` is needed.
+### npm — `@neuronruntime/sdk`
+
+One-time setup: create an npm **automation or granular access token** with publish rights for the `@neuronruntime` scope ([npmjs.com → Access Tokens](https://www.npmjs.com/settings)), and store it as the `release`-environment secret `NPM_TOKEN`. The workflow publishes with `--provenance`, so every release also carries a signed GitHub-backed attestation (verify with `npm view @neuronruntime/sdk dist.attestations`); provenance needs `id-token: write`, which the workflow already grants.
+
+> [!IMPORTANT]
+> The `@neuronruntime` npm scope must be owned by an npm account you control before the first publish. Create or claim the scope, then set the token.
 
 ```bash
 git tag sdk-v0.1.0
@@ -280,7 +285,7 @@ The tag version replaces the version in `package.json` before publishing; the ta
 
 ### NuGet — `Neuron.Executor`
 
-One-time setup: create a **Trusted Publishing** policy on [nuget.org](https://www.nuget.org) under **Account → Trusted Publishing → Add policy** with publisher GitHub Actions, repository owner `neuron-runtime`, repository `neuron`, and workflow file `publish-executor-dotnet.yml` (must match exactly). Also add a repository *variable* named `NUGET_USER` holding your nuget.org username — an identifier, not a credential, so it belongs under **Settings → Secrets and variables → Actions → Variables**, not as a secret.
+One-time setup: create an **API key** on [nuget.org](https://www.nuget.org) scoped to the `Neuron.Executor` package with **Push** rights (https://www.nuget.org → API keys → Generate Key), and store it as the `release`-environment secret `NUGET_API_KEY`. Rotate the key before it expires; the workflow reads only that secret.
 
 ```bash
 git tag dotnet-v0.1.0
@@ -291,12 +296,18 @@ The tag version is passed to `dotnet pack`/`dotnet build` as `-p:Version`.
 
 ### Go modules — `shared` and `packages/executor-sdks/golang`
 
-Go modules have no upload step: a version is published by pushing a tag whose prefix matches the module path.
+Go modules have no upload step: a version is published by pushing a tag whose prefix matches the module path. There is one ordering constraint: consumers **ignore** a module's local `replace` directives, so the executor SDK — whose `go.mod` currently `replace`s `shared` with the local checkout — can only be published after `shared` is public and the replace has been removed. The `publish-go-sdk.yml` workflow enforces this: it fails the executor-SDK tag if the replace (or its placeholder version) is still present.
 
 ```bash
+# 1. publish shared first
 git tag shared/v0.1.0
 git push origin shared/v0.1.0
 
+# 2. merge the commit that removes the replace from
+#    packages/executor-sdks/golang/go.mod and pins the published
+#    github.com/neuron-runtime/neuron/shared version
+
+# 3. then publish the executor SDK
 git tag packages/executor-sdks/golang/v0.1.0
 git push origin packages/executor-sdks/golang/v0.1.0
 ```
@@ -305,9 +316,9 @@ git push origin packages/executor-sdks/golang/v0.1.0
 
 ### Version synchronization and verification
 
-Each artifact carries its own version and is versioned independently — `@neuron/sdk` from `packages/assembly-sdks/typescript/package.json`, `Neuron.Executor` from `packages/executor-sdks/dotnet/Directory.Build.props`, Go modules from the git tag itself. The tag always overrides the checked-in version at release time; update the checked-in version in the same change that prepares a release if you want the repository to reflect the published version outside of CI.
+Each artifact carries its own version and is versioned independently — `@neuronruntime/sdk` from `packages/assembly-sdks/typescript/package.json`, `Neuron.Executor` from `packages/executor-sdks/dotnet/Directory.Build.props`, Go modules from the git tag itself. The tag always overrides the checked-in version at release time; update the checked-in version in the same change that prepares a release if you want the repository to reflect the published version outside of CI.
 
-Verify a published release with `npm view @neuron/sdk version` (plus `dist.attestations` for provenance), `dotnet nuget search Neuron.Executor`, and `go list -m github.com/neuron-runtime/neuron/shared@v0.1.0` through the public proxy.
+Verify a published release with `npm view @neuronruntime/sdk version` (plus `dist.attestations` for provenance), `dotnet nuget search Neuron.Executor`, and `go list -m github.com/neuron-runtime/neuron/shared@v0.1.0` through the public proxy.
 
 ---
 

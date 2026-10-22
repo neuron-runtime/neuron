@@ -21,11 +21,11 @@ import (
 	"github.com/neuron-runtime/neuron/application/process"
 )
 
-// SDKBin is the neuron-sdk executable name exposed by @neuron/sdk.
+// SDKBin is the neuron-sdk executable name exposed by @neuronruntime/sdk.
 const SDKBin = "neuron-sdk"
 
 // ErrSDKNotFound reports that the neuron-sdk binary could not be located.
-var ErrSDKNotFound = errors.New("neuron-sdk not found: install the @neuron/sdk workspace package (pnpm install) and run `pnpm build:sdk` first")
+var ErrSDKNotFound = errors.New("neuron-sdk not found: install the @neuronruntime/sdk workspace package (pnpm install) and run `pnpm build:sdk` first")
 
 // Builder delegates the TypeScript build to the neuron-sdk CLI.
 type Builder struct {

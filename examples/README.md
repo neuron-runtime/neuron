@@ -25,9 +25,11 @@ The order examples are intentionally more involved than a starting point needs t
 From an example directory:
 
 ```bash
-neuron build              # compile the manifest and freeze dependencies
-neuron                    # start the project runtime (foreground)
-neuron run --params '{}'  # run the assembly in another terminal
+neuron build                       # compile the manifest and freeze dependencies
+neuron                             # start the project runtime (foreground)
+neuron run --params '{"name":"World"}'   # run the assembly in another terminal
 ```
+
+Each example declares a result contract, so `neuron run` prints what the assembly produced instead of `null` — for `hello`, `{"message": "Hello, Neuron!", "name": "World"}`.
 
 See [Getting started](../docs/GETTING_STARTED.md) for a full walkthrough.

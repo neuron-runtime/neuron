@@ -199,7 +199,7 @@ func scaffoldTypeScript(root, name string) error {
 			"capability runtime:add": "neuron add",
 		},
 		"dependencies": map[string]any{
-			"@neuron/sdk": "^0.1.0",
+			"@neuronruntime/sdk": "^0.1.0",
 		},
 		"devDependencies": map[string]any{
 			"tsx":        "^4.19.2",
@@ -232,7 +232,7 @@ func scaffoldTypeScript(root, name string) error {
 	// neuron.config.json owns the Assembly name/version, and `neuron build`
 	// injects them at the shared build seam. Scaffolding them here would
 	// duplicate the configuration.
-	assembly := `import { Capability, Assembly } from "@neuron/sdk";
+	assembly := `import { Capability, Assembly } from "@neuronruntime/sdk";
 
 const sayHello = Capability("hello.say")
   .runtime({ name: "neuron:core:set" })

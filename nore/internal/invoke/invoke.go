@@ -1,12 +1,14 @@
-// Package invoke implements one-shot direct invocation of an installed
-// Capability Runtime (`nore --invoke`).
+// Package invoke implements one-shot direct invocation of a Capability
+// Runtime (`nore --invoke`).
 //
 // It is the child process behind `neuron run -c`: the CLI and N.O.R.E. are
 // separate Go modules, so the CLI cannot host a provider in-process and instead
-// hands the frozen artifact identity to a short-lived N.O.R.E. process. The
-// child reads a single capabilityruntime.InvokeRequest from stdin, hosts the
-// referenced artifact through the same provider registry Assembly execution
-// uses, and writes a single capabilityruntime.InvokeResponse to stdout.
+// hands the invocation target to a short-lived N.O.R.E. process. The child
+// reads a single capabilityruntime.InvokeRequest from stdin: a built-in core
+// runtime is resolved from the core registry and executed in-process, while an
+// installed artifact is hosted through the same provider registry Assembly
+// execution uses. It writes a single capabilityruntime.InvokeResponse to
+// stdout.
 package invoke
 
 import (
@@ -20,6 +22,8 @@ import (
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
+	"github.com/neuron-runtime/neuron/nore/internal/registry"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 )
 
@@ -63,12 +67,18 @@ func Run(ctx context.Context, storeRoot string, in io.Reader, out io.Writer) err
 	return nil
 }
 
-// Invoke hosts the request's Capability Runtime through the provider registry
-// and executes it once. Failures — an unknown runtime kind, a missing installed
-// artifact, a missing provider, or a runtime error — are returned as a
-// structured error response, never as a panic, so the parent always receives a
-// parseable document.
+// Invoke hosts the request's Capability Runtime and executes it once. A
+// request carrying CoreType executes the built-in in-process runtime from the
+// core registry; otherwise the frozen artifact is hosted through the provider
+// registry. Failures — an unknown runtime, a missing installed artifact, a
+// missing provider, or a runtime error — are returned as a structured error
+// response, never as a panic, so the parent always receives a parseable
+// document.
 func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
+	if req.CoreType != "" {
+		return invokeCore(ctx, req)
+	}
+
 	plugin.SetStoreRoot(storeRoot)
 
 	adapter, err := plugin.NewAdapter(req.CapabilityRuntime)
@@ -82,6 +92,31 @@ func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeReques
 	}()
 
 	result, err := adapter.Execute(ctx, contracts.ExecutionContext{Params: req.Params})
+	if err != nil {
+		return &capabilityrt.InvokeResponse{Error: err.Error()}
+	}
+	return &capabilityrt.InvokeResponse{Result: result}
+}
+
+// invokeCore resolves a built-in core capability runtime from the same core
+// registry Assembly execution uses and executes it once in-process. No store,
+// provider, or installed artifact is involved; an unknown core name is
+// reported as a structured error.
+func invokeCore(ctx context.Context, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
+	reg := registry.New()
+	reg.RegisterCoreRuntimes()
+	defer func() {
+		if err := reg.Close(); err != nil {
+			slog.Warn("close core capability runtimes", slog.String("error", err.Error()))
+		}
+	}()
+
+	runtime, err := reg.Resolve(core.CapabilityRuntimeType(req.CoreType))
+	if err != nil {
+		return &capabilityrt.InvokeResponse{Error: err.Error()}
+	}
+
+	result, err := runtime.Execute(ctx, contracts.ExecutionContext{Params: req.Params})
 	if err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
