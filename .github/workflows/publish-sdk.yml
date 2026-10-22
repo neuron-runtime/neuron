@@ -67,8 +67,18 @@ jobs:
           fi
           npm version "$version" --no-git-tag-version --allow-same-version
 
+      # npm refuses to publish a prerelease to the default `latest` tag.
+      # Prerelease tags (e.g. sdk-v0.1.0-pre-alpha) go to `next`; a stable tag
+      # (e.g. sdk-v0.1.0) publishes as `latest`.
       - name: Publish
         working-directory: packages/assembly-sdks/typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance --ignore-scripts
+        shell: bash
+        run: |
+          args=(--access public --provenance --ignore-scripts)
+          version="$(node -p "require('./package.json').version")"
+          if [[ "$version" == *-* ]]; then
+            args+=(--tag next)
+          fi
+          npm publish "${args[@]}"

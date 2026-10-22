@@ -6,14 +6,14 @@
   "author": "Muhammad Jay",
   "repository": {
     "type": "git",
-    "url": "https://github.com/neuron-runtime/neuron.git",
+    "url": "git+https://github.com/neuron-runtime/neuron.git",
     "directory": "packages/assembly-sdks/typescript"
   },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "neuron-sdk": "./dist/cli/command.js"
+    "neuron-sdk": "dist/cli/command.js"
   },
   "publishConfig": {
     "access": "public"
