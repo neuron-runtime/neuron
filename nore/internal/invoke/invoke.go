@@ -104,7 +104,9 @@ func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeReques
 // reported as a structured error.
 func invokeCore(ctx context.Context, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
 	reg := registry.New()
-	reg.RegisterCoreRuntimes()
+	if err := reg.RegisterCoreRuntimes(); err != nil {
+		return &capabilityrt.InvokeResponse{Error: err.Error()}
+	}
 	defer func() {
 		if err := reg.Close(); err != nil {
 			slog.Warn("close core capability runtimes", slog.String("error", err.Error()))

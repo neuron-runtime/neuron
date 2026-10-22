@@ -131,7 +131,11 @@ func New(
 	scopes := execution.NewScopeRegistry(ctx)
 
 	reg := registry.New()
-	reg.RegisterCoreRuntimes()
+	if err := reg.RegisterCoreRuntimes(); err != nil {
+		cancel()
+		bus.Close()
+		return nil, fmt.Errorf("register core capability runtimes: %w", err)
+	}
 
 	if err := plugin.RegisterResolvedCapabilityRuntimes(reg, optsApplied.resolvedCapabilityRuntimes); err != nil {
 		cancel()

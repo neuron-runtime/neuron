@@ -178,6 +178,12 @@ func runDirect(cmd *cobra.Command, reference string) error {
 		return fmt.Errorf("capability runtime name is required (e.g. neuron:core:set)")
 	}
 
+	// A reference to a built-in that does not exist is a mistake in the
+	// invocation, and the error says which built-ins exist.
+	if err := core.UnknownBuiltinError(core.CapabilityRuntimeType(typ)); err != nil {
+		return err
+	}
+
 	execParams, err := loadExecParams()
 	if err != nil {
 		return err
@@ -196,8 +202,7 @@ func runDirect(cmd *cobra.Command, reference string) error {
 				typ, version, core.CanonicalCoreType(coreType))
 		}
 		req.CoreType = string(core.CanonicalCoreType(coreType))
-	} else {
-		// Direct invocation is project-independent, so it resolves against the
+	} else { // Direct invocation is project-independent, so it resolves against the
 		// default machine-global store — exactly where `neuron add` installs when
 		// no store directory is configured. Requiring the artifact to be installed
 		// keeps direct invocation free of implicit resolution or installation.

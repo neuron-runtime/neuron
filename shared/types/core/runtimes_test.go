@@ -4,9 +4,9 @@ import "testing"
 
 func TestCoreName(t *testing.T) {
 	cases := map[string]CapabilityRuntimeType{
-		"set":     "neuron:core:set",
-		"ai":      "neuron:core:ai",
-		"command": "neuron:core:command",
+		"set":        "neuron:core:set",
+		"command":    "neuron:core:command",
+		"filesystem": "neuron:core:filesystem",
 	}
 	for in, want := range cases {
 		if got := CoreName(in); got != want {
@@ -18,15 +18,12 @@ func TestCoreName(t *testing.T) {
 func TestIsCoreRuntimeType(t *testing.T) {
 	core := []CapabilityRuntimeType{
 		"neuron:core:set",
-		"neuron:core:ai",
-		"neuron:core:log",
-		"neuron:core:command",
 		"neuron:core:http",
-		"neuron:core:delay",
+		"neuron:core:command",
 		"neuron:core:anything-new",
 		"set",
-		"ai",
 		"command",
+		"http",
 	}
 	for _, tt := range core {
 		if !IsCoreRuntimeType(tt) {
@@ -36,7 +33,7 @@ func TestIsCoreRuntimeType(t *testing.T) {
 
 	notCore := []CapabilityRuntimeType{
 		"neuron:set",
-		"neuron:ai",
+		"neuron:http",
 		"github:read",
 		"neuron-runtime:github:read",
 		"example:echo",
@@ -52,12 +49,22 @@ func TestIsCoreRuntimeType(t *testing.T) {
 	}
 }
 
+// A bare name of a retired built-in is not a core runtime type any more. It
+// was never an external package either, so a reference to it is reported as
+// a mistake in the assembly rather than sent to the package resolver.
+func TestIsCoreRuntimeTypeRejectsRetiredBareNames(t *testing.T) {
+	for _, name := range []CapabilityRuntimeType{"ai", "delay", "log"} {
+		if IsCoreRuntimeType(name) {
+			t.Errorf("IsCoreRuntimeType(%q) = true, want false", name)
+		}
+	}
+}
+
 func TestCanonicalCoreType(t *testing.T) {
 	cases := map[CapabilityRuntimeType]CapabilityRuntimeType{
 		"set":             "neuron:core:set",
 		"command":         "neuron:core:command",
 		"neuron:core:set": "neuron:core:set",
-		"neuron:core:ai":  "neuron:core:ai",
 	}
 	for in, want := range cases {
 		got := CanonicalCoreType(in)
