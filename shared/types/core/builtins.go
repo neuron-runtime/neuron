@@ -301,6 +301,77 @@ var builtinDescriptors = []BuiltinDescriptor{
 			"Terminates the program's whole process group on cancellation or deadline, so no child survives the capability.",
 		},
 	},
+	{
+		Name:    "filesystem",
+		Summary: "Reads files and directories",
+		Description: "filesystem reads a file, lists a directory, and reports what a path is. It is the " +
+			"read-only view of the machine the assembly runs on: the files the assembly was written to work " +
+			"with, and nothing else. Writing, deleting, and moving files are not part of it.",
+		Parameters: []BuiltinParameter{
+			{
+				Name:        "operation",
+				Type:        "string",
+				Required:    true,
+				Description: "What to do with the path: \"read\", \"list\", or \"stat\".",
+			},
+			{
+				Name:        "path",
+				Type:        "string",
+				Required:    true,
+				Description: "The path to read, list, or describe. A relative path is resolved against the project root.",
+			},
+			{
+				Name:        "recursive",
+				Type:        "boolean",
+				Default:     "false",
+				Description: "Whether a listing descends into subdirectories.",
+			},
+			{
+				Name:        "format",
+				Type:        "string",
+				Default:     "json",
+				Description: "How the content of a read file is represented: \"json\" or \"text\".",
+			},
+		},
+		Results: []BuiltinParameter{
+			{
+				Name:        "path",
+				Type:        "string",
+				Required:    true,
+				Description: "The absolute path the operation applied to.",
+			},
+			{
+				Name:        "content",
+				Type:        "any or string",
+				Description: "The content of the file, for the read operation: parsed JSON in the json format, a plain string in the text format.",
+			},
+			{
+				Name:        "size",
+				Type:        "number",
+				Description: "The size of the file in bytes, for the read and stat operations.",
+			},
+			{
+				Name:        "entries",
+				Type:        "array of objects",
+				Description: "The entries of the directory, for the list operation.",
+			},
+			{
+				Name:        "exists",
+				Type:        "boolean",
+				Description: "Whether the path exists, for the stat operation.",
+			},
+			{
+				Name:        "type",
+				Type:        "string",
+				Description: "What the path is: \"file\", \"directory\", \"link\", or \"other\".",
+			},
+		},
+		Constraints: []string{
+			"Refuses a path that resolves outside the permitted roots, and a symbolic link cannot be used to leave them.",
+			"Reads only: no operation writes, deletes, or moves anything.",
+			"Bounds the content a single read returns and the entries a single listing returns.",
+		},
+	},
 }
 
 // BuiltinDescriptors returns the authoritative list of built-in capability

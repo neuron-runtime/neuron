@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/neuron-runtime/neuron/nore/internal/builtins/command"
+	"github.com/neuron-runtime/neuron/nore/internal/builtins/filesystem"
 	"github.com/neuron-runtime/neuron/nore/internal/builtins/http"
 	"github.com/neuron-runtime/neuron/nore/internal/builtins/set"
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
@@ -85,9 +86,10 @@ func (r *Registry) RegisterCoreRuntimes(policy builtins.Policy) error {
 	}
 
 	implementations := map[string]contracts.CapabilityRuntime{
-		"set":     set.Set{},
-		"http":    http.HTTP{Policy: effective},
-		"command": command.Command{Policy: effective},
+		"set":        set.Set{},
+		"http":       http.HTTP{Policy: effective},
+		"command":    command.Command{Policy: effective},
+		"filesystem": filesystem.Filesystem{Policy: effective},
 	}
 
 	for _, name := range core.BuiltinTypeNames() {

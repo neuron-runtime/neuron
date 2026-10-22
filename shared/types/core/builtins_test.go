@@ -23,7 +23,7 @@ func TestBuiltinDescriptorsAreTheSourceOfCoreTypes(t *testing.T) {
 		}
 	}
 
-	want := []string{"command", "http", "set"}
+	want := []string{"command", "filesystem", "http", "set"}
 	got := BuiltinTypeNames()
 	if len(got) != len(want) {
 		t.Fatalf("BuiltinTypeNames() = %v, want %v", got, want)
@@ -70,12 +70,12 @@ func TestLookupBuiltinRejectsUnknownNames(t *testing.T) {
 }
 
 func TestIsBuiltinRuntimeType(t *testing.T) {
-	for _, name := range []string{"set", "http", "command", "neuron:core:set"} {
+	for _, name := range []string{"set", "http", "command", "filesystem", "neuron:core:set", "neuron:core:filesystem"} {
 		if !IsBuiltinRuntimeType(CapabilityRuntimeType(name)) {
 			t.Errorf("IsBuiltinRuntimeType(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"ai", "delay", "log", "filesystem", "neuron:core:delay", "neuron:core:ai", "neuron:core:log", "neuron:core:filesystem"} {
+	for _, name := range []string{"ai", "delay", "log", "neuron:core:delay", "neuron:core:ai", "neuron:core:log", "neuron:core:storage"} {
 		if IsBuiltinRuntimeType(CapabilityRuntimeType(name)) {
 			t.Errorf("IsBuiltinRuntimeType(%q) = true, want false", name)
 		}
