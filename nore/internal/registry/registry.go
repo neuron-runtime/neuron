@@ -5,7 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/neuron-runtime/neuron/nore/internal/builtins"
+	"github.com/neuron-runtime/neuron/nore/internal/builtins/command"
+	"github.com/neuron-runtime/neuron/nore/internal/builtins/http"
+	"github.com/neuron-runtime/neuron/nore/internal/builtins/set"
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -69,9 +71,9 @@ func (r *Registry) Resolve(runtimeType core.CapabilityRuntimeType) (contracts.Ca
 // authored before the namespace existed still resolves.
 func (r *Registry) RegisterCoreRuntimes() error {
 	implementations := map[string]contracts.CapabilityRuntime{
-		"set":     builtins.Set{},
-		"http":    builtins.HTTP{},
-		"command": builtins.Command{},
+		"set":     set.Set{},
+		"http":    http.HTTP{},
+		"command": command.Command{},
 	}
 
 	for _, name := range core.BuiltinTypeNames() {

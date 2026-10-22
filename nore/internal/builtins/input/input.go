@@ -118,6 +118,18 @@ func (v Values) Keys() []string {
 	return keys
 }
 
+// All returns the merged input as a plain map.
+//
+// The returned map is a copy, so a caller that returns it as a capability
+// result cannot be affected by a later change to the input.
+func (v Values) All() map[string]any {
+	merged := make(map[string]any, len(v.values))
+	for key, value := range v.values {
+		merged[key] = value
+	}
+	return merged
+}
+
 // Raw returns the value stored under name and whether it was present. It is
 // the escape hatch for values this package does not model, such as an
 // arbitrary JSON body.

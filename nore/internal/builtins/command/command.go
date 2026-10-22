@@ -1,48 +1,47 @@
-package builtins
+// Package command implements the neuron:core:command capability runtime.
+package command
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os/exec"
 
+	"github.com/neuron-runtime/neuron/nore/internal/builtins/input"
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 )
 
-// Command runs a local command and returns stdout/stderr/exit_code. It is
-// cancelled automatically when the execution context ends.
+// Command runs a local program and returns its exit code, standard output and
+// standard error.
+//
+// It is the boundary between an assembly and the programs already installed on
+// the machine. The program and its arguments are passed to the operating
+// system separately, so an argument can never become a command of its own.
 type Command struct{}
 
+// Execute runs the program named by the capability's input.
 func (Command) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
-	params := make(map[string]any)
-	maps.Copy(params, execution.CapabilityConfigurations)
-	maps.Copy(params, execution.Params)
+	values := input.New("neuron:core:command", execution.CapabilityConfigurations, execution.Params)
 
-	cmdString, _ := params["command"].(string)
-	if cmdString == "" {
-		return nil, fmt.Errorf("command runtime requires a 'command' string")
+	program, err := values.RequiredString("command")
+	if err != nil {
+		return nil, err
 	}
 
-	// Parse arguments safely
-	var cmdArgs []string
-	if argsRaw, ok := params["args"].([]any); ok {
-		for _, arg := range argsRaw {
-			cmdArgs = append(cmdArgs, fmt.Sprintf("%v", arg))
-		}
+	args, _, err := values.StringSlice("args")
+	if err != nil {
+		return nil, err
 	}
 
-	// Create command with context (this auto-kills the process if N.O.R.E times out)
-	cmd := exec.CommandContext(ctx, cmdString, cmdArgs...)
+	cmd := exec.CommandContext(ctx, program, args...)
 
-	// Capture outputs
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	runErr := cmd.Run()
 
 	// A cancelled execution is not a program that finished. exec.CommandContext
 	// kills the process, so the error it reports is the kill signal rather
@@ -53,13 +52,13 @@ func (Command) Execute(ctx context.Context, execution contracts.ExecutionContext
 	}
 
 	exitCode := 0
-	if err != nil {
+	if runErr != nil {
 		var exitError *exec.ExitError
-		if !errors.As(err, &exitError) {
+		if !errors.As(runErr, &exitError) {
 			// The program never ran: it could not be found, was not
 			// executable, or could not be started. Reporting exit code zero
 			// here would claim a success that never happened.
-			return nil, fmt.Errorf("run %q: %w", cmdString, err)
+			return nil, fmt.Errorf("run %q: %w", program, runErr)
 		}
 		exitCode = exitError.ExitCode()
 	}
