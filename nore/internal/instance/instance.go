@@ -22,6 +22,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/stream"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
@@ -48,6 +49,10 @@ type options struct {
 	// detachedDrainTimeout is how long detached work may keep running after the
 	// instance stops. A non-positive value selects the engine default.
 	detachedDrainTimeout time.Duration
+
+	// builtinPolicy bounds the built-in capability runtimes this instance
+	// registers.
+	builtinPolicy builtins.Policy
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -65,6 +70,20 @@ func WithResolvedCapabilityRuntimes(resolved []capabilityrt.ResolvedCapabilityRu
 func WithDetachedDrainTimeout(timeout time.Duration) Option {
 	return func(o *options) {
 		o.detachedDrainTimeout = timeout
+	}
+}
+
+// WithBuiltinPolicy sets the policy the built-in capability runtimes run
+// under.
+//
+// The policy bounds what the built-ins may reach: the directories they may
+// read, the programs they may run, the hosts they may contact. It is
+// resolved against the compiled-in ceilings when the runtimes are registered,
+// so a policy that reaches the runtime from outside cannot widen what a
+// capability may do.
+func WithBuiltinPolicy(policy builtins.Policy) Option {
+	return func(o *options) {
+		o.builtinPolicy = policy
 	}
 }
 
@@ -131,7 +150,7 @@ func New(
 	scopes := execution.NewScopeRegistry(ctx)
 
 	reg := registry.New()
-	if err := reg.RegisterCoreRuntimes(); err != nil {
+	if err := reg.RegisterCoreRuntimes(optsApplied.builtinPolicy); err != nil {
 		cancel()
 		bus.Close()
 		return nil, fmt.Errorf("register core capability runtimes: %w", err)

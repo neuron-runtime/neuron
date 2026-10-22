@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 )
 
 // commandHelperMarker is the argument that tells a re-executed test binary to
@@ -40,6 +41,13 @@ func TestCommandHelperProcess(t *testing.T) {
 			os.Exit(0)
 		case "sleep":
 			time.Sleep(time.Minute)
+			os.Exit(0)
+		case "flood":
+			// Write far more than any output limit allows, so the test can
+			// observe that the output is bounded while it is produced.
+			for i := 0; i < 4096; i++ {
+				os.Stdout.WriteString("0123456789")
+			}
 			os.Exit(0)
 		}
 	}
@@ -154,5 +162,27 @@ func TestCommandHelperProcessIsSkippedInTheOrdinaryRun(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(os.Args, " "), commandHelperMarker) {
 		t.Errorf("the ordinary run carries the helper marker %q", commandHelperMarker)
+	}
+}
+
+// Output beyond the limit is dropped while it is produced, and the truncation
+// is reported so a caller can tell a shortened stream from a complete one.
+func TestCommandBoundsTheOutputAndReportsTheTruncation(t *testing.T) {
+	result, err := Command{Policy: builtins.Policy{MaxCommandOutputBytes: 16}}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: helperParams(t, "flood"),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	stdout, _ := result["stdout"].(string)
+	if len(stdout) != 16 {
+		t.Errorf("stdout is %d bytes, want 16", len(stdout))
+	}
+	if result["stdout_truncated"] != true {
+		t.Errorf("stdout_truncated = %v, want true", result["stdout_truncated"])
+	}
+	if result["stderr_truncated"] == true {
+		t.Errorf("stderr_truncated = %v, want no truncation on an empty stream", result["stderr_truncated"])
 	}
 }

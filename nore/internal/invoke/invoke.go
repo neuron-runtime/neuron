@@ -23,6 +23,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/registry"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -39,7 +40,11 @@ const shutdownTimeout = 10 * time.Second
 //
 // storeRoot is the capability runtime store root the artifact was installed
 // into; it is a property of the host, not the request.
-func Run(ctx context.Context, storeRoot string, in io.Reader, out io.Writer) error {
+//
+// policy bounds the built-in capability runtimes; it is a property of the host
+// as well, because it describes what the machine running the invocation is
+// willing to let a capability reach.
+func Run(ctx context.Context, storeRoot string, policy builtins.Policy, in io.Reader, out io.Writer) error {
 	req, err := decode(in)
 	if err != nil {
 		_ = write(out, &capabilityrt.InvokeResponse{Error: err.Error()})
@@ -57,7 +62,7 @@ func Run(ctx context.Context, storeRoot string, in io.Reader, out io.Writer) err
 		}
 	}()
 
-	resp := Invoke(ctx, storeRoot, req)
+	resp := Invoke(ctx, storeRoot, policy, req)
 	if err := write(out, resp); err != nil {
 		return err
 	}
@@ -74,9 +79,11 @@ func Run(ctx context.Context, storeRoot string, in io.Reader, out io.Writer) err
 // missing provider, or a runtime error — are returned as a structured error
 // response, never as a panic, so the parent always receives a parseable
 // document.
-func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
+//
+// The policy bounds the built-in capability runtimes the request may address.
+func Invoke(ctx context.Context, storeRoot string, policy builtins.Policy, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
 	if req.CoreType != "" {
-		return invokeCore(ctx, req)
+		return invokeCore(ctx, policy, req)
 	}
 
 	plugin.SetStoreRoot(storeRoot)
@@ -91,7 +98,10 @@ func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeReques
 		}
 	}()
 
-	result, err := adapter.Execute(ctx, contracts.ExecutionContext{Params: req.Params})
+	result, err := adapter.Execute(ctx, contracts.ExecutionContext{
+		Params: req.Params,
+		Logger: contracts.NopLogger{},
+	})
 	if err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
@@ -102,9 +112,9 @@ func Invoke(ctx context.Context, storeRoot string, req capabilityrt.InvokeReques
 // registry Assembly execution uses and executes it once in-process. No store,
 // provider, or installed artifact is involved; an unknown core name is
 // reported as a structured error.
-func invokeCore(ctx context.Context, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
+func invokeCore(ctx context.Context, policy builtins.Policy, req capabilityrt.InvokeRequest) *capabilityrt.InvokeResponse {
 	reg := registry.New()
-	if err := reg.RegisterCoreRuntimes(); err != nil {
+	if err := reg.RegisterCoreRuntimes(policy); err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
 	defer func() {
@@ -118,7 +128,10 @@ func invokeCore(ctx context.Context, req capabilityrt.InvokeRequest) *capability
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
 
-	result, err := runtime.Execute(ctx, contracts.ExecutionContext{Params: req.Params})
+	result, err := runtime.Execute(ctx, contracts.ExecutionContext{
+		Params: req.Params,
+		Logger: contracts.NopLogger{},
+	})
 	if err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}

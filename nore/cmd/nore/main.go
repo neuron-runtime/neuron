@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/version"
 )
@@ -47,6 +50,7 @@ func main() {
 		projectMode          bool
 		projectRoot          string
 		host                 string
+		builtinPolicyArg     string
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
@@ -61,6 +65,7 @@ func main() {
 	flag.BoolVar(&projectMode, "project", false, "run in project runtime mode (foreground, loopback TCP, auto port)")
 	flag.StringVar(&projectRoot, "project-root", "", "project root directory (required with --project)")
 	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
+	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
 	flag.Parse()
 
 	if showVer {
@@ -68,12 +73,21 @@ func main() {
 		return
 	}
 
+	// The built-in capability policy is resolved once, at the process boundary:
+	// the policy may arrive from a project configuration over the command line,
+	// and it is resolved against the ceilings compiled into this binary so a
+	// policy that arrived from outside cannot widen what a capability reaches.
+	builtinPolicy, err := resolveBuiltinPolicy(builtinPolicyArg)
+	if err != nil {
+		log.Fatalf("resolve built-in capability policy: %v", err)
+	}
+
 	// Direct invocation mode: host a single installed Capability Runtime for one
 	// execution and exit. No storage, assemblies, or API are involved.
 	if invokeMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := invoke.Run(ctx, capabilityStore, os.Stdin, os.Stdout); err != nil {
+		if err := invoke.Run(ctx, capabilityStore, builtinPolicy, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -85,7 +99,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
 		return
 	}
 
@@ -131,7 +145,8 @@ func main() {
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
+	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
+		instance.WithBuiltinPolicy(builtinPolicy))
 	srv := api.NewServer(inst, assemblies, compiler, token)
 
 	type listenerEntry struct {
@@ -232,6 +247,32 @@ func shutdownRuntimes(srv *api.Server) {
 	}
 }
 
+// resolveBuiltinPolicy decodes the built-in capability policy the runtime was
+// started with.
+//
+// The policy travels as JSON on the command line because the runtime is a
+// separate process from the CLI. It is resolved against the ceilings compiled
+// into this binary, so a policy that arrives over a transport it did not come
+// from cannot widen what a capability may reach, and it is validated so a
+// policy that cannot be applied stops the runtime instead of being ignored.
+func resolveBuiltinPolicy(argument string) (builtins.Policy, error) {
+	var policy builtins.Policy
+	if strings.TrimSpace(argument) != "" {
+		if err := json.Unmarshal([]byte(argument), &policy); err != nil {
+			return builtins.Policy{}, fmt.Errorf("decode the built-in capability policy: %w", err)
+		}
+	}
+
+	effective, err := builtins.Effective(policy)
+	if err != nil {
+		return builtins.Policy{}, err
+	}
+	if err := effective.Validate(); err != nil {
+		return builtins.Policy{}, err
+	}
+	return effective, nil
+}
+
 // resolveAPIToken determines the token the API will require.
 //
 // The token is taken from the flag first, then from the token file beside the
@@ -309,7 +350,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
@@ -377,7 +418,8 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
+	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
+		instance.WithBuiltinPolicy(builtinPolicy))
 	srv := api.NewServer(inst, assemblies, compiler, token)
 
 	// Serve on the listener

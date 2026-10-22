@@ -9,6 +9,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/builtins/http"
 	"github.com/neuron-runtime/neuron/nore/internal/builtins/set"
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -66,14 +67,27 @@ func (r *Registry) Resolve(runtimeType core.CapabilityRuntimeType) (contracts.Ca
 // declared built-in with no implementation is a defect in the runtime, and it
 // is reported rather than leaving the built-in silently unavailable.
 //
+// The policy bounds what the built-ins may reach. It is resolved here, against
+// the ceilings compiled into the runtime, so a policy that arrives over a
+// transport it did not come from — a command line, for instance — still
+// cannot widen what a capability may reach.
+//
 // Each built-in is registered under its canonical namespaced name
 // (neuron:core:http) and under its legacy bare name (http), so an assembly
 // authored before the namespace existed still resolves.
-func (r *Registry) RegisterCoreRuntimes() error {
+func (r *Registry) RegisterCoreRuntimes(policy builtins.Policy) error {
+	effective, err := builtins.Effective(policy)
+	if err != nil {
+		return fmt.Errorf("resolve the built-in capability policy: %w", err)
+	}
+	if err := effective.Validate(); err != nil {
+		return fmt.Errorf("validate the built-in capability policy: %w", err)
+	}
+
 	implementations := map[string]contracts.CapabilityRuntime{
 		"set":     set.Set{},
-		"http":    http.HTTP{},
-		"command": command.Command{},
+		"http":    http.HTTP{Policy: effective},
+		"command": command.Command{Policy: effective},
 	}
 
 	for _, name := range core.BuiltinTypeNames() {

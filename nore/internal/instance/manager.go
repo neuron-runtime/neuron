@@ -13,6 +13,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	core2 "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
@@ -33,14 +34,24 @@ type Manager struct {
 	// finish after the instance stops. A non-positive value selects the engine
 	// default.
 	detachedDrainTimeout time.Duration
+
+	// builtinPolicy bounds the built-in capability runtimes every instance
+	// this manager creates registers.
+	builtinPolicy builtins.Policy
 }
 
-func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository) *Manager {
+func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) *Manager {
 	if parent == nil {
 		parent = context.Background()
 	}
 	if workers <= 0 {
 		workers = 8
+	}
+	var optsApplied options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&optsApplied)
+		}
 	}
 	m := &Manager{
 		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
@@ -51,6 +62,7 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 		metadata:             newMetadataStore(store),
 		assemblies:           assemblies,
 		detachedDrainTimeout: detachedDrainTimeout,
+		builtinPolicy:        optsApplied.builtinPolicy,
 	}
 	m.reconcile()
 	return m
@@ -150,7 +162,7 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 		return nil, false, err
 	}
 	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store,
-		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout))
+		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy))
 	if err != nil {
 		return nil, false, err
 	}

@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 )
 
 func TestHTTPReturnsTheStatusAndTheParsedBody(t *testing.T) {
@@ -130,5 +132,60 @@ func TestHTTPReportsAnUnreachableServer(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Execute succeeded for a server that is not listening")
+	}
+}
+
+// A response body that exceeds the limit is refused rather than truncated: a
+// caller that receives a shortened body cannot tell it apart from a complete
+// one.
+func TestHTTPRefusesAResponseBodyAboveTheLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("0123456789"))
+	}))
+	defer server.Close()
+
+	_, err := HTTP{Policy: builtins.Policy{MaxHTTPResponseBytes: 4}}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err == nil {
+		t.Fatal("Execute accepted a response body above the limit")
+	}
+	if !strings.Contains(err.Error(), "exceeds the limit") {
+		t.Errorf("error = %v, want it to state the limit", err)
+	}
+}
+
+func TestHTTPAcceptsAResponseBodyAtTheLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("0123456789"))
+	}))
+	defer server.Close()
+
+	result, err := HTTP{Policy: builtins.Policy{MaxHTTPResponseBytes: 10}}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result["body"] != "0123456789" {
+		t.Errorf("body = %#v, want the whole body", result["body"])
+	}
+}
+
+func TestHTTPRefusesARequestBodyAboveTheLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	_, err := HTTP{Policy: builtins.Policy{MaxHTTPRequestBodyBytes: 4}}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":  server.URL,
+			"body": map[string]any{"name": "neuron"},
+		},
+	})
+	if err == nil {
+		t.Fatal("Execute accepted a request body above the limit")
+	}
+	if !strings.Contains(err.Error(), "exceeds the limit") {
+		t.Errorf("error = %v, want it to state the limit", err)
 	}
 }
