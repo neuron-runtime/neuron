@@ -411,10 +411,25 @@ neuron capability runtime inspect example:echo@1.0.0
 
 ## Built-in modules
 
-The Neuron runtime ships a small set of built-in modules for common operations. They run **in-process** inside the runtime engine and require no resolution or installation — referencing one in a Capability is a plain module reference, and the runtime dispatches it directly to the in-process implementation.
+The Neuron runtime ships four built-in modules for common operations. They run **in-process** inside the runtime engine and require no resolution or installation — referencing one in a Capability is a plain module reference, and the runtime dispatches it directly to the in-process implementation.
+
+| Built-in | Purpose |
+| --- | --- |
+| `neuron:core:set` | Materializes a capability's value set: the capability's configuration with its params overlaid |
+| `neuron:core:http` | Performs an HTTP request with SSRF protection, host allowlist, and optional retry policy |
+| `neuron:core:command` | Runs a local program with working-directory confinement, environment allowlist, and process-group termination |
+| `neuron:core:filesystem` | Reads files and lists directories, confined to the project root and any extra roots the project declares |
 
 > [!IMPORTANT]
 > Built-ins are the deliberate exception to out-of-process hosting: they are part of the Neuron runtime itself (and thereby of the trusted, tested runtime). Everything else follows the external-module path above, with verification and process/WASM isolation.
+
+The `neuron builtins` command reports the contract of every built-in, or the contract of one built-in when named:
+
+```bash
+neuron builtins            # every built-in
+neuron builtins http       # one built-in
+neuron builtins http -v    # with the full descriptions
+```
 
 ---
 

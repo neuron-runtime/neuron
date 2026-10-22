@@ -118,6 +118,29 @@ params or result fields. Add `paramsSchema(...)` / `resultSchema(...)` plus
 structured reference (`capability.result.x`, `assembly.params.x`, or a literal);
 arbitrary expression strings are not evaluated for result fields.
 
+### Built-in capability runtimes
+
+The SDK now exports every built-in capability runtime from `@neuronruntime/sdk/core`:
+
+```ts
+import { set, http, command, filesystem } from "@neuronruntime/sdk/core";
+
+const fetchUser = http("users.get");
+const listFiles = filesystem("files.list");
+```
+
+- `set` is the default runtime for a capability that declares none; most
+  assemblies never name it explicitly.
+- `http` now accepts `query`, `contentType`, `auth`, and `retry` params, and
+  produces `content_type` and `duration_ms` results — matching the runtime's
+  published contract.
+- `delay` is removed: it only waited, which is a sequencing concern rather than
+  a capability. Use an explicit dependency between the capabilities that must
+  run in order instead.
+- A built-in capability runtime runs in-process and is never resolved or
+  installed, so its manifest declaration carries no version and no registry.
+  The SDK no longer writes `version: "latest", registry: "local"` for a built-in.
+
 ## Expressions and structured references
 
 The canonical manifest stores references structurally:

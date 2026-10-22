@@ -506,12 +506,10 @@ There are two ways a capability type gets a capability runtime.
 
 | Capability type | Behavior |
 | --- | --- |
-| `neuron:core:set` | Sets static values from config |
-| `neuron:core:ai` | In-process mock/placeholder capability runtime |
-| `neuron:core:log` | Logs its input |
-| `neuron:core:http` | Makes an HTTP request |
-| `neuron:core:delay` | Waits a configured interval |
-| `neuron:core:command` | Runs an OS command |
+| `neuron:core:set` | Materializes a capability's value set (configuration with params overlaid) |
+| `neuron:core:http` | Performs an HTTP request with SSRF protection, host allowlist, and retry policy |
+| `neuron:core:command` | Runs a local program with cwd confinement, env allowlist, and process-group termination |
+| `neuron:core:filesystem` | Reads files and lists directories, confined to the project root and extra roots |
 
 They are registered by `RegisterCoreRuntimes` in `nore/internal/registry`, under both the canonical namespaced name (`neuron:core:set`, …) and the legacy bare name.
 
