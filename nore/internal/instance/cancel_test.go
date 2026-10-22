@@ -13,13 +13,13 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
-// Cancel is only honest if the work actually stops. The delay runtime blocks until
+// Cancel is only honest if the work actually stops. The command runtime blocks until
 // its context dies, so an execution observed in flight is genuinely running code --
 // which makes this the boundary at which "cancelled" can be proven end to end
 // rather than inferred from a status string.
 func TestCancelExecutionStopsTheRunningWork(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.CancelExecution(context.Background(), exec.ID, errors.New("stopped by operator")); err != nil {
@@ -49,7 +49,7 @@ func TestCancelExecutionStopsTheRunningWork(t *testing.T) {
 // deliberately, and blaming it would misdirect whoever reads the execution.
 func TestCancelExecutionDoesNotReportTheAbortedCapabilityAsFailed(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.CancelExecution(context.Background(), exec.ID, errors.New("stopped by operator")); err != nil {
@@ -59,7 +59,7 @@ func TestCancelExecutionDoesNotReportTheAbortedCapabilityAsFailed(t *testing.T) 
 	// The engine unwinds asynchronously after the cancellation is recorded.
 	time.Sleep(250 * time.Millisecond)
 
-	if got := exec.CapabilityState("cap_wait").Status; got != execution.CapabilityCancelled {
+	if got := exec.CapabilityState("cap_blocking").Status; got != execution.CapabilityCancelled {
 		t.Errorf("capability status = %s, want %s", got, execution.CapabilityCancelled)
 	}
 }
@@ -69,8 +69,8 @@ func TestCancelExecutionDoesNotReportTheAbortedCapabilityAsFailed(t *testing.T) 
 // took effect when the work had already concluded on its own.
 func TestCancelExecutionRefusesACompletedExecution(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
-	exec, err := i.Execute(context.Background(), map[string]any{"duration": "1ms"})
+	i := startBlockingInstance(t, store)
+	exec, err := i.Execute(context.Background(), shortParams())
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestCancelExecutionRefusesACompletedExecution(t *testing.T) {
 // able to tell that apart from a refusal.
 func TestCancelExecutionReportsAnUnknownExecution(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 
 	err := i.CancelExecution(context.Background(), "exec_does_not_exist", errors.New("stop"))
 	if !errors.Is(err, ErrExecutionNotFound) {
@@ -121,7 +121,7 @@ func TestCancelExecutionReportsAnUnknownExecution(t *testing.T) {
 // already happened -- stopping the instance first would race it and prove nothing.
 func TestCancellationIsPersisted(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.CancelExecution(context.Background(), exec.ID, errors.New("stopped by operator")); err != nil {
@@ -172,16 +172,16 @@ func waitForPersistedStatus(t *testing.T, store *sqlite.Store, executionID share
 // and the honest answer there is that there is nothing left to stop.
 func TestCancelOnARestoredInstanceReportsTheExecutionAsFinished(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.Stop(); err != nil {
 		t.Fatalf("stop instance: %v", err)
 	}
 
-	assembly := delayAssembly()
+	assembly := blockingAssembly()
 	restored, err := New(context.Background(), i.ID, protocol.InstanceKey{
-		AssemblyID: "sys_delay", Version: "1.0.0",
+		AssemblyID: "sys_blocking", Version: "1.0.0",
 	}, &assembly, 2, store)
 	if err != nil {
 		t.Fatalf("restore instance: %v", err)
@@ -199,7 +199,7 @@ func TestCancelOnARestoredInstanceReportsTheExecutionAsFinished(t *testing.T) {
 // until its own timeout.
 func TestCancelExecutionPublishesTheCancellation(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	subscription, err := i.Bus().SubscribeExecution(exec.ID, 16)

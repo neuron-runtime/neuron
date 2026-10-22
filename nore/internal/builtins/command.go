@@ -44,12 +44,24 @@ func (Command) Execute(ctx context.Context, execution contracts.ExecutionContext
 
 	err := cmd.Run()
 
+	// A cancelled execution is not a program that finished. exec.CommandContext
+	// kills the process, so the error it reports is the kill signal rather
+	// than the cancellation, and reporting that as an exit code would claim a
+	// result the program never produced.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+
 	exitCode := 0
 	if err != nil {
 		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			exitCode = exitError.ExitCode()
+		if !errors.As(err, &exitError) {
+			// The program never ran: it could not be found, was not
+			// executable, or could not be started. Reporting exit code zero
+			// here would claim a success that never happened.
+			return nil, fmt.Errorf("run %q: %w", cmdString, err)
 		}
+		exitCode = exitError.ExitCode()
 	}
 
 	return map[string]any{
