@@ -269,6 +269,38 @@ Usage:
 neuron remove example:echo@1.0.0
 ```
 
+### `neuron builtins`
+
+Report the capability runtimes N.O.R.E. provides without installation.
+
+```
+Usage:
+  neuron builtins [name] [flags]
+
+Flags:
+  -v, --verbose   Include the full descriptions
+```
+
+A built-in capability runtime is part of the runtime: it is always available, it is never installed from a registry, and it is the capability runtime an assembly uses when it names none. The command reports the contract of every built-in, or the contract of one built-in when it is named. It needs neither a running runtime nor a project.
+
+```bash
+# List the built-in capability runtimes
+neuron builtins
+
+# The contract of one built-in
+neuron builtins http
+
+# The contract with the full descriptions
+neuron builtins http --verbose
+```
+
+```
+neuron:core:command     Runs a local program
+neuron:core:filesystem  Reads files and directories
+neuron:core:http        Makes an HTTP request
+neuron:core:set         Materializes a capability's static value set
+```
+
 ### `neuron capability runtime`
 
 Inspect capability runtime packages installed in the local store. (Installing or removing a package is done with the top-level `neuron add` and `neuron remove` commands, since those change what a project pins.)

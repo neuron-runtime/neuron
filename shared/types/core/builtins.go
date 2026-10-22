@@ -439,6 +439,30 @@ func BuiltinTypeNames() []string {
 	return names
 }
 
+// BuiltinTypes returns the canonical type of every built-in capability
+// runtime, sorted.
+//
+// The canonical type is the name an assembly refers to a built-in by.
+func BuiltinTypes() []CapabilityRuntimeType {
+	names := BuiltinTypeNames()
+	types := make([]CapabilityRuntimeType, 0, len(names))
+	for _, name := range names {
+		types = append(types, CoreName(name))
+	}
+	return types
+}
+
+// builtinTypeNames returns the canonical type of every built-in as text, for
+// an error message that names the built-ins an author may refer to.
+func builtinTypeNames() []string {
+	types := BuiltinTypes()
+	names := make([]string, 0, len(types))
+	for _, builtinType := range types {
+		names = append(names, string(builtinType))
+	}
+	return names
+}
+
 // builtinName extracts the built-in name from a capability runtime type.
 //
 // It accepts the canonical namespaced form and the legacy bare form, and
@@ -544,7 +568,7 @@ func UnknownBuiltinError(t CapabilityRuntimeType) error {
 		return nil
 	}
 
-	available := "available built-in capability runtimes are: " + strings.Join(BuiltinTypeNames(), ", ")
+	available := "available built-in capability runtimes are: " + strings.Join(builtinTypeNames(), ", ")
 
 	if removed, wasRemoved := LookupRemovedBuiltin(t); wasRemoved {
 		return fmt.Errorf("capability runtime %q does not exist: it was removed because %s; use %s instead. %s",

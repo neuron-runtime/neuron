@@ -9,6 +9,7 @@ import (
 	"github.com/neuron-runtime/neuron/application/config"
 	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
 	"github.com/neuron-runtime/neuron/application/internal/cli/build"
+	"github.com/neuron-runtime/neuron/application/internal/cli/builtins"
 	"github.com/neuron-runtime/neuron/application/internal/cli/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/daemon"
@@ -87,6 +88,7 @@ func init() {
 		versioncmd.New(),
 		installcmd.New(),
 		providercmd.New(),
+		builtins.New(),
 	)
 }
 

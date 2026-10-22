@@ -27,6 +27,10 @@ var (
 	CapabilityRuntimeList    = "list"
 	CapabilityRuntimeInspect = "inspect [name@version]"
 
+	// Builtins reports the capability runtimes the runtime provides without
+	// installation.
+	Builtins = "builtins [name]"
+
 	Add    = "add [name@version]"
 	Remove = "remove [name@version]"
 
