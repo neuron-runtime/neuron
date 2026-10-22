@@ -79,16 +79,25 @@ var builtinDescriptors = []BuiltinDescriptor{
 			"invocation and returns the combination, with params overriding configuration. It is the " +
 			"default runtime for a capability that declares none, which makes it the way an assembly " +
 			"supplies a value set to a downstream capability without writing a capability runtime.",
+		Parameters: []BuiltinParameter{
+			{
+				Name:        "format",
+				Type:        "string",
+				Default:     "json",
+				Description: "How the values of the set are represented: \"json\" or \"text\".",
+			},
+		},
 		Results: []BuiltinParameter{
 			{
 				Name:        "value",
 				Type:        "object",
 				Required:    true,
-				Description: "The merged value set: the capability's configuration with the params overlaid on it.",
+				Description: "The merged value set: the capability's configuration with the params overlaid on it. The result of the capability carries the names of the merged set.",
 			},
 		},
 		Constraints: []string{
 			"Reads only the capability's own input; it reaches nothing outside the runtime.",
+			"The format is an instruction to the built-in rather than a value of the set, so it is not returned as one.",
 		},
 	},
 	{
