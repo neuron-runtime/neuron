@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
@@ -296,5 +297,202 @@ func TestHTTPRefusesARequestBodyAboveTheLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds the limit") {
 		t.Errorf("error = %v, want it to state the limit", err)
+	}
+}
+
+// The query parameters are appended to the URL, so a caller can shape the
+// request without building the URL itself.
+func TestHTTPAppendsTheQueryParameters(t *testing.T) {
+	var query string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":   server.URL,
+			"query": map[string]any{"page": "2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if query != "page=2" {
+		t.Errorf("query = %q, want %q", query, "page=2")
+	}
+}
+
+// The bearer credentials are sent as an authorization header, and never as
+// part of the URL.
+func TestHTTPSendsBearerCredentials(t *testing.T) {
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":  server.URL,
+			"auth": map[string]any{"type": "bearer", "token": "abc"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if authorization != "Bearer abc" {
+		t.Errorf("Authorization = %q, want %q", authorization, "Bearer abc")
+	}
+}
+
+// The basic credentials are sent as an authorization header.
+func TestHTTPSendsBasicCredentials(t *testing.T) {
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":  server.URL,
+			"auth": map[string]any{"type": "basic", "username": "neuron", "password": "secret"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if authorization != "Basic bmV1cm9uOnNlY3JldA==" {
+		t.Errorf("Authorization = %q, want the basic credentials", authorization)
+	}
+}
+
+// An API key is sent in the header it names.
+func TestHTTPSendsAnAPIKey(t *testing.T) {
+	var key string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key = r.Header.Get("X-Api-Key")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":  server.URL,
+			"auth": map[string]any{"type": "apiKey", "name": "X-Api-Key", "value": "abc"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if key != "abc" {
+		t.Errorf("X-Api-Key = %q, want %q", key, "abc")
+	}
+}
+
+// An authentication type that does not exist is refused rather than ignored.
+func TestHTTPRefusesAnUnknownAuthenticationType(t *testing.T) {
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":  "https://example.com",
+			"auth": map[string]any{"type": "magic"},
+		},
+	})
+	if err == nil {
+		t.Fatal("Execute accepted an unknown authentication type")
+	}
+	if !strings.Contains(err.Error(), "unknown authentication type") {
+		t.Errorf("error = %v, want it to state that the type is unknown", err)
+	}
+}
+
+// The request carries the content type the caller asked for.
+func TestHTTPSendsTheContentType(t *testing.T) {
+	var contentType string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType = r.Header.Get("Content-Type")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":         server.URL,
+			"method":      "POST",
+			"contentType": "application/xml",
+			"body":        map[string]any{"name": "neuron"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if contentType != "application/xml" {
+		t.Errorf("Content-Type = %q, want %q", contentType, "application/xml")
+	}
+}
+
+// The answer carries the content type of the response, so a caller can tell
+// what it received.
+func TestHTTPReportsTheResponseContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result["content_type"] != "application/json" {
+		t.Errorf("content_type = %v, want %q", result["content_type"], "application/json")
+	}
+}
+
+// The answer says how long the request took.
+func TestHTTPReportsTheDuration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, ok := result["duration_ms"].(float64); !ok {
+		t.Errorf("duration_ms = %#v, want a number", result["duration_ms"])
+	}
+}
+
+// The retry policy names the methods that may be retried.
+func TestHTTPRetriesOnlyTheNamedMethods(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{
+			"url":    server.URL,
+			"method": "POST",
+			"retry":  map[string]any{"attempts": 3, "backoff": "10ms", "methods": []any{"POST"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Errorf("the server was asked %d times, want 3", got)
 	}
 }

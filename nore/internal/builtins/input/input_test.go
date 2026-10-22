@@ -193,3 +193,58 @@ func TestFormatReadsTheSelectedFormat(t *testing.T) {
 		t.Errorf("format = %q, want %q", format, FormatText)
 	}
 }
+
+// A nested object is read with the same rules as the outer values, so a
+// built-in does not have to know how the fields of a nested object are typed.
+func TestNestedReadsAnObjectWithTheSameRules(t *testing.T) {
+	values := New("neuron:core:http", nil, map[string]any{
+		"retry": map[string]any{"attempts": float64(3), "backoff": "200ms"},
+	})
+
+	nested, present, err := values.Nested("retry")
+	if err != nil {
+		t.Fatalf("Nested: %v", err)
+	}
+	if !present {
+		t.Fatal("Nested did not find the object")
+	}
+
+	attempts, err := nested.Int("attempts", 1)
+	if err != nil {
+		t.Fatalf("Int: %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3", attempts)
+	}
+
+	backoff, err := nested.Duration("backoff", 0)
+	if err != nil {
+		t.Fatalf("Duration: %v", err)
+	}
+	if backoff.String() != "200ms" {
+		t.Errorf("backoff = %s, want 200ms", backoff)
+	}
+}
+
+// A value that is not an object is refused rather than read as one.
+func TestNestedRejectsANonObjectValue(t *testing.T) {
+	values := New("neuron:core:http", nil, map[string]any{"retry": "often"})
+
+	_, _, err := values.Nested("retry")
+	if err == nil {
+		t.Fatal("Nested accepted a value that is not an object")
+	}
+}
+
+// A nested object that is absent is reported as absent.
+func TestNestedReportsAnAbsentObject(t *testing.T) {
+	values := New("neuron:core:http", nil, nil)
+
+	_, present, err := values.Nested("retry")
+	if err != nil {
+		t.Fatalf("Nested: %v", err)
+	}
+	if present {
+		t.Error("Nested found an object that is not there")
+	}
+}

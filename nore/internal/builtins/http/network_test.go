@@ -207,7 +207,7 @@ func TestHTTPRetriesAnIdempotentRequest(t *testing.T) {
 	defer server.Close()
 
 	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
-		Params: map[string]any{"url": server.URL, "retries": 2},
+		Params: map[string]any{"url": server.URL, "retry": map[string]any{"attempts": 3, "backoff": "10ms"}},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -220,7 +220,7 @@ func TestHTTPRetriesAnIdempotentRequest(t *testing.T) {
 	}
 }
 
-// A method that is not idempotent is never retried: the server may already
+// A method that is not idempotent is not retried: the server may already
 // have performed the effect the caller asked for.
 func TestHTTPDoesNotRetryANonIdempotentRequest(t *testing.T) {
 	var attempts atomic.Int32
@@ -230,17 +230,17 @@ func TestHTTPDoesNotRetryANonIdempotentRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
-		Params: map[string]any{"url": server.URL, "method": "POST", "retries": 2},
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL, "method": "POST", "retry": map[string]any{"attempts": 3, "backoff": "10ms"}},
 	})
-	if err == nil {
-		t.Fatal("Execute retried a request that is not idempotent")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not idempotent") {
-		t.Errorf("error = %v, want it to state that the method is not idempotent", err)
+	if result["status_code"] != 503 {
+		t.Errorf("status_code = %v, want 503", result["status_code"])
 	}
-	if got := attempts.Load(); got != 0 {
-		t.Errorf("the server was asked %d times, want 0", got)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("the server was asked %d times, want 1", got)
 	}
 }
 

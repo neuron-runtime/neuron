@@ -296,6 +296,33 @@ func (v Values) StringSlice(name string) ([]string, bool, error) {
 	return result, true, nil
 }
 
+// Object returns the value stored under name as an object.
+//
+// The returned map is the nested value itself, not a copy of it.
+func (v Values) Object(name string) (map[string]any, bool, error) {
+	value, ok := v.values[name]
+	if !ok || value == nil {
+		return nil, false, nil
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, true, v.typeError(name, "an object", value)
+	}
+	return object, true, nil
+}
+
+// Nested returns the object stored under name as a set of values.
+//
+// The nested values are read with the same rules as the outer ones, so a
+// built-in does not have to know how the fields of a nested object are typed.
+func (v Values) Nested(name string) (Values, bool, error) {
+	object, present, err := v.Object(name)
+	if err != nil || !present {
+		return Values{runtime: v.runtime}, present, err
+	}
+	return New(v.runtime, nil, object), true, nil
+}
+
 // Format returns the output format selected by the parameter named name,
 // falling back when it is absent.
 func (v Values) Format(name string, fallback Format) (Format, error) {

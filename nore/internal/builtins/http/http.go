@@ -4,6 +4,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +39,9 @@ const maxRedirects = 5
 // maxRetryDelay bounds how long the runtime waits before a retry.
 const maxRetryDelay = 2 * time.Second
 
+// defaultRetryBackoff is how long the runtime waits before the first retry.
+const defaultRetryBackoff = 100 * time.Millisecond
+
 // Execute performs the request named by the capability's input.
 func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
 	// The policy is resolved here rather than trusted, because a runtime may
@@ -55,6 +59,18 @@ func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext)
 	if err != nil {
 		return nil, err
 	}
+
+	query, _, err := values.StringMap("query")
+	if err != nil {
+		return nil, err
+	}
+	if len(query) > 0 {
+		target, err = appendQuery(target, query)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err := validateURL(target); err != nil {
 		return nil, err
 	}
@@ -83,15 +99,17 @@ func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext)
 		return nil, err
 	}
 
-	retries, err := values.Int("retries", 0)
+	retry, err := readRetry(values)
 	if err != nil {
 		return nil, err
 	}
-	if retries < 0 {
-		return nil, fmt.Errorf("neuron:core:http: parameter \"retries\" must not be negative, got %d", retries)
+
+	contentType, _, err := values.String("contentType")
+	if err != nil {
+		return nil, err
 	}
-	if retries > 0 && !isIdempotent(method) {
-		return nil, fmt.Errorf("neuron:core:http: retries are only applied to idempotent requests, and %s is not idempotent", method)
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "application/json"
 	}
 
 	var bodyReader io.Reader
@@ -120,7 +138,19 @@ func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext)
 		req.Header.Set(name, value)
 	}
 	if bodyReader != nil && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// The credentials are applied to the request rather than to the URL, so
+	// they never end up in a log line or in an error that names the URL.
+	auth, hasAuth, err := values.Nested("auth")
+	if err != nil {
+		return nil, err
+	}
+	if hasAuth {
+		if err := applyAuthentication(req, auth); err != nil {
+			return nil, err
+		}
 	}
 
 	// The deadline bounds the whole operation, retries included, rather than
@@ -136,11 +166,13 @@ func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext)
 		contracts.F("url", target),
 	)
 
-	resp, err := perform(ctx, client, req, retries+1)
+	started := time.Now()
+	resp, err := perform(ctx, client, req, retry)
 	if err != nil {
 		return nil, fmt.Errorf("neuron:core:http: %w", err)
 	}
 	defer resp.Body.Close()
+	elapsed := time.Since(started)
 
 	// The response is read one byte past the limit so a body that is exactly
 	// at the limit is accepted and a body that exceeds it is refused rather
@@ -165,9 +197,11 @@ func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext)
 	)
 
 	return map[string]any{
-		"status_code": resp.StatusCode,
-		"headers":     responseHeaders(resp.Header),
-		"body":        body,
+		"status_code":  resp.StatusCode,
+		"headers":      responseHeaders(resp.Header),
+		"body":         body,
+		"content_type": resp.Header.Get("Content-Type"),
+		"duration_ms":  float64(elapsed.Milliseconds()),
 	}, nil
 }
 
@@ -211,13 +245,14 @@ func newClient(policy builtins.Policy, timeout time.Duration, followRedirects bo
 // retries.
 //
 // A retry is only made for a failure that a second attempt can plausibly
-// repair: a transport error, or a status that says the server is busy.
-func perform(ctx context.Context, client *nethttp.Client, req *nethttp.Request, attempts int) (*nethttp.Response, error) {
+// repair — a transport error, or a status that says the server is busy — and
+// only for the methods the capability named.
+func perform(ctx context.Context, client *nethttp.Client, req *nethttp.Request, retry retryPolicy) (*nethttp.Response, error) {
 	var lastErr error
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := 0; attempt < retry.attempts; attempt++ {
 		if attempt > 0 {
-			if err := waitForRetry(ctx, attempt); err != nil {
+			if err := waitForRetry(ctx, retry.backoff, attempt); err != nil {
 				return nil, err
 			}
 			// The body is read again for the retry: a consumed body cannot
@@ -232,21 +267,114 @@ func perform(ctx context.Context, client *nethttp.Client, req *nethttp.Request, 
 		}
 
 		resp, err := client.Do(req)
-		if err == nil {
-			if attempt < attempts-1 && retryableStatus(resp.StatusCode) {
-				resp.Body.Close()
-				lastErr = fmt.Errorf("the server answered %d", resp.StatusCode)
+		if err != nil {
+			lastErr = err
+			if attempt < retry.attempts-1 && retry.allows(req.Method) {
 				continue
 			}
-			return resp, nil
+			break
 		}
-		lastErr = err
+
+		if attempt < retry.attempts-1 && retry.allows(req.Method) && retryableStatus(resp.StatusCode) {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("the server answered %d", resp.StatusCode)
+			continue
+		}
+		return resp, nil
 	}
 
 	if lastErr == nil {
 		lastErr = fmt.Errorf("the request was not performed")
 	}
 	return nil, lastErr
+}
+
+// retryPolicy describes how a failed request is retried.
+type retryPolicy struct {
+	// attempts is how many attempts are made in total, including the first.
+	attempts int
+
+	// backoff is how long the runtime waits before the second attempt. The
+	// wait grows with the attempt.
+	backoff time.Duration
+
+	// methods are the request methods that may be retried.
+	methods map[string]bool
+}
+
+// allows reports whether the method may be retried.
+func (r retryPolicy) allows(method string) bool {
+	return r.methods[strings.ToUpper(strings.TrimSpace(method))]
+}
+
+// readRetry reads the retry policy from the capability's input.
+//
+// Retrying is off unless the capability asks for it, and only the methods it
+// names may be retried: a retried POST may repeat an effect the server
+// already performed.
+func readRetry(values input.Values) (retryPolicy, error) {
+	policy := retryPolicy{attempts: 1, backoff: defaultRetryBackoff}
+
+	nested, present, err := values.Nested("retry")
+	if err != nil || !present {
+		return policy, err
+	}
+
+	attempts, err := nested.Int("attempts", 1)
+	if err != nil {
+		return policy, err
+	}
+	if attempts < 1 {
+		return policy, fmt.Errorf("neuron:core:http: the retry attempts must be at least 1, got %d", attempts)
+	}
+	policy.attempts = attempts
+
+	backoff, err := nested.Duration("backoff", policy.backoff)
+	if err != nil {
+		return policy, err
+	}
+	if backoff < 0 {
+		return policy, fmt.Errorf("neuron:core:http: the retry backoff must not be negative")
+	}
+	policy.backoff = backoff
+
+	methods, _, err := nested.StringSlice("methods")
+	if err != nil {
+		return policy, err
+	}
+	if len(methods) == 0 {
+		policy.methods = defaultRetryMethods()
+		return policy, nil
+	}
+
+	policy.methods = make(map[string]bool, len(methods))
+	for _, method := range methods {
+		trimmed := strings.ToUpper(strings.TrimSpace(method))
+		if trimmed == "" {
+			continue
+		}
+		policy.methods[trimmed] = true
+	}
+	if len(policy.methods) == 0 {
+		policy.methods = defaultRetryMethods()
+	}
+	return policy, nil
+}
+
+// defaultRetryMethods are the methods that are retried when the capability
+// did not name any.
+//
+// They are the methods that are idempotent by definition: a retried request
+// may repeat the effect of the first one, and only for these methods that
+// effect is the same.
+func defaultRetryMethods() map[string]bool {
+	return map[string]bool{
+		nethttp.MethodGet:     true,
+		nethttp.MethodHead:    true,
+		nethttp.MethodPut:     true,
+		nethttp.MethodDelete:  true,
+		nethttp.MethodOptions: true,
+	}
 }
 
 // retryableStatus reports whether a status says the server is busy rather
@@ -265,10 +393,13 @@ func retryableStatus(status int) bool {
 
 // waitForRetry waits before the next attempt, or returns the reason the wait
 // was cut short.
-func waitForRetry(ctx context.Context, attempt int) error {
-	delay := 100 * time.Millisecond * time.Duration(attempt)
+func waitForRetry(ctx context.Context, backoff time.Duration, attempt int) error {
+	delay := backoff * time.Duration(attempt)
 	if delay > maxRetryDelay {
 		delay = maxRetryDelay
+	}
+	if delay <= 0 {
+		return nil
 	}
 
 	timer := time.NewTimer(delay)
@@ -282,24 +413,11 @@ func waitForRetry(ctx context.Context, attempt int) error {
 	}
 }
 
-// isIdempotent reports whether a method may be retried.
-//
-// A retried POST may repeat a side effect the server already performed, so
-// only the methods that are idempotent by definition are retried.
-func isIdempotent(method string) bool {
-	switch method {
-	case nethttp.MethodGet, nethttp.MethodHead, nethttp.MethodPut, nethttp.MethodDelete, nethttp.MethodOptions:
-		return true
-	default:
-		return false
-	}
-}
-
 // requestTimeout resolves how long the request may take.
 //
 // A capability may ask for a shorter timeout than the policy allows, but not
-// for a longer one: the policy is the ceiling, and a capability is part of
-// the assembly's input.
+// for a longer one: the policy is the ceiling, and a capability is part of the
+// assembly's input.
 func requestTimeout(values input.Values, policy builtins.Policy) (time.Duration, error) {
 	limit, err := policy.Timeout()
 	if err != nil {
@@ -333,6 +451,64 @@ func validateURL(target string) error {
 	if parsed.Host == "" {
 		return fmt.Errorf("neuron:core:http: the url %q has no host", target)
 	}
+	return nil
+}
+
+// appendQuery adds the query parameters to the URL.
+func appendQuery(target string, query map[string]string) (string, error) {
+	parsed, err := neturl.Parse(target)
+	if err != nil {
+		return "", fmt.Errorf("neuron:core:http: the url %q is not a valid URL: %w", target, err)
+	}
+
+	values := parsed.Query()
+	for name, value := range query {
+		values.Set(name, value)
+	}
+	parsed.RawQuery = values.Encode()
+
+	return parsed.String(), nil
+}
+
+// applyAuthentication adds the credentials to the request.
+func applyAuthentication(req *nethttp.Request, auth input.Values) error {
+	kind, err := auth.RequiredString("type")
+	if err != nil {
+		return err
+	}
+
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "bearer":
+		token, err := auth.RequiredString("token")
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	case "basic":
+		username, err := auth.RequiredString("username")
+		if err != nil {
+			return err
+		}
+		password, _, err := auth.String("password")
+		if err != nil {
+			return err
+		}
+		credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+		req.Header.Set("Authorization", "Basic "+credentials)
+	case "apikey":
+		name, err := auth.RequiredString("name")
+		if err != nil {
+			return err
+		}
+		value, err := auth.RequiredString("value")
+		if err != nil {
+			return err
+		}
+		req.Header.Set(name, value)
+	default:
+		return fmt.Errorf("neuron:core:http: unknown authentication type %q; supported types are bearer, basic, apiKey", kind)
+	}
+
 	return nil
 }
 
