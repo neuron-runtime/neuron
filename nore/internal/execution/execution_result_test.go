@@ -26,9 +26,9 @@ func resultContractBlueprint() *types.ExecutionBlueprint {
 			},
 			Fields: []types.ExecutionResultField{
 				{Name: "name", Source: &shared.ValueRef{
-					Kind:        shared.ValueRefCapabilityResult,
-					Capability:  "say",
-					Path:        []string{"name"},
+					Kind:       shared.ValueRefCapabilityResult,
+					Capability: "say",
+					Path:       []string{"name"},
 				}},
 				{Name: "order_id", Source: &shared.ValueRef{
 					Kind: shared.ValueRefAssemblyParams,
@@ -39,9 +39,9 @@ func resultContractBlueprint() *types.ExecutionBlueprint {
 					Value: "confirmed",
 				}},
 				{Name: "typed", Source: &shared.ValueRef{
-					Kind:        shared.ValueRefCapabilityParams,
-					Capability:  "say",
-					Path:        []string{"name"},
+					Kind:       shared.ValueRefCapabilityParams,
+					Capability: "say",
+					Path:       []string{"name"},
 				}},
 			},
 		},

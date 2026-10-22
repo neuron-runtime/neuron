@@ -23,8 +23,8 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/registry"
-	core "github.com/neuron-runtime/neuron/shared/types/core"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // shutdownTimeout bounds the release of the provider backends after a single
