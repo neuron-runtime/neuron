@@ -63,6 +63,9 @@ const validateOrder = Capability("order.validate")
 > [!NOTE]
 > Capability runtime names follow the `owner:capability:sub` convention (for example `neuron:core:set`, `example:echo`, `github:read`), so a capability without an explicit `.runtime()` defaults to the in-process built-in `neuron:core:set` and runs without any registry or installation. To run a capability through an external module — a signed process or a WebAssembly worker — set `.runtime({ name: "<owner>:<capability>", version, registry })` explicitly; the resolved artifact is verified and frozen at `neuron build` time. See [docs/MODULES.md](../../../docs/MODULES.md).
 
+> [!NOTE]
+> A built-in capability runtime runs in-process, so it is never resolved and never installed. It therefore carries no version and no registry: the manifest writes `"capabilityRuntime": { "name": "neuron:core:set" }` and nothing more. A version and a registry on a built-in would state that a package that does not exist has a version.
+
 ### Runtime configuration
 
 A capability runtime declares **what** runs a capability. A `runtimeConfig` declares **how the runtime should drive** it: execution mode, timeout, retry behavior, and (reserved) resource constraints.
@@ -429,13 +432,13 @@ export default manifest;
   "capabilities": [
     {
       "name": "order.validate",
-      "capabilityRuntime": { "name": "neuron:core:set", "version": "latest", "registry": "local" },
+      "capabilityRuntime": { "name": "neuron:core:set" },
       "params": [],
       "results": []
     },
     {
       "name": "payment.authorize",
-      "capabilityRuntime": { "name": "neuron:core:set", "version": "latest", "registry": "local" },
+      "capabilityRuntime": { "name": "neuron:core:set" },
       "params": [],
       "results": []
     }
@@ -507,6 +510,52 @@ The entry file default-exporting the manifest (`Assembly(...).toManifest()`) is 
 | `Composition`, `CompositionNode`, `CapabilityComposition`, `Connection`, `ParamBindings`, `ExecutionConfig` | Composition and binding internals |
 | `AssemblyManifest`, `CapabilityManifest`, `BindingManifest` | Manifest structure types |
 | `Infer`, `Schema`, `SchemaField` | Schema type inference |
+
+The `@neuronruntime/sdk/core` entry point exports the built-in capability runtimes:
+
+| Export | Purpose |
+| --- | --- |
+| `set` | Declare a capability that materializes a value set |
+| `http` | Declare a capability that performs a single HTTP request |
+| `command` | Declare a capability that executes a local program |
+| `filesystem` | Declare a capability that reads files and directories |
+
+---
+
+## Built-in capability runtimes
+
+The runtime provides four capability runtimes. They run in-process, they are never installed from a registry, and each one takes the name of the capability it runs.
+
+```ts
+import { http, command, filesystem } from "@neuronruntime/sdk/core";
+
+const fetchUser = http("users.get");
+const listFiles = filesystem("files.list");
+const runTool = command("tools.build");
+```
+
+Each export returns a capability definition with the contract of the built-in already applied, so the params and results are typed.
+
+| Built-in | Accepts | Produces |
+| --- | --- | --- |
+| `set` | The capability's own configuration and params | The merged value set |
+| `http` | `url`, `method`, `headers`, `query`, `body`, `contentType`, `auth`, `timeout`, `format`, `followRedirects`, `retry` | `status_code`, `headers`, `body`, `content_type`, `duration_ms` |
+| `command` | `command`, `args`, `env`, `cwd`, `stdin`, `timeout`, `format`, `failOnNonZeroExit`, `maxOutputBytes` | `exit_code`, `stdout`, `stderr`, `success`, `timed_out`, `duration_ms` |
+| `filesystem` | `operation`, `path`, `recursive`, `format` | `path`, `content`, `size`, `entries`, `exists`, `type` |
+
+The runtime enforces the boundary of each built-in on the assembly's behalf, and the project configuration may only narrow it. `neuron builtins` reports the contract the runtime publishes, including those boundaries.
+
+```bash
+neuron builtins            # every built-in
+neuron builtins http       # one built-in
+neuron builtins http -v    # with the full descriptions
+```
+
+### Migrating from the earlier core exports
+
+- `delay` is gone. It only waited, which is a sequencing concern rather than a capability; use an explicit dependency between the capabilities that must run in order instead.
+- The exports are factories now. `http` was a capability definition named `neuron:core:http`; it is now `http("name")`, so each capability that uses the built-in has a name of its own.
+- The `http` contract matches what the runtime publishes: the query parameters, the content type, the credentials, and the retry policy are accepted, and the response headers, content type, and duration are produced.
 
 ---
 

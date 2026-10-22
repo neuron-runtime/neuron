@@ -174,3 +174,41 @@ const sharedRuntime = { name: "acme:http", version: "1.2.0", registry: "github" 
 
 Capability("sync-call").runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "wait" } } });
 Capability("fire-and-forget").runtime({ ...sharedRuntime, runtimeConfig: { execution: { mode: "detach" } } });
+
+// ---------------------------------------------------------------------------
+// Built-in capability runtimes
+// ---------------------------------------------------------------------------
+
+import { set, http, command, filesystem } from "./core.js";
+
+// The built-ins are declared with the name the author gives them, and they run
+// through the built-in runtime.
+const setValues = set("values");
+const httpCall = http("call");
+const commandRun = command("run");
+const filesystemRead = filesystem("read");
+
+setValues.withParams({ orderId: "o-1" });
+httpCall.withParams({ url: "https://example.com/api" });
+commandRun.withParams({ command: "git", args: ["status"] });
+filesystemRead.withParams({ operation: "read", path: "data.json" });
+
+// @ts-expect-error the http capability needs a url.
+httpCall.withParams({ method: "GET" });
+
+// @ts-expect-error the command capability needs the program to run.
+commandRun.withParams({ args: ["status"] });
+
+// @ts-expect-error the filesystem capability needs an operation and a path.
+filesystemRead.withParams({ operation: "read" });
+
+// The results are typed.
+httpCall.result.status_code satisfies Expression<number>;
+httpCall.result.content_type satisfies Expression<string>;
+commandRun.result.exit_code satisfies Expression<number>;
+commandRun.result.timed_out satisfies Expression<boolean>;
+filesystemRead.result.exists satisfies Expression<boolean | undefined>;
+
+// The body of a response can be narrowed by the author.
+const typedCall = http<{ id: string }>("typed-call");
+typedCall.result.body satisfies { readonly id: Expression<string> } | Expression<string>;

@@ -9,18 +9,19 @@ describe("Capability", () => {
     expect(svc.ref).toBe("validate-order");
     expect(svc.toManifest()).toEqual({
       name: "validate-order",
-      capabilityRuntime: { name: "neuron:core:set", version: "latest", registry: "local" },
+      capabilityRuntime: { name: "neuron:core:set" },
       params: [],
       results: [],
     });
   });
 
-  it("defaults the capability runtime version to latest", () => {
+  it("gives the built-in runtime no version and no registry", () => {
+    // A built-in capability runtime runs in-process. It is never resolved
+    // against a registry, so a version and a registry would state that a
+    // package that does not exist has a version.
     const svc = Capability("my-capability");
     expect(svc.toManifest().capabilityRuntime).toEqual({
       name: "neuron:core:set",
-      version: "latest",
-      registry: "local",
     });
   });
 });
@@ -46,6 +47,26 @@ describe("Capability.runtime()", () => {
       name: "http.get",
       version: "latest",
       registry: "local",
+    });
+  });
+
+  it("gives a built-in runtime no version and no registry", () => {
+    const svc = Capability("set-values").runtime({ name: "neuron:core:set" });
+    expect(svc.toManifest().capabilityRuntime).toEqual({
+      name: "neuron:core:set",
+    });
+  });
+
+  it("drops a version and a registry declared for a built-in runtime", () => {
+    // A built-in is never resolved and never installed, so the version and
+    // the registry are not part of its identity and are not carried.
+    const svc = Capability("set-values").runtime({
+      name: "neuron:core:set",
+      version: "1.0.0",
+      registry: "github",
+    });
+    expect(svc.toManifest().capabilityRuntime).toEqual({
+      name: "neuron:core:set",
     });
   });
 

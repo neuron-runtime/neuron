@@ -1,6 +1,17 @@
 export {
-    delay,
+    set,
     http,
+    command,
+    filesystem,
+    type SetParamsType,
+    type SetResultType,
     type HttpParamsType,
-    type HttpResultType
+    type HttpResultType,
+    type HttpAuthType,
+    type HttpRetryType,
+    type CommandParamsType,
+    type CommandResultType,
+    type FilesystemParamsType,
+    type FilesystemResultType,
+    type FilesystemEntryType,
 } from './core/capabilities';
