@@ -196,6 +196,18 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 		noreArgs = append(noreArgs, "--data-dir", cfg.Storage.Directory)
 	}
 
+	// The built-in capability policy travels with the runtime: it states what
+	// the built-in capability runtimes may reach, and the runtime enforces it.
+	policy, err := cfg.BuiltinPolicy()
+	if err != nil {
+		return err
+	}
+	policyJSON, err := config.BuiltinPolicyJSON(policy)
+	if err != nil {
+		return err
+	}
+	noreArgs = append(noreArgs, "--builtin-policy", policyJSON)
+
 	// Execute nore with the project's stdout/stderr so the user sees the logs
 	noreCmd := exec.CommandContext(cmd.Context(), noreBin, noreArgs...)
 	noreCmd.Stdout = cmd.OutOrStdout()

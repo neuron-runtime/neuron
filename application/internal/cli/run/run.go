@@ -21,6 +21,7 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
 	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/neuron-runtime/neuron/application/project"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
@@ -236,6 +237,19 @@ func runDirect(cmd *cobra.Command, reference string) error {
 	if storeDir != "" {
 		childArgs = append(childArgs, "--capability-runtime-store", storeDir)
 	}
+
+	// A direct invocation is project-independent, so it runs under the
+	// compiled-in ceilings. The policy travels with the request so the child
+	// enforces the same limits the parent would.
+	policy, err := builtins.Effective(builtins.Policy{})
+	if err != nil {
+		return fmt.Errorf("resolve the built-in capability policy: %w", err)
+	}
+	policyJSON, err := config.BuiltinPolicyJSON(policy)
+	if err != nil {
+		return err
+	}
+	childArgs = append(childArgs, "--builtin-policy", policyJSON)
 	child := exec.CommandContext(ctx, noreBin, childArgs...)
 	child.Stdin = bytes.NewReader(requestJSON)
 	child.Stderr = cmd.ErrOrStderr()
