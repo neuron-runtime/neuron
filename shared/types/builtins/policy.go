@@ -62,6 +62,20 @@ type Policy struct {
 	// capability reach an internal service.
 	AllowedHTTPHosts []string `json:"allowedHTTPHosts,omitempty"`
 
+	// AllowPrivateNetworks lifts the restriction on contacting addresses that
+	// are not publicly routable.
+	//
+	// The restriction exists because a capability's URL may be derived from
+	// untrusted input, and a capability that can reach the metadata service
+	// or an internal network turns an assembly into a pivot. A request the
+	// operator authored themselves is not that case, so the paths that run a
+	// capability outside an assembly set this.
+	//
+	// It is deliberately not configurable from a project configuration file: a
+	// project configuration is part of the assembly's own input, and an input
+	// must not be able to widen what a capability reaches.
+	AllowPrivateNetworks bool `json:"allowPrivateNetworks,omitempty"`
+
 	// MaxCommandOutputBytes bounds the output retained from one stream of a
 	// single command.
 	MaxCommandOutputBytes int64 `json:"maxCommandOutputBytes,omitempty"`
@@ -117,6 +131,10 @@ func DefaultPolicy() Policy {
 // The resolution is idempotent. Applying it to an already effective policy
 // returns the same policy, which lets the runtime re-apply it to a policy it
 // received over a transport without the transport being trusted.
+//
+// AllowPrivateNetworks is not a limit and is carried through unchanged. It
+// states the trust context of the request rather than a bound on it, and it
+// is set by the paths that know the request was authored by the operator.
 func Effective(configured Policy) (Policy, error) {
 	ceilings := DefaultPolicy()
 	effective := ceilings
@@ -186,6 +204,7 @@ func Effective(configured Policy) (Policy, error) {
 	effective.FilesystemRoots = normalizeRoots(configured.FilesystemRoots)
 	effective.AllowedExecutables = normalizeList(configured.AllowedExecutables)
 	effective.AllowedHTTPHosts = normalizeList(configured.AllowedHTTPHosts)
+	effective.AllowPrivateNetworks = configured.AllowPrivateNetworks
 
 	return effective, nil
 }

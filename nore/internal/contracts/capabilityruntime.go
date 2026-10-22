@@ -41,6 +41,18 @@ func (NopLogger) Info(context.Context, string, ...Field)  {}
 func (NopLogger) Warn(context.Context, string, ...Field)  {}
 func (NopLogger) Error(context.Context, string, ...Field) {}
 
+// LoggerOrNop returns l, or a logger that discards everything when l is nil.
+//
+// The logger is a seam that some execution paths do not provide — a direct
+// invocation has no event bus to publish onto — so a capability runtime that
+// logs must not have to know which path it runs under.
+func LoggerOrNop(l Logger) Logger {
+	if l == nil {
+		return NopLogger{}
+	}
+	return l
+}
+
 type ExecutionContext struct {
 	ExecutionID   core2.ID
 	CorrelationID core2.ID

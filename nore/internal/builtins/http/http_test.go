@@ -11,6 +11,13 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
 )
 
+// localHTTP returns a runtime that may reach the loopback interface, which
+// is where the test servers live. The runtime refuses such an address by
+// default, so a test that wants to talk to a local server has to say so.
+func localHTTP() HTTP {
+	return HTTP{Policy: builtins.Policy{AllowedHTTPHosts: []string{"127.0.0.1"}}}
+}
+
 func TestHTTPReturnsTheStatusAndTheParsedBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -19,7 +26,7 @@ func TestHTTPReturnsTheStatusAndTheParsedBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{"url": server.URL},
 	})
 	if err != nil {
@@ -38,22 +45,83 @@ func TestHTTPReturnsTheStatusAndTheParsedBody(t *testing.T) {
 	}
 }
 
-// A body that is not JSON is still returned, as text. Dropping it would hide
-// the server's answer behind an error the author cannot act on.
+// The response headers are part of the answer: a caller that cannot see them
+// cannot read a rate-limit header or a content type.
+func TestHTTPReturnsTheResponseHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Trace", "abc")
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	headers, ok := result["headers"].(map[string]string)
+	if !ok {
+		t.Fatalf("headers = %#v, want a map", result["headers"])
+	}
+	if headers["X-Trace"] != "abc" {
+		t.Errorf("X-Trace = %q, want %q", headers["X-Trace"], "abc")
+	}
+}
+
+// A body that is not JSON is refused in the JSON format: a caller that asked
+// for a structured answer cannot be handed a string and told it is a value.
+func TestHTTPRefusesANonJSONBodyInTheJSONFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("plain text"))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err == nil {
+		t.Fatal("Execute accepted a body that is not JSON")
+	}
+	if !strings.Contains(err.Error(), "not JSON") {
+		t.Errorf("error = %v, want it to state that the body is not JSON", err)
+	}
+}
+
+// The text format is how a caller asks for a body that is not JSON.
 func TestHTTPKeepsANonJSONBodyAsText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("plain text"))
 	}))
 	defer server.Close()
 
-	result, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
-		Params: map[string]any{"url": server.URL},
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL, "format": "text"},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if result["body"] != "plain text" {
 		t.Errorf("body = %#v, want the raw text", result["body"])
+	}
+}
+
+// An empty body is an answer, not a malformed one.
+func TestHTTPAcceptsAnEmptyBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result["body"] != nil {
+		t.Errorf("body = %#v, want no body", result["body"])
 	}
 }
 
@@ -65,7 +133,7 @@ func TestHTTPReturnsANonSuccessStatusWithoutFailing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
+	result, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{"url": server.URL},
 	})
 	if err != nil {
@@ -92,7 +160,7 @@ func TestHTTPSendsTheMethodHeadersAndBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{
 			"url":     server.URL,
 			"method":  "post",
@@ -115,10 +183,42 @@ func TestHTTPSendsTheMethodHeadersAndBody(t *testing.T) {
 	}
 }
 
+// A url names a GET. A caller that wants another method asks for it.
+func TestHTTPDefaultsToGET(t *testing.T) {
+	var method string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if method != http.MethodGet {
+		t.Errorf("method = %q, want GET", method)
+	}
+}
+
 func TestHTTPRequiresAURL(t *testing.T) {
 	_, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{})
 	if err == nil {
 		t.Fatal("Execute succeeded without a url")
+	}
+}
+
+func TestHTTPRejectsAnUnsupportedScheme(t *testing.T) {
+	_, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": "ftp://example.com/file"},
+	})
+	if err == nil {
+		t.Fatal("Execute accepted an unsupported url scheme")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("error = %v, want it to state that the scheme is not supported", err)
 	}
 }
 
@@ -127,7 +227,7 @@ func TestHTTPReportsAnUnreachableServer(t *testing.T) {
 	url := server.URL
 	server.Close()
 
-	_, err := HTTP{}.Execute(context.Background(), contracts.ExecutionContext{
+	_, err := localHTTP().Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{"url": url},
 	})
 	if err == nil {
@@ -144,7 +244,10 @@ func TestHTTPRefusesAResponseBodyAboveTheLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := HTTP{Policy: builtins.Policy{MaxHTTPResponseBytes: 4}}.Execute(context.Background(), contracts.ExecutionContext{
+	_, err := HTTP{Policy: builtins.Policy{
+		AllowedHTTPHosts:     []string{"127.0.0.1"},
+		MaxHTTPResponseBytes: 4,
+	}}.Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{"url": server.URL},
 	})
 	if err == nil {
@@ -161,8 +264,11 @@ func TestHTTPAcceptsAResponseBodyAtTheLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := HTTP{Policy: builtins.Policy{MaxHTTPResponseBytes: 10}}.Execute(context.Background(), contracts.ExecutionContext{
-		Params: map[string]any{"url": server.URL},
+	result, err := HTTP{Policy: builtins.Policy{
+		AllowedHTTPHosts:     []string{"127.0.0.1"},
+		MaxHTTPResponseBytes: 10,
+	}}.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"url": server.URL, "format": "text"},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -176,7 +282,10 @@ func TestHTTPRefusesARequestBodyAboveTheLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
 
-	_, err := HTTP{Policy: builtins.Policy{MaxHTTPRequestBodyBytes: 4}}.Execute(context.Background(), contracts.ExecutionContext{
+	_, err := HTTP{Policy: builtins.Policy{
+		AllowedHTTPHosts:        []string{"127.0.0.1"},
+		MaxHTTPRequestBodyBytes: 4,
+	}}.Execute(context.Background(), contracts.ExecutionContext{
 		Params: map[string]any{
 			"url":  server.URL,
 			"body": map[string]any{"name": "neuron"},

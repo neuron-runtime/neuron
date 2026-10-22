@@ -166,3 +166,15 @@ func TestValidateRejectsAnUnresolvedPolicy(t *testing.T) {
 		t.Fatal("Validate accepted a policy with no limits")
 	}
 }
+
+// The private-network allowance states the trust context of a request rather
+// than a bound on it, so it survives the resolution unchanged.
+func TestEffectiveCarriesThePrivateNetworkAllowance(t *testing.T) {
+	effective, err := Effective(Policy{AllowPrivateNetworks: true})
+	if err != nil {
+		t.Fatalf("Effective: %v", err)
+	}
+	if !effective.AllowPrivateNetworks {
+		t.Error("Effective dropped the private-network allowance")
+	}
+}

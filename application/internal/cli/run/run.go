@@ -241,7 +241,12 @@ func runDirect(cmd *cobra.Command, reference string) error {
 	// A direct invocation is project-independent, so it runs under the
 	// compiled-in ceilings. The policy travels with the request so the child
 	// enforces the same limits the parent would.
-	policy, err := builtins.Effective(builtins.Policy{})
+	//
+	// Private networks are permitted here because the request is the
+	// operator's own: someone running a capability runtime by hand is
+	// reaching a service they chose, not an address that came out of an
+	// assembly's input.
+	policy, err := builtins.Effective(builtins.Policy{AllowPrivateNetworks: true})
 	if err != nil {
 		return fmt.Errorf("resolve the built-in capability policy: %w", err)
 	}
