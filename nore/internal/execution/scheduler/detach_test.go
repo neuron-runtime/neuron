@@ -137,16 +137,16 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
-	if err := store.Add(parent); err != nil {
-		t.Fatalf("store.Add(parent): %v", err)
+	if err := store.Add(ctx, parent); err != nil {
+		t.Fatalf("store.Add(ctx, parent): %v", err)
 	}
 	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, parent.ID, parent.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
 		t.Fatalf("publish ExecutionStarted: %v", err)
 	}
 
 	waitFor(t, "parent execution to finish", func() bool {
-		current, ok := store.Get(parent.ID)
-		return ok && current.IsTerminal()
+		current, err := store.Get(context.Background(), parent.ID)
+		return err == nil && current.IsTerminal()
 	})
 
 	// The parent must never run the detached capability or its descendants.
@@ -159,8 +159,8 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 
 	task := waitForChild(t, store, parent.ID)
 	waitFor(t, "detached task to finish", func() bool {
-		current, ok := store.Get(task.ID)
-		return ok && current.IsTerminal()
+		current, err := store.Get(context.Background(), task.ID)
+		return err == nil && current.IsTerminal()
 	})
 
 	// The work actually happened exactly once, inside the task.
@@ -171,9 +171,9 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 		t.Fatalf("the detached descendant ran %d times, want 1", got)
 	}
 
-	storedTask, ok := store.Get(task.ID)
-	if !ok {
-		t.Fatal("detached task disappeared")
+	storedTask, err := store.Get(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("detached task disappeared: %v", err)
 	}
 	if storedTask.ParentExecutionID != parent.ID {
 		t.Fatalf("task parent = %q, want %q", storedTask.ParentExecutionID, parent.ID)
@@ -188,7 +188,11 @@ func waitForChild(t *testing.T, store *executionmodel.MemoryStore, parent core.I
 	t.Helper()
 	var found *executionmodel.Execution
 	waitFor(t, "detached child execution to be created", func() bool {
-		for _, candidate := range store.List() {
+		candidates, err := store.List(context.Background())
+		if err != nil {
+			return false
+		}
+		for _, candidate := range candidates {
 			if candidate.ParentExecutionID == parent {
 				found = candidate
 				return true
@@ -310,8 +314,8 @@ func TestDetachedWorkSurvivesInstanceShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
-	if err := store.Add(parent); err != nil {
-		t.Fatalf("store.Add(parent): %v", err)
+	if err := store.Add(ctx, parent); err != nil {
+		t.Fatalf("store.Add(ctx, parent): %v", err)
 	}
 	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, parent.ID, parent.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
 		t.Fatalf("publish ExecutionStarted: %v", err)
@@ -395,8 +399,8 @@ func TestOrdinaryWorkIsStillCancelledAtShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
-	if err := store.Add(root); err != nil {
-		t.Fatalf("store.Add(root): %v", err)
+	if err := store.Add(ctx, root); err != nil {
+		t.Fatalf("store.Add: %v", err)
 	}
 	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, root.ID, root.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
 		t.Fatalf("publish ExecutionStarted: %v", err)

@@ -316,7 +316,9 @@ func (i *Instance) Stop() error {
 		i.wg.Wait()
 	}
 
-	sweepAbandonedExecutions(i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
+	sweepCtx, cancelSweep := context.WithTimeout(context.Background(), sweepPersistenceTimeout)
+	defer cancelSweep()
+	sweepErr := sweepAbandonedExecutions(sweepCtx, i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
 
 	// Release capability runtime-backed resources (wasm runtimes) now that no execution
 	// can be in flight.
@@ -333,7 +335,7 @@ func (i *Instance) Stop() error {
 	i.mu.Lock()
 	i.status = StatusStopped
 	i.mu.Unlock()
-	return nil
+	return sweepErr
 }
 
 func (i *Instance) Status() Status {
@@ -366,7 +368,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	if err != nil {
 		return nil, err
 	}
-	if err := i.store.Add(exec); err != nil {
+	if err := i.store.Add(ctx, exec); err != nil {
 		return nil, err
 	}
 
@@ -404,9 +406,12 @@ var ErrExecutionNotCancellable = errors.New("execution already reached a termina
 // decision. A restored instance has no scheduler -- and therefore no work to
 // stop -- so there the execution's record is simply corrected and persisted.
 func (i *Instance) CancelExecution(ctx context.Context, executionID shared.ID, reason error) error {
-	exec, exists := i.store.Get(executionID)
-	if !exists {
+	exec, err := i.store.Get(ctx, executionID)
+	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("%w: %s", ErrExecutionNotFound, executionID)
+	}
+	if err != nil {
+		return fmt.Errorf("load execution %s: %w", executionID, err)
 	}
 	if exec.IsTerminal() {
 		return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
@@ -416,24 +421,35 @@ func (i *Instance) CancelExecution(ctx context.Context, executionID shared.ID, r
 		if !exec.MarkCancelled(reason) {
 			return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
 		}
-		if err := i.store.Save(context.Background(), exec); err != nil {
+		if err := i.store.Save(ctx, exec); err != nil {
 			return fmt.Errorf("persist cancelled execution %s: %w", executionID, err)
 		}
 		return nil
 	}
 
-	if !i.scheduler.CancelExecution(ctx, executionID, reason) {
+	cancelled, err := i.scheduler.CancelExecution(ctx, executionID, reason)
+	if err != nil {
+		return err
+	}
+	if !cancelled {
 		return fmt.Errorf("%w: %s", ErrExecutionNotCancellable, executionID)
 	}
 	return nil
 }
 
-func (i *Instance) ListExecutions() []*execution.Execution {
-	return i.store.ListByInstance(shared.ID(i.ID))
+func (i *Instance) ListExecutions(ctx context.Context) ([]*execution.Execution, error) {
+	return i.store.ListByInstance(ctx, shared.ID(i.ID))
 }
 
-func (i *Instance) GetExecution(id shared.ID) (*execution.Execution, bool) {
-	return i.store.Get(id)
+func (i *Instance) GetExecution(ctx context.Context, id shared.ID) (*execution.Execution, error) {
+	exec, err := i.store.Get(ctx, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrExecutionNotFound, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return exec, nil
 }
 
 func (i *Instance) ListExecutionEvents(ctx context.Context, executionID shared.ID) ([]event.Event, error) {

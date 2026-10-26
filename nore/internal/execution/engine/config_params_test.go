@@ -107,7 +107,7 @@ func TestCapabilityConfigParamsVariableExposesSnakeCaseKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}
-	if err := store.Add(execution); err != nil {
+	if err := store.Add(context.Background(), execution); err != nil {
 		t.Fatalf("store.Add: %v", err)
 	}
 

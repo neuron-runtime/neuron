@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
-	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -51,11 +50,19 @@ func (s *Store) Save(ctx context.Context, evt Event) error {
 		return fmt.Errorf("marshal persisted event: %w", err)
 	}
 
-	return s.store.Put(ctx, s.key(evt.Metadata.ExecutionID, evt.Metadata.EventID), data)
+	key, err := s.key(evt.Metadata.ExecutionID, evt.Metadata.EventID)
+	if err != nil {
+		return err
+	}
+
+	return s.store.Put(ctx, key, data)
 }
 
 func (s *Store) List(ctx context.Context, executionID core.ID) ([]Event, error) {
-	prefix := sqlite.SanitizeKey("events", string(executionID))
+	prefix, err := storage.Prefix("events", string(executionID))
+	if err != nil {
+		return nil, err
+	}
 	keys, err := s.store.List(ctx, prefix)
 	if err != nil {
 		return nil, err
@@ -65,7 +72,7 @@ func (s *Store) List(ctx context.Context, executionID core.ID) ([]Event, error) 
 	for _, key := range keys {
 		evt, err := s.load(ctx, key)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("load event %q: %w", key, err)
 		}
 		events = append(events, evt)
 	}
@@ -126,23 +133,30 @@ func (s *Store) load(ctx context.Context, key string) (Event, error) {
 	}, nil
 }
 
-func (s *Store) key(executionID, eventID core.ID) string {
-	return sqlite.SanitizeKey("events", string(executionID), string(eventID))
+func (s *Store) key(executionID, eventID core.ID) (string, error) {
+	return storage.Key("events", string(executionID), string(eventID))
 }
 
 // DeleteExecution removes every persisted event recorded for the execution.
+// The listing and deletes run in one transaction so a failure cannot leave a
+// partially deleted history.
 func (s *Store) DeleteExecution(ctx context.Context, executionID core.ID) error {
-	prefix := sqlite.SanitizeKey("events", string(executionID))
-	keys, err := s.store.List(ctx, prefix)
+	prefix, err := storage.Prefix("events", string(executionID))
 	if err != nil {
 		return err
 	}
-	for _, key := range keys {
-		if err := s.store.Delete(ctx, key); err != nil {
+	return s.store.WithTx(ctx, func(tx storage.Tx) error {
+		keys, err := tx.List(ctx, prefix)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		for _, key := range keys {
+			if err := tx.Delete(ctx, key); err != nil {
+				return fmt.Errorf("delete event %q: %w", key, err)
+			}
+		}
+		return nil
+	})
 }
 
 // unixNanoToTime intentionally deleted; time.Unix is used directly in load.

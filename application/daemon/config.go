@@ -55,6 +55,10 @@ func ConfigFromEffective(cfg config.Config) Config {
 		c.Args = append(c.Args, "--socket", cfg.Daemon.Socket)
 	}
 
+	if cfg.Storage.Provider != "" {
+		c.Args = append(c.Args, "--storage-driver", cfg.Storage.Provider)
+	}
+
 	if cfg.Storage.Directory != "" {
 		c.Args = append(c.Args, "--data-dir", cfg.Storage.Directory)
 	}

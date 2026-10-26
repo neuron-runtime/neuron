@@ -2,8 +2,9 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
@@ -32,6 +33,12 @@ import (
 // shutdown race. Exactly one transition can take effect, because MarkCompleted
 // and MarkFailed both refuse an execution that is already terminal.
 
+// sweepPersistenceTimeout bounds persistence work that intentionally outlives
+// the request or instance context it was triggered by (shutdown sweeps and
+// restored metadata). It is a policy for that write, not a claim that the work
+// can resume.
+const sweepPersistenceTimeout = 10 * time.Second
+
 // sweepUnresumableExecutions drives every execution of an instance to failed,
 // persisting each one.
 //
@@ -40,8 +47,8 @@ import (
 // them as running would be a permanent lie rather than a temporary inaccuracy.
 // Detached executions are included here for exactly that reason: without the
 // runtime that owned them they cannot resume at all.
-func sweepUnresumableExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error) {
-	sweepExecutions(store, instanceID, reason, nil)
+func sweepUnresumableExecutions(ctx context.Context, store contracts.ExecutionRepository, instanceID shared.ID, reason error) error {
+	return sweepExecutions(ctx, store, instanceID, reason, nil)
 }
 
 // sweepAbandonedExecutions drives the executions an instance owned to failed
@@ -54,8 +61,8 @@ func sweepUnresumableExecutions(store contracts.ExecutionRepository, instanceID 
 // while the work it describes may well have completed moments later. It is left
 // instead for the restore path, which records the accurate reason -- that the
 // process ended with no runtime to resume it -- rather than a misleading one.
-func sweepAbandonedExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error) {
-	sweepExecutions(store, instanceID, reason, func(e *executionmodel.Execution) bool {
+func sweepAbandonedExecutions(ctx context.Context, store contracts.ExecutionRepository, instanceID shared.ID, reason error) error {
+	return sweepExecutions(ctx, store, instanceID, reason, func(e *executionmodel.Execution) bool {
 		return e.ParentExecutionID != ""
 	})
 }
@@ -68,11 +75,17 @@ func sweepAbandonedExecutions(store contracts.ExecutionRepository, instanceID sh
 // the event persister has already returned, and it would save through the
 // cancelled instance context in any case. There is also nothing left streaming to
 // inform, so a publish would be discarded rather than observed.
-func sweepExecutions(store contracts.ExecutionRepository, instanceID shared.ID, reason error, skip func(*executionmodel.Execution) bool) {
+func sweepExecutions(ctx context.Context, store contracts.ExecutionRepository, instanceID shared.ID, reason error, skip func(*executionmodel.Execution) bool) error {
 	if store == nil {
-		return
+		return nil
 	}
-	for _, exec := range store.ListByInstance(instanceID) {
+	executions, err := store.ListByInstance(ctx, instanceID)
+	if err != nil {
+		return fmt.Errorf("list executions for instance %s: %w", instanceID, err)
+	}
+
+	var failures []error
+	for _, exec := range executions {
 		if exec.IsTerminal() {
 			continue
 		}
@@ -85,16 +98,13 @@ func sweepExecutions(store contracts.ExecutionRepository, instanceID shared.ID, 
 			continue
 		}
 		// The instance context is already cancelled, so persistence cannot be
-		// bounded by it; a bounded context would risk abandoning the write and
-		// leaving the stranded snapshot on disk.
-		if err := store.Save(context.Background(), exec); err != nil {
-			slog.Error("persist terminal execution state",
-				slog.String("execution_id", string(exec.ID)),
-				slog.String("instance_id", string(instanceID)),
-				slog.String("error", err.Error()),
-			)
+		// bounded by it. Callers pass a bounded background context for shutdown
+		// sweeps; restore passes the live startup context.
+		if err := store.Save(ctx, exec); err != nil {
+			failures = append(failures, fmt.Errorf("persist failed execution %s: %w", exec.ID, err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 // stoppedBeforeFinished explains that an execution lost its instance before it

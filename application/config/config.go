@@ -173,15 +173,16 @@ type DaemonConfig struct {
 	PIDFile string `yaml:"pidFile,omitempty" mapstructure:"pidFile"`
 }
 
-// StorageConfig selects the storage provider and its root directory.
+// StorageConfig selects the storage driver and its root directory.
 //
 // Storage is internal: Neuron manages it and it cannot be set from a
 // configuration file. It remains on Config only so the daemon bootstrap can
-// derive its data directory and the CLI can test programmatically.
+// derive its data directory and forward the selected driver to the runtime.
 type StorageConfig struct {
+	// Provider names a registered storage driver; "sqlite" is the default.
 	Provider string `yaml:"provider" mapstructure:"provider"`
 
-	// Directory is the provider's data directory. The storage implementation
+	// Directory is the driver's data directory. The storage implementation
 	// decides the individual subdirectories (assemblies, instances, ...).
 	Directory string `yaml:"directory" mapstructure:"directory"`
 }

@@ -24,7 +24,7 @@ import (
 func newCancellationHandler(t *testing.T) (*Handler, *instance.Instance) {
 	t.Helper()
 
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -47,7 +47,10 @@ func newCancellationHandler(t *testing.T) (*Handler, *instance.Instance) {
 		t.Fatalf("register assembly: %v", err)
 	}
 
-	m := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	m, err := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
 	cel, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
 		t.Fatalf("new CEL compiler: %v", err)

@@ -2,11 +2,13 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 )
 
 // stateChangingEventTypes are the event kinds after which an execution
@@ -64,8 +66,15 @@ func (p *executionPersister) Run(ctx context.Context) error {
 			if !isStateChanging(received.Type) {
 				continue
 			}
-			execution, exists := p.store.Get(received.Metadata.ExecutionID)
-			if !exists {
+			execution, err := p.store.Get(ctx, received.Metadata.ExecutionID)
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				slog.Error("load execution for persistence",
+					slog.String("execution_id", string(received.Metadata.ExecutionID)),
+					slog.String("error", err.Error()),
+				)
 				continue
 			}
 			if err := p.store.Save(ctx, execution); err != nil {

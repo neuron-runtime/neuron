@@ -79,6 +79,15 @@ type Execution struct {
 	// state; Wait and Done poll it. It is a runtime-only device and is not
 	// serialized in snapshots.
 	done chan struct{}
+
+	// revision is the durable compare-and-swap version of this execution. It is
+	// serialized in snapshots and incremented only after a successful save.
+	revision uint64
+
+	// saveMu serializes saves of this Execution value. Two writers sharing the
+	// same value cannot produce a false conflict; only a distinct copy with an
+	// older revision triggers storage.ErrConflict.
+	saveMu sync.Mutex
 }
 
 func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID) (*Execution, error) {
@@ -351,6 +360,20 @@ func (e *Execution) IsTerminal() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.isTerminalLocked()
+}
+
+// Revision reports the durable revision this execution was last saved at. A
+// newly created execution has revision 0 until its first successful Add.
+func (e *Execution) Revision() uint64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.revision
+}
+
+func (e *Execution) setRevision(revision uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.revision = revision
 }
 
 func (e *Execution) Params(capabilityID shared.ID) map[string]any {

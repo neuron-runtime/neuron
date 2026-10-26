@@ -7,11 +7,16 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
+// ExecutionRepository is the durable execution boundary shared by the
+// scheduler, the instance persister, and the API.
+//
+// Reads report storage.ErrNotFound for absence and return backend or decode
+// failures as errors. A miss must never be synthesized from a failure.
 type ExecutionRepository interface {
-	Add(execution *executionmodel.Execution) error
-	Get(executionID core.ID) (*executionmodel.Execution, bool)
+	Add(ctx context.Context, execution *executionmodel.Execution) error
+	Get(ctx context.Context, executionID core.ID) (*executionmodel.Execution, error)
 	Save(ctx context.Context, execution *executionmodel.Execution) error
-	Delete(executionID core.ID)
-	List() []*executionmodel.Execution
-	ListByInstance(instanceID core.ID) []*executionmodel.Execution
+	Delete(ctx context.Context, executionID core.ID) error
+	List(ctx context.Context) ([]*executionmodel.Execution, error)
+	ListByInstance(ctx context.Context, instanceID core.ID) ([]*executionmodel.Execution, error)
 }

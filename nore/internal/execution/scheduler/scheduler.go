@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/neuron-runtime/neuron/nore/internal/contracts"
 	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -113,9 +115,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // The task's input is the detached capability's params, not the root execution's,
 // because the task's entry is that one capability rather than the assembly.
 func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Event) error {
-	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
-	if !exists {
+	execution, err := s.executions.Get(ctx, received.Metadata.ExecutionID)
+	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("execution %s was not found", received.Metadata.ExecutionID)
+	}
+	if err != nil {
+		return fmt.Errorf("load execution %s: %w", received.Metadata.ExecutionID, err)
 	}
 	if execution.IsTerminal() {
 		return nil
@@ -131,7 +136,7 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 	if err != nil {
 		return err
 	}
-	if err := s.executions.Add(task); err != nil {
+	if err := s.executions.Add(ctx, task); err != nil {
 		return fmt.Errorf("persist detached task for capability %s: %w", capabilityID, err)
 	}
 
@@ -139,14 +144,18 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 	if err := execution.MarkCapabilityDetached(capabilityID); err != nil {
 		// The task was never started, so leaving it behind would strand work no
 		// one will run.
-		s.executions.Delete(task.ID)
+		if deleteErr := s.executions.Delete(ctx, task.ID); deleteErr != nil {
+			return errors.Join(err, fmt.Errorf("remove unstarted detached task %s: %w", task.ID, deleteErr))
+		}
 		return err
 	}
 	remaining, err := execution.CompleteCurrentAndSchedule(0)
 	if err != nil {
 		// The parent is corrupt, but the task has not started. Remove it rather
 		// than leave an execution no one will ever run.
-		s.executions.Delete(task.ID)
+		if deleteErr := s.executions.Delete(ctx, task.ID); deleteErr != nil {
+			return errors.Join(err, fmt.Errorf("remove unstarted detached task %s: %w", task.ID, deleteErr))
+		}
 		return err
 	}
 
@@ -168,23 +177,26 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 // It reports whether this call cancelled the execution. A false return means the
 // execution was already terminal or unknown, and the caller must not claim it
 // cancelled something that had already finished.
-func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, reason error) bool {
-	execution, exists := s.executions.Get(executionID)
-	if !exists {
-		return false
+func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, reason error) (bool, error) {
+	execution, err := s.executions.Get(ctx, executionID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load execution %s: %w", executionID, err)
 	}
 	// Stop the work even when the state transition loses the race below: a
 	// capability must not keep running just because the execution completed in
 	// the same instant the cancellation arrived.
 	s.scopes.Cancel(executionID)
 	if !execution.MarkCancelled(reason) {
-		return false
+		return false, nil
 	}
 	s.scopes.Release(executionID)
 	_ = s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
 		Message: reasonMessage(reason),
 	}))
-	return true
+	return true, nil
 }
 
 // reasonMessage renders a cancellation reason for the event payload, which is
@@ -197,9 +209,12 @@ func reasonMessage(reason error) string {
 }
 
 func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event) error {
-	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
-	if !exists {
+	execution, err := s.executions.Get(ctx, received.Metadata.ExecutionID)
+	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("execution %s was not found", received.Metadata.ExecutionID)
+	}
+	if err != nil {
+		return fmt.Errorf("load execution %s: %w", received.Metadata.ExecutionID, err)
 	}
 	payload, ok := received.Payload.(event.ExecutionStartedPayload)
 	if !ok {
@@ -238,9 +253,12 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 }
 
 func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Event) error {
-	execution, exists := s.executions.Get(received.Metadata.ExecutionID)
-	if !exists {
+	execution, err := s.executions.Get(ctx, received.Metadata.ExecutionID)
+	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("execution %s was not found", received.Metadata.ExecutionID)
+	}
+	if err != nil {
+		return fmt.Errorf("load execution %s: %w", received.Metadata.ExecutionID, err)
 	}
 	if execution.IsTerminal() {
 		return nil
@@ -314,8 +332,18 @@ func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionm
 }
 
 func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err error) {
-	execution, exists := s.executions.Get(executionID)
-	if !exists || !execution.MarkFailed(err) {
+	execution, loadErr := s.executions.Get(ctx, executionID)
+	if errors.Is(loadErr, storage.ErrNotFound) {
+		return
+	}
+	if loadErr != nil {
+		slog.Error("load execution for failure transition",
+			slog.String("execution_id", string(executionID)),
+			slog.String("error", loadErr.Error()),
+		)
+		return
+	}
+	if !execution.MarkFailed(err) {
 		return
 	}
 	s.scopes.Release(execution.ID)

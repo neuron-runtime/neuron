@@ -2,8 +2,8 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +40,7 @@ type Manager struct {
 	builtinPolicy builtins.Policy
 }
 
-func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) *Manager {
+func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) (*Manager, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -64,29 +64,34 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 		detachedDrainTimeout: detachedDrainTimeout,
 		builtinPolicy:        optsApplied.builtinPolicy,
 	}
-	m.reconcile()
-	return m
+	if err := m.reconcile(parent); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // reconcile registers instances whose metadata was persisted by a previous
 // process so their executions and events remain queryable after a restart.
 // Instances are restored as metadata-only records and are not started.
-func (m *Manager) reconcile() {
-	records, err := m.metadata.List(context.Background())
+func (m *Manager) reconcile(ctx context.Context) error {
+	records, err := m.metadata.List(ctx)
 	if err != nil {
-		log.Printf("load instance metadata: %v", err)
-		return
+		return fmt.Errorf("load instance metadata: %w", err)
 	}
 	for _, rec := range records {
-		i := restoreInstance(
+		i, err := restoreInstance(
 			m.parent,
 			rec,
 			execution.NewExecutionStore(m.store),
 			event.NewStore(m.store),
 		)
+		if err != nil {
+			return fmt.Errorf("restore instance %s: %w", rec.ID, err)
+		}
 		m.instancesByID[rec.ID] = i
 		m.instancesByKey[i.Key] = i
 	}
+	return nil
 }
 
 func (m *Manager) Get(key protocol.InstanceKey) (*Instance, bool) {
@@ -108,23 +113,27 @@ func (m *Manager) GetByID(id string) (*Instance, bool) {
 // or env) is resolved through the registered assemblies so version-without-hash
 // addresses the most recently registered artifact. Returns false when no
 // instance exists for the key.
-func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Instance, bool) {
+func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Instance, bool, error) {
 	m.mu.RLock()
 	if i, ok := m.instancesByKey[key]; ok {
 		m.mu.RUnlock()
-		return i, true
+		return i, true, nil
 	}
 	m.mu.RUnlock()
 
-	if reg, err := m.assemblies.Resolve(ctx, key); err == nil {
-		m.mu.RLock()
-		if i, ok := m.instancesByKey[reg.Key]; ok {
-			m.mu.RUnlock()
-			return i, true
-		}
-		m.mu.RUnlock()
+	reg, err := m.assemblies.Resolve(ctx, key)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, false, nil
 	}
-	return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if i, ok := m.instancesByKey[reg.Key]; ok {
+		return i, true, nil
+	}
+	return nil, false, nil
 }
 
 // GetOrCreate returns the live runtime for key, lazily constructing it from
@@ -172,8 +181,14 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 
 	m.instancesByKey[canonical] = i
 	m.instancesByID[string(id)] = i
-	if err := m.metadata.Save(context.Background(), recordFor(i, i.Status())); err != nil {
-		log.Printf("persist instance metadata for %s: %v", i.ID, err)
+	if err := m.metadata.Save(ctx, recordFor(i, i.Status())); err != nil {
+		delete(m.instancesByKey, canonical)
+		delete(m.instancesByID, string(id))
+		stopErr := i.Stop()
+		return nil, false, errors.Join(
+			fmt.Errorf("persist instance metadata for %s: %w", i.ID, err),
+			stopErr,
+		)
 	}
 	return i, true, nil
 }
@@ -211,7 +226,7 @@ func withCapabilityRuntimes(reg assembly.RegisteredAssembly) (Option, error) {
 	return WithResolvedCapabilityRuntimes(resolved), nil
 }
 
-func (m *Manager) Stop(id string) error {
+func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.mu.RLock()
 	i, ok := m.instancesByID[id]
 	m.mu.RUnlock()
@@ -225,8 +240,8 @@ func (m *Manager) Stop(id string) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.metadata.Save(context.Background(), recordFor(i, StatusStopped)); err != nil {
-		log.Printf("persist instance metadata for %s: %v", i.ID, err)
+	if err := m.metadata.Save(ctx, recordFor(i, StatusStopped)); err != nil {
+		return fmt.Errorf("persist instance metadata for %s: %w", i.ID, err)
 	}
 	return nil
 }
@@ -248,7 +263,10 @@ func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err 
 	if err != nil {
 		return false, fmt.Errorf("invalid instance target %q: %w", target, err)
 	}
-	inst, ok := m.Resolve(ctx, key)
+	inst, ok, err := m.Resolve(ctx, key)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
 		return false, nil
 	}
@@ -262,21 +280,32 @@ func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 		return err
 	}
 
-	for _, exec := range inst.ListExecutions() {
-		inst.Store().Delete(exec.ID)
-		if err := inst.EventStore().DeleteExecution(ctx, exec.ID); err != nil {
-			log.Printf("delete events for execution %s on %s: %v", exec.ID, inst.ID, err)
+	executions, err := inst.ListExecutions(ctx)
+	if err != nil {
+		return fmt.Errorf("list executions for instance %s: %w", inst.ID, err)
+	}
+
+	var failures []error
+	for _, exec := range executions {
+		if err := inst.Store().Delete(ctx, exec.ID); err != nil {
+			failures = append(failures, fmt.Errorf("delete execution %s on %s: %w", exec.ID, inst.ID, err))
 		}
+		if err := inst.EventStore().DeleteExecution(ctx, exec.ID); err != nil {
+			failures = append(failures, fmt.Errorf("delete events for execution %s on %s: %w", exec.ID, inst.ID, err))
+		}
+	}
+	if err := m.metadata.Delete(ctx, inst.ID); err != nil {
+		failures = append(failures, fmt.Errorf("delete instance metadata for %s: %w", inst.ID, err))
+	}
+	if len(failures) > 0 {
+		// Leave the in-memory maps intact so the caller can retry the removal.
+		return errors.Join(failures...)
 	}
 
 	m.mu.Lock()
 	delete(m.instancesByID, inst.ID)
 	delete(m.instancesByKey, inst.Key)
 	m.mu.Unlock()
-
-	if err := m.metadata.Delete(ctx, inst.ID); err != nil {
-		log.Printf("delete instance metadata for %s: %v", inst.ID, err)
-	}
 	return nil
 }
 
@@ -314,11 +343,11 @@ func (m *Manager) Clear(ctx context.Context) error {
 	}
 	m.mu.RUnlock()
 
-	var firstErr error
+	var failures []error
 	for _, inst := range instances {
-		if err := m.removeInstance(ctx, inst); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.removeInstance(ctx, inst); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	return firstErr
+	return errors.Join(failures...)
 }

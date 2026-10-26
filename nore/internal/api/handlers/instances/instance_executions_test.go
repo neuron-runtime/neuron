@@ -24,14 +24,17 @@ import (
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
 
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
 	assembliesRepo := assembly.NewRepository(store)
-	m := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	m, err := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
 
 	cel, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
@@ -137,7 +140,7 @@ func TestListExecutionsUnknownInstanceIDReturns404(t *testing.T) {
 // Execute rather than rejected with "instance is not running". This is what
 // makes `neuron run` re-run an already-instantiated assembly.
 func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -182,7 +185,10 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 
 	// A fresh manager reconciles the record as metadata-only; the runtime is
 	// intentionally absent.
-	m := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	m, err := instance.NewManager(context.Background(), 2, 0, store, assembliesRepo)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
 	stale, ok := m.GetByID("inst_stale")
 	if !ok {
 		t.Fatal("stale instance was not restored")

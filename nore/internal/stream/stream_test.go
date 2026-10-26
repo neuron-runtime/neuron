@@ -13,7 +13,7 @@ import (
 
 func newTestStore(t *testing.T) *event.Store {
 	t.Helper()
-	s, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	s, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -158,7 +158,7 @@ func TestCapabilityTimeoutIsAFailureNotACancellation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewExecution: %v", err)
 			}
-			if err := store.Add(execution); err != nil {
+			if err := store.Add(context.Background(), execution); err != nil {
 				t.Fatalf("store.Add: %v", err)
 			}
 

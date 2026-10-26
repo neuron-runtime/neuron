@@ -17,7 +17,7 @@ import (
 
 func newTestStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -207,9 +207,9 @@ func TestStopPersistsTerminalStateToStorage(t *testing.T) {
 	}
 
 	// Read through a fresh repository so the in-memory copy cannot answer.
-	reloaded, ok := execution.NewExecutionStore(store).Get(exec.ID)
-	if !ok {
-		t.Fatalf("execution %s not found in storage after the instance stopped", exec.ID)
+	reloaded, err := execution.NewExecutionStore(store).Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("execution %s not found in storage after the instance stopped: %v", exec.ID, err)
 	}
 	if got := reloaded.Status(); got != execution.StatusFailed {
 		t.Fatalf("persisted status = %s, want %s", got, execution.StatusFailed)
@@ -240,23 +240,26 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 	if err := exec.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start execution: %v", err)
 	}
-	if err := execution.NewExecutionStore(store).Add(exec); err != nil {
+	if err := execution.NewExecutionStore(store).Add(context.Background(), exec); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	restored := restoreInstance(
+	restored, err := restoreInstance(
 		context.Background(),
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
 	)
+	if err != nil {
+		t.Fatalf("restore instance: %v", err)
+	}
 	if restored.Status() != StatusFailed {
 		t.Fatalf("restored instance status = %s, want %s", restored.Status(), StatusFailed)
 	}
 
-	reloaded, ok := execution.NewExecutionStore(store).Get(exec.ID)
-	if !ok {
-		t.Fatalf("execution %s not found after restore", exec.ID)
+	reloaded, err := execution.NewExecutionStore(store).Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("execution %s not found after restore: %v", exec.ID, err)
 	}
 	if got := reloaded.Status(); got != execution.StatusFailed {
 		t.Fatalf("restored execution status = %s, want %s", got, execution.StatusFailed)
@@ -344,7 +347,7 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 	if err := detached.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start detached task: %v", err)
 	}
-	if err := executions.Add(detached); err != nil {
+	if err := executions.Add(context.Background(), detached); err != nil {
 		t.Fatalf("add detached task: %v", err)
 	}
 
@@ -355,11 +358,11 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 	if err := ordinary.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start execution: %v", err)
 	}
-	if err := executions.Add(ordinary); err != nil {
+	if err := executions.Add(context.Background(), ordinary); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	sweepAbandonedExecutions(executions, instanceID, stoppedBeforeFinished(string(instanceID)))
+	sweepAbandonedExecutions(context.Background(), executions, instanceID, stoppedBeforeFinished(string(instanceID)))
 
 	if !ordinary.IsTerminal() || ordinary.Status() != execution.StatusFailed {
 		t.Errorf("ordinary execution status = %s, want %s: work the instance owns must still be given a terminal state", ordinary.Status(), execution.StatusFailed)
@@ -368,9 +371,9 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 		t.Errorf("the detached task was driven to %s; the sweep must leave it for the restore path, which can report accurately", detached.Status())
 	}
 
-	reloaded, ok := executions.Get(detached.ID)
-	if !ok {
-		t.Fatalf("detached task %s not found", detached.ID)
+	reloaded, err := executions.Get(context.Background(), detached.ID)
+	if err != nil {
+		t.Fatalf("detached task %s not found: %v", detached.ID, err)
 	}
 	if reloaded.IsTerminal() {
 		t.Error("the detached task was persisted as terminal, so its truthful unfinished state would be lost on restart")
@@ -378,17 +381,20 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 
 	// A restart is what finally gives it a terminal state, and the reason it
 	// records is the accurate one rather than "the instance stopped".
-	restored := restoreInstance(
+	restored, err := restoreInstance(
 		context.Background(),
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
 	)
+	if err != nil {
+		t.Fatalf("restore instance: %v", err)
+	}
 	t.Cleanup(func() { _ = restored.Stop() })
 
-	recovered, ok := execution.NewExecutionStore(store).Get(detached.ID)
-	if !ok {
-		t.Fatalf("detached task %s not found after restore", detached.ID)
+	recovered, err := execution.NewExecutionStore(store).Get(context.Background(), detached.ID)
+	if err != nil {
+		t.Fatalf("detached task %s not found after restore: %v", detached.ID, err)
 	}
 	if !recovered.IsTerminal() {
 		t.Fatalf("restored detached task status = %s, want a terminal state: nothing can resume it", recovered.Status())

@@ -37,7 +37,7 @@ func Defaults() Config {
 		},
 
 		Storage: StorageConfig{
-			Provider:  "file",
+			Provider:  "sqlite",
 			Directory: DefaultDataDir(),
 		},
 

@@ -193,7 +193,10 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	// Add workers
 	noreArgs = append(noreArgs, "--workers", fmt.Sprintf("%d", cfg.Runtime.Workers.Max))
 
-	// Add data dir
+	// Add storage backend and data dir
+	if cfg.Storage.Provider != "" {
+		noreArgs = append(noreArgs, "--storage-driver", cfg.Storage.Provider)
+	}
 	if cfg.Storage.Directory != "" {
 		noreArgs = append(noreArgs, "--data-dir", cfg.Storage.Directory)
 	}

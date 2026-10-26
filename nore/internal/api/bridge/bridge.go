@@ -56,8 +56,8 @@ func (b *EventBridge) Stream(ctx context.Context, room string) (<-chan protocol.
 	if !ok {
 		return nil, fmt.Errorf("instance %s not found", instanceID)
 	}
-	if _, ok := inst.GetExecution(executionID); !ok {
-		return nil, fmt.Errorf("execution %s not found", executionID)
+	if _, err := inst.GetExecution(ctx, executionID); err != nil {
+		return nil, err
 	}
 
 	messages, err := inst.Events(ctx, executionID, "")
