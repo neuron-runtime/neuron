@@ -300,7 +300,7 @@ Built-in modules are the exception that proves the rule: they run in-process ins
 | **Instances** | Creating, running, pausing, restarting, and removing living realizations of Assemblies |
 | **Capability runtimes** | Hosting and supervising modules — in-process for built-ins, out-of-process for external modules (process and WASM providers) |
 | **Scheduling** | Advancing executions, evaluating binding mappings and validations, handling cancellations |
-| **Persistence** | Durable storage of registered assemblies, instances, executions, and events through an interchangeable storage provider (SQLite by default) |
+| **Persistence** | Durable storage of registered assemblies, instances, executions, and events through the `storage.Store` contract. SQLite is the default driver; `storage.provider` (or `--storage-driver` / `NEURON_STORAGE_PROVIDER`) selects another registered driver |
 | **API** | The local HTTP/JSON transport over which the CLI talks to the runtime |
 
 N.O.R.E. deliberately does **not**:
@@ -324,7 +324,7 @@ flowchart TB
         rt[provider<br/>capability runtime host]
         pl[planner<br/>assembly → execution plan]
         rv[resolver<br/>CEL expressions]
-        st[storage<br/>provider + SQLite]
+        st[storage<br/>contract + driver registry]
         sys[assembly<br/>registered assembly repository]
         plugin[plugin<br/>frozen records → adapters]
     end
@@ -352,7 +352,7 @@ flowchart TB
 | `mechanism` | Provider registry — one provider contract, multiple first-party providers (process workers, WASM), with health checks, worker pooling, restart, and cancellation |
 | `planner` | Compiles the registered Assembly + frozen capability runtimes into an executable plan. Source-language agnostic; owns no HTTP clients, registries, or file downloads |
 | `resolver` | CEL expression resolver — binding mappings and validations |
-| `storage` | Provider interface + SQLite implementation — assemblies, instances, executions, events |
+| `storage` | Backend-neutral `Store` contract, sentinel errors, key construction, driver registry, and transactions. Concrete drivers live under `storage/<driver>` and are imported only by the composition root |
 | `plugin` | Boundary between frozen capability runtime records and the providers — thin adapters, no process/socket/WASM machinery itself |
 | `assembly` | Registered assembly repository and indexing |
 
@@ -871,13 +871,61 @@ From there the normal evolution holds: the artifact is distributed through a reg
 
 ## Persistence
 
-N.O.R.E. persists registered assemblies, instances, executions, and the event log through a small storage provider interface (`storage.Store`), implemented today by SQLite under the configured data directory (`~/.neuron/nore`).
+N.O.R.E. persists registered assemblies, instance metadata, execution snapshots, and the event log through one backend-neutral contract, `storage.Store`. Generic runtime packages depend only on that contract. Concrete drivers live under `nore/internal/storage/<driver>`; only the composition root (`cmd/nore`) imports one, so the execution, event, instance, assembly, and planner packages cannot acquire a backend dependency.
 
-Executions are kept in an in-memory store that writes through to persistent storage, so live executions are fully in-memory for speed and durable for recovery. On restart, N.O.R.E. restores persisted instances and their in-flight executions as metadata-only records.
+SQLite is the default driver. `--storage-driver` selects a registered driver, and its default comes from `NEURON_STORAGE_PROVIDER`; the CLI forwards the effective internal storage provider to the runtime as that flag. Storage configuration itself is engine-owned and is rejected from project files. `storage.Open` performs the whole lifecycle: validate the driver, construct it, run migrations, and `Ping`. An unknown driver or a failed open aborts startup with an actionable error; there is no silent fallback to another backend. A store is passed to runtime components as `storage.Store`; no component constructs its own backend.
 
-Execution history and retention are intended to become a **configurable storage policy** (`none | memory | local`) so retention is an operational choice rather than a fixed behavior — and so execution semantics never depend on persistent storage being enabled. The pluggable store is in place; the policy is not.
+The contract has explicit failure semantics. Missing records are `storage.ErrNotFound`, compare-and-swap losses are `storage.ErrConflict`, insert-only collisions are `storage.ErrAlreadyExists`, and nested/re-entrant transaction use is `storage.ErrNestedTransaction` / `storage.ErrTransactionActive`. Callers distinguish absence from backend or decode failures with `errors.Is`; a failed read is never reported as an empty list or a missing record.
 
----
+### Transactions
+
+`storage.Store.WithTx(ctx, fn)` runs `fn` against a `storage.Tx` that exposes the same Get/Put/Delete/List operations bound to one transaction. Returning an error or a cancelled context rolls back. A plain `Store` operation attempted while a transaction is active returns `ErrTransactionActive`; a nested `WithTx` returns `ErrNestedTransaction` rather than joining or deadlocking. Store and transaction concurrency rules are part of the contract suite (`nore/internal/storage/storagetest`), not an assumption about SQLite.
+
+Transactions are required when one logical operation writes more than one key:
+
+- **Assembly registration** writes the artifact, prunes artifacts replaced for the same version, and updates the version index atomically. A failed registration leaves no partial artifact or index entry.
+- **Execution save** reads the persisted revision, compares it with the writer's revision, and writes the next snapshot in one transaction. This is the compare-and-swap guard that rejects a stale writer.
+- **Execution transition plus dispatch intent** (Phase 4) and **timer claim** (Phase 5) will use the same boundary. They are not implemented yet.
+
+Single-key reads and writes use the plain `Store`; they do not need a transaction.
+
+### Execution guarantees
+
+Three guarantees are separate and must not be conflated:
+
+| Guarantee | Meaning | Status |
+| --- | --- | --- |
+| **Observability** | A run's transitions and output can be inspected through events and the API | Implemented |
+| **Persistence** | Registered assemblies, instance metadata, execution history, and events survive a restart and remain queryable | Implemented |
+| **Durable execution** | Unfinished work resumes after a restart and reaches a terminal state exactly once | Not implemented |
+
+Persistence does not imply durable execution. N.O.R.E. keeps live executions in memory and writes snapshots through to storage, so live work is fast and completed history survives a restart. Saving a snapshot is not the same as recording a resumable transition and dispatch intent.
+
+On restart, N.O.R.E. restores instance metadata and execution records as **metadata-only** records. A restored instance has no event bus, scheduler, capability runtime engine, or worker processes, so it cannot be started or resumed. Executions that were unfinished when the process stopped are marked failed with the reason no runtime could resume them. This is the current non-durable mode, not an execution guarantee N.O.R.E. claims to provide.
+
+> [!WARNING]
+> Creating a new instance is how work is re-run today. Do not treat a restored instance or a persisted `running` execution as live work that will continue.
+
+### Durability modes
+
+The intended policy surface names three modes:
+
+| Mode | Semantics |
+| --- | --- |
+| `execution.durability: none` | No execution/event history is retained. Execution semantics do not depend on storage. |
+| `execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the behavior N.O.R.E. implements today. |
+| `execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with idempotent dispatch. Planned for Phase 4; not implemented. |
+
+The configuration key is not wired yet: today the `history` behavior is unconditional. Defining the modes here gives Phase 4 a contract to implement rather than an emergent behavior to reverse-engineer.
+
+### Retention limitation
+
+Registered assemblies are stored under `assemblies/{id}/{version}/{hash}/{env}/manifest`. A key that carries a hash resolves exactly that artifact; an unknown or mismatched artifact is an error, never a fallback to the latest content.
+
+Registration is not content-addressed immutable. Registering the same assembly version again replaces the version's previous artifact(s) and prunes the earlier hashes, so a given `name:version` addresses exactly one artifact, the newest one. A hash that is no longer retained resolves to `ErrNotFound`. Phase 4 removes this retention limitation for artifacts referenced by durable executions.
+
+> [!NOTE]
+> Execution history and events are an observability and persistence concern, not part of execution semantics. The current implementation always retains history; making retention configurable is a separate policy layer, and execution must not depend on it being enabled.
 
 ## Security & isolation
 

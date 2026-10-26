@@ -57,6 +57,11 @@ build record.
 - Internal storage keys (including `capabilityRuntimes.storeDir`) and
   `providers.storeDir` are rejected from project configuration; use the
   documented environment overrides where a non-default location is required.
+- The internal storage provider now names a registered storage driver and
+  defaults to `sqlite`. The retired `file` value is not a driver and is
+  rejected. Select a driver with `--storage-driver` or
+  `NEURON_STORAGE_PROVIDER`; storage settings remain engine-owned and are not
+  accepted in project configuration files.
 - The old configuration file names `neuron.yaml` and `neuron.yml` are no longer
   read. Rename the file to `neuron.config.yaml` (or `neuron.config.json`).
 - The global configuration file may not declare Assembly identity or entries
