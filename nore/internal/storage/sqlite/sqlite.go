@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -35,14 +36,22 @@ type Store struct {
 // responds. A failure closes the database before returning so a partially
 // initialized store is never observed.
 func New(ctx context.Context, cfg storage.Config) (*Store, error) {
-	if cfg.DataDir == "" {
-		return nil, fmt.Errorf("data directory is required")
-	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = cfg.Path
+	}
+	if dataDir == "" {
+		return nil, fmt.Errorf("data directory is required")
+	}
 
-	dbPath := filepath.Join(cfg.DataDir, "nore.db")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create data directory %s: %w", dataDir, err)
+	}
+
+	dbPath := filepath.Join(dataDir, "nore.db")
 
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
 	if err != nil {

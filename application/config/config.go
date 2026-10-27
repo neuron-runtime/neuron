@@ -179,12 +179,17 @@ type DaemonConfig struct {
 // configuration file. It remains on Config only so the daemon bootstrap can
 // derive its data directory and forward the selected driver to the runtime.
 type StorageConfig struct {
-	// Provider names a registered storage driver; "sqlite" is the default.
+	// Provider/Driver names a registered storage driver; "sqlite" is the default.
 	Provider string `yaml:"provider" mapstructure:"provider"`
+	Driver   string `yaml:"driver" mapstructure:"driver"`
 
-	// Directory is the driver's data directory. The storage implementation
+	// Directory/Path is the driver's data directory. The storage implementation
 	// decides the individual subdirectories (assemblies, instances, ...).
 	Directory string `yaml:"directory" mapstructure:"directory"`
+	Path      string `yaml:"path" mapstructure:"path"`
+
+	// DSN is the PostgreSQL connection string. Must not be committed.
+	DSN string `yaml:"dsn" mapstructure:"dsn"`
 }
 
 // CapabilityRuntimesConfig lists the executable registries Neuron can resolve capabilities

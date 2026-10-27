@@ -197,7 +197,10 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("daemon.pidFile", cfg.Daemon.PIDFile)
 
 	v.SetDefault("storage.provider", cfg.Storage.Provider)
+	v.SetDefault("storage.driver", cfg.Storage.Driver)
 	v.SetDefault("storage.directory", cfg.Storage.Directory)
+	v.SetDefault("storage.path", cfg.Storage.Path)
+	v.SetDefault("storage.dsn", cfg.Storage.DSN)
 
 	v.SetDefault("inspector.enabled", cfg.Inspector.Enabled)
 	v.SetDefault("inspector.address", cfg.Inspector.Address)
@@ -257,7 +260,20 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 // resolvePaths expands any relative or "~"-prefixed path fields against the
 // project root so downstream consumers always receive absolute paths.
 func resolvePaths(cfg *Config, projectDir string) {
+	if cfg.Storage.Driver == "" {
+		cfg.Storage.Driver = cfg.Storage.Provider
+	}
+	if cfg.Storage.Provider == "" {
+		cfg.Storage.Provider = cfg.Storage.Driver
+	}
+	if cfg.Storage.Path == "" {
+		cfg.Storage.Path = cfg.Storage.Directory
+	}
+	if cfg.Storage.Directory == "" {
+		cfg.Storage.Directory = cfg.Storage.Path
+	}
 	cfg.Storage.Directory = Expand(cfg.Storage.Directory, projectDir)
+	cfg.Storage.Path = Expand(cfg.Storage.Path, projectDir)
 	cfg.Daemon.Socket = Expand(cfg.Daemon.Socket, projectDir)
 	cfg.Daemon.PIDFile = Expand(cfg.Daemon.PIDFile, projectDir)
 	cfg.CapabilityRuntimes.StoreDir = Expand(cfg.CapabilityRuntimes.StoreDir, projectDir)

@@ -38,7 +38,9 @@ func Defaults() Config {
 
 		Storage: StorageConfig{
 			Provider:  "sqlite",
+			Driver:    "sqlite",
 			Directory: DefaultDataDir(),
+			Path:      DefaultDataDir(),
 		},
 
 		// No registries are compiled in. A project that resolves external

@@ -194,13 +194,25 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	noreArgs = append(noreArgs, "--workers", fmt.Sprintf("%d", cfg.Runtime.Workers.Max))
 
 	// Add storage backend and data dir
-	if cfg.Storage.Provider != "" {
-		noreArgs = append(noreArgs, "--storage-driver", cfg.Storage.Provider)
+	driver := cfg.Storage.Driver
+	if driver == "" {
+		driver = cfg.Storage.Provider
 	}
-	if cfg.Storage.Directory != "" {
-		noreArgs = append(noreArgs, "--data-dir", cfg.Storage.Directory)
+	if driver != "" {
+		noreArgs = append(noreArgs, "--storage-driver", driver)
 	}
 
+	dir := cfg.Storage.Directory
+	if dir == "" {
+		dir = cfg.Storage.Path
+	}
+	if dir != "" {
+		noreArgs = append(noreArgs, "--data-dir", dir)
+		noreArgs = append(noreArgs, "--storage-path", dir)
+	}
+	if cfg.Storage.DSN != "" {
+		noreArgs = append(noreArgs, "--storage-dsn", cfg.Storage.DSN)
+	}
 	// The built-in capability policy travels with the runtime: it states what
 	// the built-in capability runtimes may reach, and the runtime enforces it.
 	policy, err := cfg.BuiltinPolicy()

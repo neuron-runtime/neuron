@@ -19,6 +19,9 @@ func noreArgs(t *testing.T, args []string) []string {
 	_ = fs.String("socket", "", "")
 	_ = fs.Int("workers", 8, "")
 	_ = fs.String("data-dir", "", "")
+	_ = fs.String("storage-driver", "", "")
+	_ = fs.String("storage-path", "", "")
+	_ = fs.String("storage-dsn", "", "")
 	_ = fs.String("detached-drain-timeout", "30s", "")
 
 	if err := fs.Parse(args); err != nil {

@@ -78,6 +78,10 @@ type Store interface {
 type Config struct {
 	// Driver names the registered backend. Empty selects DefaultDriver.
 	Driver string
-	// DataDir is the backend's root directory.
+	// DataDir is the backend's root directory (legacy).
 	DataDir string
+	// Path is the SQLite database file path or root location depending on backend.
+	Path string
+	// DSN is the PostgreSQL connection string. It must not be logged verbatim.
+	DSN string
 }

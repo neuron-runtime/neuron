@@ -25,6 +25,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	_ "github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	_ "github.com/neuron-runtime/neuron/nore/internal/storage/postgres"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
@@ -43,6 +44,8 @@ func main() {
 		workers              int
 		dataDir              string
 		storageDriver        string
+		storagePath          string
+		storageDSN           string
 		tokenArg             string
 		detachedDrainTimeout time.Duration
 		capabilityStore      string
@@ -59,6 +62,8 @@ func main() {
 	flag.IntVar(&workers, "workers", 8, "capability runtime worker count")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "persistent data directory")
 	flag.StringVar(&storageDriver, "storage-driver", defaultStorageDriver(), "storage backend driver (default: sqlite)")
+	flag.StringVar(&storagePath, "storage-path", "", "storage path override (sqlite)")
+	flag.StringVar(&storageDSN, "storage-dsn", os.Getenv("NEURON_DATABASE_URL"), "storage DSN (postgres)")
 	flag.StringVar(&tokenArg, "token", "", "API token for authenticating requests; empty loads the token from the socket's token file")
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
@@ -69,6 +74,13 @@ func main() {
 	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
 	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
 	flag.Parse()
+
+	if envDriver := os.Getenv("NEURON_STORAGE_DRIVER"); envDriver != "" {
+		storageDriver = envDriver
+	}
+	if envDSN := os.Getenv("NEURON_DATABASE_URL"); envDSN != "" {
+		storageDSN = envDSN
+	}
 
 	if showVer {
 		fmt.Println(version.String())
@@ -101,7 +113,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
 		return
 	}
 
@@ -126,11 +138,17 @@ func main() {
 
 	plugin.SetStoreRoot(capabilityStore)
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("create data directory %s: %v", dataDir, err)
+	storePath := dataDir
+	if storagePath != "" {
+		storePath = storagePath
+	}
+	if storageDriver == "" || storageDriver == "sqlite" {
+		if err := os.MkdirAll(storePath, 0o755); err != nil {
+			log.Fatalf("create data directory %s: %v", storePath, err)
+		}
 	}
 
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: dataDir})
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}
@@ -362,7 +380,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
@@ -399,13 +417,19 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	}
 
 	// Create data directory
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("create data directory %s: %v", dataDir, err)
+	storePath := dataDir
+	if storagePath != "" {
+		storePath = storagePath
+	}
+	if storageDriver == "" || storageDriver == "sqlite" {
+		if err := os.MkdirAll(storePath, 0o755); err != nil {
+			log.Fatalf("create data directory %s: %v", storePath, err)
+		}
 	}
 
 	// Open storage before publishing the discovery record. A runtime that
 	// cannot initialize its durable state must not advertise itself as ready.
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: dataDir})
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}

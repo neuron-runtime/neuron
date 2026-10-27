@@ -275,6 +275,8 @@ func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err 
 
 // removeInstance deletes an instance's runtime, executions, events and
 // metadata. It is safe for both live and metadata-only (restored) instances.
+// All deletions are performed atomically in a single storage transaction when
+// possible; in-memory state is only removed after successful commit.
 func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 	if err := inst.Stop(); err != nil {
 		return err
@@ -285,22 +287,49 @@ func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 		return fmt.Errorf("list executions for instance %s: %w", inst.ID, err)
 	}
 
-	var failures []error
+	var keys []string
 	for _, exec := range executions {
-		if err := inst.Store().Delete(ctx, exec.ID); err != nil {
-			failures = append(failures, fmt.Errorf("delete execution %s on %s: %w", exec.ID, inst.ID, err))
+		k, err := storage.Key("executions", string(exec.ID))
+		if err != nil {
+			return err
 		}
-		if err := inst.EventStore().DeleteExecution(ctx, exec.ID); err != nil {
-			failures = append(failures, fmt.Errorf("delete events for execution %s on %s: %w", exec.ID, inst.ID, err))
+		keys = append(keys, k)
+		prefix, err := storage.Prefix("events", string(exec.ID))
+		if err != nil {
+			return err
 		}
+		ekeys, err := m.store.List(ctx, prefix)
+		if err != nil {
+			return fmt.Errorf("list events for execution %s on %s: %w", exec.ID, inst.ID, err)
+		}
+		keys = append(keys, ekeys...)
 	}
-	if err := m.metadata.Delete(ctx, inst.ID); err != nil {
-		failures = append(failures, fmt.Errorf("delete instance metadata for %s: %w", inst.ID, err))
+	mkey, err := storage.Key("instances", inst.ID)
+	if err != nil {
+		return err
+		}
+	keys = append(keys, mkey)
+
+	if err := m.store.WithTx(ctx, func(tx storage.Tx) error {
+		for _, k := range keys {
+			if err := tx.Delete(ctx, k); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if len(failures) > 0 {
-		// Leave the in-memory maps intact so the caller can retry the removal.
-		return errors.Join(failures...)
+
+	// Clear memory caches if present (best effort)
+	for _, exec := range executions {
+		if es := inst.Store(); es != nil {
+			_ = es.Delete(ctx, exec.ID)
+		}
+		_ = inst.EventStore().DeleteExecution(ctx, exec.ID)
 	}
+	// metadata already deleted in tx; ensure mem cleared
+	_ = m.metadata.Delete(ctx, inst.ID)
 
 	m.mu.Lock()
 	delete(m.instancesByID, inst.ID)
