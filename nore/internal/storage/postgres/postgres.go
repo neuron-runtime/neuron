@@ -13,6 +13,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/migrate"
 )
 
 func init() {
@@ -54,9 +55,16 @@ func New(ctx context.Context, cfg storage.Config) (storage.Store, error) {
 	}
 
 	s := &Store{db: db}
-	if err := s.migrate(ctx); err != nil {
+	migs := migrate.KVStoreMigrations(migrate.DriverPostgres)
+	maxv := int64(0)
+	for _, m := range migs {
+		if m.Version > maxv {
+			maxv = m.Version
+		}
+	}
+	if err := migrate.Migrate(ctx, migrate.Config{DB: db, Driver: migrate.DriverPostgres, Migrations: migs, MaxVersion: maxv}); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return s, nil
 }
@@ -293,23 +301,6 @@ func (s *Store) Close() error {
 	}
 	if err := s.db.Close(); err != nil {
 		return fmt.Errorf("postgres close: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS kv_store (
-		key TEXT PRIMARY KEY,
-		value BYTEA NOT NULL,
-		created_at TIMESTAMP DEFAULT NOW(),
-		updated_at TIMESTAMP DEFAULT NOW()
-	)`)
-	if err != nil {
-		return fmt.Errorf("postgres migrate: %w", err)
-	}
-	_, err = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_kv_store_key ON kv_store (key)`)
-	if err != nil {
-		return fmt.Errorf("postgres migrate index: %w", err)
 	}
 	return nil
 }

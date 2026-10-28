@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/nore/internal/storage/migrate"
 
 	_ "modernc.org/sqlite"
 )
@@ -66,23 +67,19 @@ func New(ctx context.Context, cfg storage.Config) (*Store, error) {
 	}
 
 	s := &Store{db: db}
-	if err := s.migrate(ctx); err != nil {
+	migs := migrate.KVStoreMigrations(migrate.DriverSQLite)
+	maxv := int64(0)
+	for _, m := range migs {
+		if m.Version > maxv {
+			maxv = m.Version
+		}
+	}
+	if err := migrate.Migrate(ctx, migrate.Config{DB: db, Driver: migrate.DriverSQLite, Migrations: migs, MaxVersion: maxv}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
 	return s, nil
-}
-
-func (s *Store) migrate(ctx context.Context) error {
-	query := `CREATE TABLE IF NOT EXISTS kv_store (
-		key TEXT PRIMARY KEY,
-		value BLOB NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	)`
-	_, err := s.db.ExecContext(ctx, query)
-	return err
 }
 
 func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
