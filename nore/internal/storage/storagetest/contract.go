@@ -227,6 +227,41 @@ func Run(t *testing.T, open func(t *testing.T) storage.Store) {
 			t.Fatalf("ping after close = %v, want ErrClosed", err)
 		}
 	})
+
+	t.Run("transaction failure injection", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		existing := mustKey(t, "tx", "existing-fi")
+		created := mustKey(t, "tx", "created-fi")
+		if err := store.Put(ctx, existing, []byte("before")); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		boom := errors.New("boom")
+		err := store.WithTx(ctx, func(tx storage.Tx) error {
+			if err := tx.Put(ctx, existing, []byte("after")); err != nil {
+				return err
+			}
+			if err := tx.Delete(ctx, created); err != nil {
+				// Delete may be no-op; ignore
+			}
+			if err := tx.Put(ctx, created, []byte("temp")); err != nil {
+				return err
+			}
+			if _, err := tx.Get(ctx, existing); err != nil {
+				return err
+			}
+			return boom
+		})
+		if !errors.Is(err, boom) {
+			t.Fatalf("transaction error = %v, want %v", err, boom)
+		}
+		if got, err := store.Get(ctx, existing); err != nil || string(got) != "before" {
+			t.Fatalf("rolled-back existing = %q, %v; want before", got, err)
+		}
+		if _, err := store.Get(ctx, created); !errors.Is(err, storage.ErrNotFound) {
+			t.Fatalf("rolled-back created key = %v, want ErrNotFound", err)
+		}
+	})
 }
 
 func mustKey(t *testing.T, parts ...string) string {
