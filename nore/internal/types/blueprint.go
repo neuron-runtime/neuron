@@ -57,7 +57,26 @@ type ExecutionNode struct {
 	// for each Capability execution.
 	Configurations resolver.ConfigurationProgram
 
+	// Predecessors is the compiled set of incoming edges that must be satisfied
+	// before this capability may run. It is ordered by binding ID so readiness
+	// and merged inputs never depend on map iteration, declaration order, or
+	// completion timing.
+	Predecessors []ExecutionPredecessor
+
+	// JoinPolicy is the effective policy that decides when this capability's
+	// predecessors have all been satisfied. The planner resolves it from the
+	// incoming bindings, applying the default for an undeclared policy.
+	JoinPolicy shared.JoinPolicy
+
 	Next []ExecutionTransition
+}
+
+// ExecutionPredecessor identifies one incoming edge of an ExecutionNode. The
+// binding ID is the stable identity of the edge; the capability ID names the
+// source whose completion satisfies it.
+type ExecutionPredecessor struct {
+	BindingID    shared.ID
+	CapabilityID shared.ID
 }
 
 // CompiledMapping is a structurally resolved binding mapping: the planner

@@ -250,6 +250,9 @@ func convertBinding(conn manifest.Binding, capabilityMap map[string]core.Capabil
 	if !ok {
 		return core.Binding{}, fmt.Errorf("binding from %q to %q: to capability %q not found", conn.From, conn.To, conn.To)
 	}
+	if err := conn.JoinPolicy.Validate(); err != nil {
+		return core.Binding{}, fmt.Errorf("binding %s -> %s: %w", conn.From, conn.To, err)
+	}
 
 	var mappings []core.MappingRule
 	for _, m := range conn.Mappings {
@@ -285,6 +288,7 @@ func convertBinding(conn manifest.Binding, capabilityMap map[string]core.Capabil
 		To: core.Endpoint{
 			CapabilityID: toSvc.Metadata.ID,
 		},
+		JoinPolicy:  conn.JoinPolicy,
 		Mappings:    mappings,
 		Validations: validations,
 	}, nil

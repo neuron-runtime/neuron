@@ -101,10 +101,35 @@ func declaredRuntimeConfig(config *core.RuntimeConfig) *core.RuntimeConfig {
 }
 
 type normalizedBinding struct {
-	From        string                `json:"from"`
-	To          string                `json:"to"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	// JoinPolicy is normalized to its effective value so an omitted policy and
+	// an explicit JoinPolicyAll contribute identically: they mean the same thing
+	// at execution time and must not invalidate an otherwise identical assembly.
+	JoinPolicy  core.JoinPolicy       `json:"joinPolicy"`
 	Mappings    []core.MappingRule    `json:"mappings,omitempty"`
 	Validations []core.ValidationRule `json:"validations,omitempty"`
+}
+
+// bindingSortKey renders a normalized binding in its deterministic JSON form.
+// encoding/json sorts map keys, so the key is stable for every field the hash
+// includes, including structured mapping sources and inline literal values.
+func bindingSortKey(binding normalizedBinding) string {
+	data, err := json.Marshal(binding)
+	if err != nil {
+		return binding.From + "\x00" + binding.To + "\x00" + string(binding.JoinPolicy)
+	}
+	return string(data)
+}
+
+// mappingSortKey is the deterministic tie-breaker for two mappings that target
+// the same path.
+func mappingSortKey(mapping core.MappingRule) string {
+	data, err := json.Marshal(mapping)
+	if err != nil {
+		return mapping.TargetPath
+	}
+	return string(data)
 }
 
 func normalizeAssembly(assembly core.Assembly) normalizedAssembly {
@@ -135,21 +160,45 @@ func normalizeAssembly(assembly core.Assembly) normalizedAssembly {
 	bindings := make([]normalizedBinding, 0, len(assembly.Specification.Bindings))
 	for _, b := range assembly.Specification.Bindings {
 		mappings := append([]core.MappingRule(nil), b.Mappings...)
-		sort.Slice(mappings, func(i, j int) bool { return mappings[i].TargetPath < mappings[j].TargetPath })
+		sort.Slice(mappings, func(i, j int) bool {
+			if mappings[i].TargetPath != mappings[j].TargetPath {
+				return mappings[i].TargetPath < mappings[j].TargetPath
+			}
+			// Two rules may share a target path in an artifact the compiler did
+			// not produce. Their structured source is the tie-breaker so the
+			// hash never depends on the order they happened to be declared in.
+			return mappingSortKey(mappings[i]) < mappingSortKey(mappings[j])
+		})
 		validations := append([]core.ValidationRule(nil), b.Validations...)
-		sort.Slice(validations, func(i, j int) bool { return validations[i].Expression < validations[j].Expression })
+		sort.Slice(validations, func(i, j int) bool {
+			if validations[i].Expression != validations[j].Expression {
+				return validations[i].Expression < validations[j].Expression
+			}
+			return validations[i].Message < validations[j].Message
+		})
 		bindings = append(bindings, normalizedBinding{
 			From:        string(b.From.CapabilityID),
 			To:          string(b.To.CapabilityID),
+			JoinPolicy:  b.JoinPolicy.Effective(),
 			Mappings:    mappings,
 			Validations: validations,
 		})
 	}
+	// Bindings are sorted by identity and then by every remaining contributing
+	// field. From/To alone is not a total order: parallel edges may share both
+	// endpoints while differing in mappings, validations, or join policy, and
+	// their relative order must not depend on declaration order.
 	sort.Slice(bindings, func(i, j int) bool {
 		if bindings[i].From != bindings[j].From {
 			return bindings[i].From < bindings[j].From
 		}
-		return bindings[i].To < bindings[j].To
+		if bindings[i].To != bindings[j].To {
+			return bindings[i].To < bindings[j].To
+		}
+		if bindings[i].JoinPolicy != bindings[j].JoinPolicy {
+			return bindings[i].JoinPolicy < bindings[j].JoinPolicy
+		}
+		return bindingSortKey(bindings[i]) < bindingSortKey(bindings[j])
 	})
 
 	return normalizedAssembly{

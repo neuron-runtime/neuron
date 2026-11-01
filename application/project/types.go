@@ -79,6 +79,7 @@ type BindingReference struct {
 	// Inline definition
 	From        string                  `yaml:"from"`
 	To          string                  `yaml:"to"`
+	JoinPolicy  core.JoinPolicy         `yaml:"joinPolicy,omitempty"`
 	Mappings    []MappingDefinition     `yaml:"mappings,omitempty"`
 	Validations []BindingValidationRule `yaml:"validations,omitempty"`
 
@@ -95,6 +96,7 @@ type BindingFile struct {
 
 	From        string                  `yaml:"from"`
 	To          string                  `yaml:"to"`
+	JoinPolicy  core.JoinPolicy         `yaml:"joinPolicy,omitempty"`
 	Mappings    []MappingDefinition     `yaml:"mappings,omitempty"`
 	Validations []BindingValidationRule `yaml:"validations,omitempty"`
 }

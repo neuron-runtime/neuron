@@ -2,6 +2,7 @@ package planner
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
@@ -56,12 +57,21 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 
 	nodes := make(map[shared.ID]types.ExecutionNode, len(capabilities))
 	incoming := make(map[shared.ID]int, len(capabilities))
+	predecessors := make(map[shared.ID][]types.ExecutionPredecessor, len(capabilities))
+	joinPolicies := make(map[shared.ID]shared.JoinPolicy, len(capabilities))
 	for id, capability := range capabilities {
 		compiledConfig, err := c.expressions.CompileCapabilityConfigurations(capability.CapabilityConfigurations)
 		if err != nil {
 			return nil, fmt.Errorf("compile configurations for capability %s: %w", id, err)
 		}
-		nodes[id] = types.ExecutionNode{Capability: capability, Configurations: compiledConfig}
+		// A capability with no incoming bindings is an entry point; every
+		// capability otherwise joins its predecessors under the same default
+		// policy until an explicit declaration overrides it below.
+		nodes[id] = types.ExecutionNode{
+			Capability:     capability,
+			Configurations: compiledConfig,
+			JoinPolicy:     shared.JoinPolicyAll,
+		}
 		incoming[id] = 0
 	}
 
@@ -82,10 +92,25 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 			return nil, fmt.Errorf("target input port %q does not exist on capability %s", binding.To.Port, toCapability.Metadata.ID)
 		}
 
+		joinPolicy := binding.JoinPolicy.Effective()
+		if err := joinPolicy.Validate(); err != nil {
+			return nil, fmt.Errorf("binding %s: %w", binding.Metadata.ID, err)
+		}
+		if existing, exists := joinPolicies[binding.To.CapabilityID]; exists && existing != joinPolicy {
+			return nil, fmt.Errorf(
+				"capability %s has conflicting join policies %q and %q",
+				binding.To.CapabilityID, existing, joinPolicy)
+		}
+		joinPolicies[binding.To.CapabilityID] = joinPolicy
+
 		incoming[binding.To.CapabilityID]++
 		if incoming[binding.To.CapabilityID] > 1 {
 			return nil, fmt.Errorf("capability %s has multiple incoming bindings; use an aggregation capability", binding.To.CapabilityID)
 		}
+		predecessors[binding.To.CapabilityID] = append(predecessors[binding.To.CapabilityID], types.ExecutionPredecessor{
+			BindingID:    binding.Metadata.ID,
+			CapabilityID: binding.From.CapabilityID,
+		})
 
 		transition, err := c.compileTransition(binding)
 		if err != nil {
@@ -94,6 +119,22 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		node := nodes[binding.From.CapabilityID]
 		node.Next = append(node.Next, transition)
 		nodes[binding.From.CapabilityID] = node
+	}
+
+	for capabilityID, capabilityPredecessors := range predecessors {
+		// Binding IDs are the stable edge identity. Sorting here means readiness
+		// and merged inputs are deterministic regardless of map iteration or the
+		// order the bindings were declared in.
+		sort.Slice(capabilityPredecessors, func(i, j int) bool {
+			if capabilityPredecessors[i].BindingID != capabilityPredecessors[j].BindingID {
+				return capabilityPredecessors[i].BindingID < capabilityPredecessors[j].BindingID
+			}
+			return capabilityPredecessors[i].CapabilityID < capabilityPredecessors[j].CapabilityID
+		})
+		node := nodes[capabilityID]
+		node.Predecessors = capabilityPredecessors
+		node.JoinPolicy = joinPolicies[capabilityID]
+		nodes[capabilityID] = node
 	}
 
 	entryIDs := triggerIDs

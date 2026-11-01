@@ -68,6 +68,10 @@ func validateBindingBasic(
 ) error {
 	prefix := fmt.Sprintf("bindings[%d]", index)
 
+	if err := conn.JoinPolicy.Validate(); err != nil {
+		return fmt.Errorf("%s.joinPolicy: %w", prefix, err)
+	}
+
 	if conn.Entry == "" {
 		if strings.TrimSpace(conn.From) == "" {
 			return fmt.Errorf("%s.from is required", prefix)
@@ -108,6 +112,9 @@ func validateBindingFile(conn BindingFile) error {
 	}
 	if strings.TrimSpace(conn.To) == "" {
 		return fmt.Errorf("binding.to is required")
+	}
+	if err := conn.JoinPolicy.Validate(); err != nil {
+		return fmt.Errorf("binding.joinPolicy: %w", err)
 	}
 
 	for j, m := range conn.Mappings {

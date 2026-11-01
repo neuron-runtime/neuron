@@ -81,3 +81,28 @@ func TestFromResolvedProjectWithoutAResultContractStaysNil(t *testing.T) {
 		t.Fatalf("result = %+v, want nil when the YAML assembly declares none", got.Result)
 	}
 }
+
+func TestFromResolvedProjectCarriesBindingJoinPolicy(t *testing.T) {
+	rp := &project.ResolvedProject{
+		Assembly: project.ResolvedAssembly{
+			Bindings: []project.ResolvedBinding{{
+				Definition: project.BindingFile{
+					From:       "a",
+					To:         "b",
+					JoinPolicy: core.JoinPolicyAll,
+				},
+			}},
+		},
+	}
+
+	got := FromResolvedProject(rp)
+	if got == nil {
+		t.Fatal("FromResolvedProject returned nil")
+	}
+	if len(got.Bindings) != 1 {
+		t.Fatalf("bindings = %d, want 1", len(got.Bindings))
+	}
+	if got.Bindings[0].JoinPolicy != core.JoinPolicyAll {
+		t.Fatalf("join policy = %q, want %q", got.Bindings[0].JoinPolicy, core.JoinPolicyAll)
+	}
+}
