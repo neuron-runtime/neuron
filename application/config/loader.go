@@ -135,6 +135,13 @@ func Load(opts Options) (Config, error) {
 
 	resolvePaths(&cfg, cfg.ProjectDir)
 
+	// The built-in policy is resolved here so a configuration that asks for
+	// more than the compiled-in ceilings fails when the configuration is
+	// loaded, rather than when a capability first reaches for the limit.
+	if _, err := cfg.BuiltinPolicy(); err != nil {
+		return Config{}, err
+	}
+
 	if err := validateAssemblyDeclarations(&cfg); err != nil {
 		return Config{}, fmt.Errorf("invalid assemblies: %w", err)
 	}
@@ -190,7 +197,10 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("daemon.pidFile", cfg.Daemon.PIDFile)
 
 	v.SetDefault("storage.provider", cfg.Storage.Provider)
+	v.SetDefault("storage.driver", cfg.Storage.Driver)
 	v.SetDefault("storage.directory", cfg.Storage.Directory)
+	v.SetDefault("storage.path", cfg.Storage.Path)
+	v.SetDefault("storage.dsn", cfg.Storage.DSN)
 
 	v.SetDefault("inspector.enabled", cfg.Inspector.Enabled)
 	v.SetDefault("inspector.address", cfg.Inspector.Address)
@@ -235,12 +245,35 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("dev.maxWorkers", cfg.Dev.MaxWorkers)
 	v.SetDefault("entry", cfg.Entry)
 	v.SetDefault("variables", cfg.Variables)
+
+	v.SetDefault("builtins.filesystem.roots", cfg.Builtins.Filesystem.Roots)
+	v.SetDefault("builtins.command.allowedExecutables", cfg.Builtins.Command.AllowedExecutables)
+	v.SetDefault("builtins.http.allowedHosts", cfg.Builtins.HTTP.AllowedHosts)
+	v.SetDefault("builtins.limits.maxCommandOutputBytes", cfg.Builtins.Limits.MaxCommandOutputBytes)
+	v.SetDefault("builtins.limits.maxHTTPRequestBodyBytes", cfg.Builtins.Limits.MaxHTTPRequestBodyBytes)
+	v.SetDefault("builtins.limits.maxHTTPResponseBytes", cfg.Builtins.Limits.MaxHTTPResponseBytes)
+	v.SetDefault("builtins.limits.maxFileReadBytes", cfg.Builtins.Limits.MaxFileReadBytes)
+	v.SetDefault("builtins.limits.maxDirectoryEntries", cfg.Builtins.Limits.MaxDirectoryEntries)
+	v.SetDefault("builtins.limits.defaultTimeout", cfg.Builtins.Limits.DefaultTimeout)
 }
 
 // resolvePaths expands any relative or "~"-prefixed path fields against the
 // project root so downstream consumers always receive absolute paths.
 func resolvePaths(cfg *Config, projectDir string) {
+	if cfg.Storage.Driver == "" {
+		cfg.Storage.Driver = cfg.Storage.Provider
+	}
+	if cfg.Storage.Provider == "" {
+		cfg.Storage.Provider = cfg.Storage.Driver
+	}
+	if cfg.Storage.Path == "" {
+		cfg.Storage.Path = cfg.Storage.Directory
+	}
+	if cfg.Storage.Directory == "" {
+		cfg.Storage.Directory = cfg.Storage.Path
+	}
 	cfg.Storage.Directory = Expand(cfg.Storage.Directory, projectDir)
+	cfg.Storage.Path = Expand(cfg.Storage.Path, projectDir)
 	cfg.Daemon.Socket = Expand(cfg.Daemon.Socket, projectDir)
 	cfg.Daemon.PIDFile = Expand(cfg.Daemon.PIDFile, projectDir)
 	cfg.CapabilityRuntimes.StoreDir = Expand(cfg.CapabilityRuntimes.StoreDir, projectDir)
@@ -263,6 +296,8 @@ func resolvePaths(cfg *Config, projectDir string) {
 	for i := range cfg.Providers.LocalRoots {
 		cfg.Providers.LocalRoots[i] = Expand(cfg.Providers.LocalRoots[i], projectDir)
 	}
+
+	resolveBuiltinPaths(cfg, projectDir)
 
 	for i := range cfg.CapabilityRuntimes.Registries {
 		reg := &cfg.CapabilityRuntimes.Registries[i]

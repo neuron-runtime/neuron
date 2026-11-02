@@ -27,6 +27,32 @@ type Logger interface {
 	Error(ctx context.Context, message string, fields ...Field)
 }
 
+// NopLogger discards every log message.
+//
+// It is the logger for the execution paths that have no event bus to publish
+// onto — a direct invocation, for instance, which runs a capability runtime
+// outside the engine. Handing those paths a nil logger instead would turn
+// every diagnostic a capability runtime writes into a panic, so the seam is
+// always satisfied.
+type NopLogger struct{}
+
+func (NopLogger) Debug(context.Context, string, ...Field) {}
+func (NopLogger) Info(context.Context, string, ...Field)  {}
+func (NopLogger) Warn(context.Context, string, ...Field)  {}
+func (NopLogger) Error(context.Context, string, ...Field) {}
+
+// LoggerOrNop returns l, or a logger that discards everything when l is nil.
+//
+// The logger is a seam that some execution paths do not provide — a direct
+// invocation has no event bus to publish onto — so a capability runtime that
+// logs must not have to know which path it runs under.
+func LoggerOrNop(l Logger) Logger {
+	if l == nil {
+		return NopLogger{}
+	}
+	return l
+}
+
 type ExecutionContext struct {
 	ExecutionID   core2.ID
 	CorrelationID core2.ID

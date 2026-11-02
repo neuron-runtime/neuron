@@ -10,7 +10,11 @@ import (
 
 func (h *Handler) GetInstanceByID(w http.ResponseWriter, r *http.Request) {
 	id := utils.PathID(r.PathValue("id"))
-	i, ok := h.resolveInstance(r, id)
+	i, ok, err := h.resolveInstance(r, id)
+	if err != nil {
+		utils.ErrorJSON(w, http.StatusInternalServerError, err)
+		return
+	}
 	if !ok {
 		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", id))
 		return

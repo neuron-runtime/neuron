@@ -82,7 +82,7 @@ func startExecution(t *testing.T, ctx context.Context, bus *event.Bus, store *ex
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
-	if err := store.Add(exec); err != nil {
+	if err := store.Add(ctx, exec); err != nil {
 		t.Fatalf("store.Add: %v", err)
 	}
 	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, exec.ID, exec.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
@@ -133,7 +133,11 @@ func TestCancelExecutionStopsTheRunningCapability(t *testing.T) {
 	scheduler, exec, runtime := newCancelHarness(t, ctx, singleCapabilityBlueprint("slow"))
 	runtime.awaitStart(t)
 
-	if !scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator")) {
+	cancelled, err := scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator"))
+	if err != nil {
+		t.Fatalf("CancelExecution: %v", err)
+	}
+	if !cancelled {
 		t.Fatal("CancelExecution() = false, want true for a running execution")
 	}
 	runtime.awaitCancellation(t)
@@ -175,7 +179,11 @@ func TestCancelExecutionAnnouncesTheCancellation(t *testing.T) {
 	events := subscribeToExecution(t, bus, exec.ID)
 	runtime.awaitStart(t)
 
-	if !scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator")) {
+	cancelled, err := scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator"))
+	if err != nil {
+		t.Fatalf("CancelExecution: %v", err)
+	}
+	if !cancelled {
 		t.Fatal("CancelExecution() = false, want true")
 	}
 
@@ -214,7 +222,9 @@ func TestTheAbortedInvocationDoesNotReportTheCapabilityAsFailed(t *testing.T) {
 
 	scheduler, exec, runtime := newCancelHarness(t, ctx, singleCapabilityBlueprint("slow"))
 	runtime.awaitStart(t)
-	scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator"))
+	if _, err := scheduler.CancelExecution(ctx, exec.ID, errors.New("stopped by operator")); err != nil {
+		t.Fatalf("CancelExecution: %v", err)
+	}
 	runtime.awaitCancellation(t)
 
 	// The engine needs a moment to unwind and report the aborted invocation.
@@ -247,7 +257,11 @@ func TestCancelExecutionStopsThePlanFromAdvancing(t *testing.T) {
 
 	scheduler, exec, runtime := newCancelHarness(t, ctx, plan)
 	runtime.awaitStart(t)
-	if !scheduler.CancelExecution(ctx, exec.ID, errors.New("stop")) {
+	cancelled, err := scheduler.CancelExecution(ctx, exec.ID, errors.New("stop"))
+	if err != nil {
+		t.Fatalf("CancelExecution: %v", err)
+	}
+	if !cancelled {
 		t.Fatal("CancelExecution() = false, want true")
 	}
 	runtime.awaitCancellation(t)
@@ -276,15 +290,15 @@ func TestCancelExecutionRefusesUnknownAndTerminalExecutions(t *testing.T) {
 		t.Fatalf("New scheduler: %v", err)
 	}
 
-	if scheduler.CancelExecution(ctx, "exec_missing", errors.New("stop")) {
-		t.Error("CancelExecution() = true for an unknown execution, want false")
+	if cancelled, err := scheduler.CancelExecution(ctx, "exec_missing", errors.New("stop")); err != nil || cancelled {
+		t.Errorf("CancelExecution() = (%v, %v), want (false, nil)", cancelled, err)
 	}
 
 	exec, err := executionmodel.NewExecution(singleCapabilityBlueprint("slow"), "corr_1", "inst_1")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
-	if err := store.Add(exec); err != nil {
+	if err := store.Add(ctx, exec); err != nil {
 		t.Fatalf("store.Add: %v", err)
 	}
 	if err := exec.Start(map[string]any{}, 1); err != nil {
@@ -294,8 +308,8 @@ func TestCancelExecutionRefusesUnknownAndTerminalExecutions(t *testing.T) {
 		t.Fatal("MarkCompleted() = false, want true")
 	}
 
-	if scheduler.CancelExecution(ctx, exec.ID, errors.New("stop")) {
-		t.Error("CancelExecution() = true for a completed execution, want false")
+	if cancelled, err := scheduler.CancelExecution(ctx, exec.ID, errors.New("stop")); err != nil || cancelled {
+		t.Errorf("CancelExecution() = (%v, %v), want (false, nil)", cancelled, err)
 	}
 	if got := exec.Status(); got != executionmodel.StatusCompleted {
 		t.Errorf("Status() = %s, want %s (a refused cancellation must not rewrite the outcome)", got, executionmodel.StatusCompleted)

@@ -139,7 +139,7 @@ describe("Assembly", () => {
     expect(manifest.bindings).toHaveLength(0);
   });
 
-  it("rejects fan-in when a capability reads from multiple sources", () => {
+  it("supports fan-in: a capability reads from multiple sources", () => {
     const a = Capability("a").resultSchema({ x: string() });
     const b = Capability("b").resultSchema({ y: string() });
     const target = Capability("target").paramsSchema({ x: string(), y: string() });
@@ -150,9 +150,20 @@ describe("Assembly", () => {
       target.withParams({ x: a.result.x, y: b.result.y }),
     ]);
 
-    expect(() => sys.toManifest()).toThrow(
-      /Capability "target" reads inputs from multiple sources \(a, b\)/
+    expect(() => sys.toManifest()).not.toThrow();
+    const manifest = sys.toManifest();
+    const fanInBinding = manifest.bindings.find(
+      (b) => b.from === "a" || b.from === "b"
     );
+    expect(fanInBinding).toBeDefined();
+    // Each source should have its own binding with only its mappings
+    const aBinding = manifest.bindings.find((b) => b.from === "a");
+    const bBinding = manifest.bindings.find((b) => b.from === "b");
+    expect(aBinding).toBeDefined();
+    expect(bBinding).toBeDefined();
+    // aBinding should have mapping for x only, bBinding for y only
+    expect(aBinding?.mappings).toHaveLength(1);
+    expect(bBinding?.mappings).toHaveLength(1);
   });
 
   it("deduplicates capabilities referenced multiple times", () => {

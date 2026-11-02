@@ -40,13 +40,15 @@ func restoreInstance(
 	rec metadata,
 	store contracts.ExecutionRepository,
 	eventStore *event.Store,
-) *Instance {
+) (*Instance, error) {
 	status := rec.Status
 	if status == StatusStarting || status == StatusRunning {
 		status = StatusFailed
 	}
 
-	sweepUnresumableExecutions(store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID))
+	if err := sweepUnresumableExecutions(parent, store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID)); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithCancel(parent)
 	return &Instance{
@@ -64,5 +66,5 @@ func restoreInstance(
 		createdAt:  rec.CreatedAt,
 		store:      store,
 		eventStore: eventStore,
-	}
+	}, nil
 }

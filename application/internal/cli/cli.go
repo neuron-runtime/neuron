@@ -9,6 +9,7 @@ import (
 	"github.com/neuron-runtime/neuron/application/config"
 	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
 	"github.com/neuron-runtime/neuron/application/internal/cli/build"
+	"github.com/neuron-runtime/neuron/application/internal/cli/builtins"
 	"github.com/neuron-runtime/neuron/application/internal/cli/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/daemon"
@@ -87,6 +88,7 @@ func init() {
 		versioncmd.New(),
 		installcmd.New(),
 		providercmd.New(),
+		builtins.New(),
 	)
 }
 
@@ -191,10 +193,37 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	// Add workers
 	noreArgs = append(noreArgs, "--workers", fmt.Sprintf("%d", cfg.Runtime.Workers.Max))
 
-	// Add data dir
-	if cfg.Storage.Directory != "" {
-		noreArgs = append(noreArgs, "--data-dir", cfg.Storage.Directory)
+	// Add storage backend and data dir
+	driver := cfg.Storage.Driver
+	if driver == "" {
+		driver = cfg.Storage.Provider
 	}
+	if driver != "" {
+		noreArgs = append(noreArgs, "--storage-driver", driver)
+	}
+
+	dir := cfg.Storage.Directory
+	if dir == "" {
+		dir = cfg.Storage.Path
+	}
+	if dir != "" {
+		noreArgs = append(noreArgs, "--data-dir", dir)
+		noreArgs = append(noreArgs, "--storage-path", dir)
+	}
+	if cfg.Storage.DSN != "" {
+		noreArgs = append(noreArgs, "--storage-dsn", cfg.Storage.DSN)
+	}
+	// The built-in capability policy travels with the runtime: it states what
+	// the built-in capability runtimes may reach, and the runtime enforces it.
+	policy, err := cfg.BuiltinPolicy()
+	if err != nil {
+		return err
+	}
+	policyJSON, err := config.BuiltinPolicyJSON(policy)
+	if err != nil {
+		return err
+	}
+	noreArgs = append(noreArgs, "--builtin-policy", policyJSON)
 
 	// Execute nore with the project's stdout/stderr so the user sees the logs
 	noreCmd := exec.CommandContext(cmd.Context(), noreBin, noreArgs...)

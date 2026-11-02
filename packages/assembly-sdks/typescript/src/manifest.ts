@@ -53,11 +53,15 @@ export interface CapabilityManifest {
  * installation deduplicate on, so several capabilities may share one resolved
  * artifact. `runtimeConfig` is not part of that identity: it stays attached to
  * the capability whose invocation it governs.
+ *
+ * A built-in capability runtime (the `neuron:core:` namespace) runs in-process
+ * and is never resolved or installed, so it carries no version and no
+ * registry. Those two are absent rather than empty for such a runtime.
  */
 export interface CapabilityRuntimeManifest {
   name: string;
-  version: string;
-  registry: string;
+  version?: string;
+  registry?: string;
   /**
    * How N.O.R.E. executes this capability through this runtime. Absent means
    * the author declared nothing and N.O.R.E. supplies every default. It is

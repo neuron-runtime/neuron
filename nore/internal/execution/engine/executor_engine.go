@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 )
 
 // DefaultDetachedDrainTimeout bounds how long N.O.R.E. keeps running detached
@@ -82,8 +85,19 @@ func (e *CapabilityRuntimeEngine) Run(ctx context.Context) error {
 }
 
 func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, received event.Event) {
-	execution, exists := e.executions.Get(received.Metadata.ExecutionID)
-	if !exists || execution.IsTerminal() {
+	execution, err := e.executions.Get(ctx, received.Metadata.ExecutionID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return
+	}
+	if err != nil {
+		slog.Error("load execution for capability",
+			slog.String("execution_id", string(received.Metadata.ExecutionID)),
+			slog.String("capability_id", string(received.Metadata.CapabilityID)),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if execution.IsTerminal() {
 		return
 	}
 	capabilityID := received.Metadata.CapabilityID

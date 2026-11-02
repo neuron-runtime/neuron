@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
-	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
@@ -68,14 +67,19 @@ func (idx *VersionIndex) Select(version string) (string, VersionEntry, error) {
 
 // indexKey is the storage key of a assembly's version index.
 // It lives at assemblies/{assemblyID}/versions.json, outside the artifact tree.
-func (r *Repository) indexKey(assemblyID string) string {
-	return sqlite.SanitizeKey("assemblies", assemblyID, indexFileName)
+func (r *Repository) indexKey(assemblyID string) (string, error) {
+	return storage.Key("assemblies", assemblyID, indexFileName)
 }
 
-// loadIndex reads the assembly's version index. When absent it is rebuilt from
-// the registered artifacts and persisted, so pre-index data stays addressable.
-func (r *Repository) loadIndex(ctx context.Context, assemblyID string) (*VersionIndex, error) {
-	data, err := r.store.Get(ctx, r.indexKey(assemblyID))
+// loadIndex reads the assembly's version index through kv. When absent it is
+// rebuilt from the registered artifacts and persisted, so pre-index data stays
+// addressable.
+func (r *Repository) loadIndex(ctx context.Context, kv storage.KV, assemblyID string) (*VersionIndex, error) {
+	indexKey, err := r.indexKey(assemblyID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := kv.Get(ctx, indexKey)
 	if err == nil {
 		var idx VersionIndex
 		if err := json.Unmarshal(data, &idx); err != nil {
@@ -86,14 +90,17 @@ func (r *Repository) loadIndex(ctx context.Context, assemblyID string) (*Version
 	if !errors.Is(err, storage.ErrNotFound) {
 		return nil, err
 	}
-	return r.buildIndex(ctx, assemblyID)
+	return r.buildIndex(ctx, kv, assemblyID)
 }
 
 // buildIndex scans every artifact of a assembly and reconstructs its version
 // index. Rebuilding is self-healing: it only runs when no index exists yet.
-func (r *Repository) buildIndex(ctx context.Context, assemblyID string) (*VersionIndex, error) {
-	prefix := sqlite.SanitizeKey("assemblies", assemblyID)
-	keys, err := r.store.List(ctx, prefix+"/")
+func (r *Repository) buildIndex(ctx context.Context, kv storage.KV, assemblyID string) (*VersionIndex, error) {
+	prefix, err := storage.Prefix("assemblies", assemblyID)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := kv.List(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -103,9 +110,9 @@ func (r *Repository) buildIndex(ctx context.Context, assemblyID string) (*Versio
 		if !strings.HasSuffix(storageKey, "/manifest") {
 			continue
 		}
-		reg, err := r.getByStorageKey(ctx, storageKey)
+		reg, err := r.getByStorageKey(ctx, kv, storageKey)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("rebuild index for %s: load artifact %q: %w", assemblyID, storageKey, err)
 		}
 		entry := VersionEntry{
 			Hash:         reg.Key.Hash,
@@ -120,13 +127,13 @@ func (r *Repository) buildIndex(ctx context.Context, assemblyID string) (*Versio
 		}
 	}
 
-	if err := r.saveIndex(ctx, assemblyID, idx); err != nil {
+	if err := r.saveIndex(ctx, kv, assemblyID, idx); err != nil {
 		return nil, err
 	}
 	return idx, nil
 }
 
-func (r *Repository) saveIndex(ctx context.Context, assemblyID string, idx *VersionIndex) error {
+func (r *Repository) saveIndex(ctx context.Context, kv storage.KV, assemblyID string, idx *VersionIndex) error {
 	if idx == nil {
 		idx = newVersionIndex()
 	}
@@ -134,7 +141,11 @@ func (r *Repository) saveIndex(ctx context.Context, assemblyID string, idx *Vers
 	if err != nil {
 		return fmt.Errorf("marshal version index for %s: %w", assemblyID, err)
 	}
-	return r.store.Put(ctx, r.indexKey(assemblyID), data)
+	indexKey, err := r.indexKey(assemblyID)
+	if err != nil {
+		return err
+	}
+	return kv.Put(ctx, indexKey, data)
 }
 
 // newerEntry reports whether (verA, entryA) is newer than (verB, entryB).

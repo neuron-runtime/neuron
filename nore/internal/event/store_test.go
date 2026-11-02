@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
@@ -11,7 +12,7 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	s, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,5 +67,67 @@ func TestStoreRoundTripAndListAfter(t *testing.T) {
 	}
 	if after[0].Metadata.EventID != second.Metadata.EventID {
 		t.Fatalf("expected second first after cursor, got %s", after[0].Metadata.EventID)
+	}
+}
+
+func TestListReportsMalformedPersistedEvent(t *testing.T) {
+	ctx := context.Background()
+	raw, err := sqlite.New(ctx, storage.Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+
+	store := NewStore(raw)
+	execID := core.ID("exec_malformed")
+	eventID := core.ID("evt_corrupt")
+
+	key, err := storage.Key("events", string(execID), string(eventID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Put(ctx, key, []byte("{not valid json")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.List(ctx, execID)
+	if err == nil {
+		t.Fatal("expected List to fail on malformed event")
+	}
+	if !strings.Contains(err.Error(), key) {
+		t.Fatalf("expected error to name key %q, got %v", key, err)
+	}
+}
+
+func TestListSeparatesPrefixCollidingExecutions(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	execA := core.ID("exec_a")
+	execAB := core.ID("exec_ab")
+
+	a := newTestEvent(execA)
+	if err := store.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	ab := newTestEvent(execAB)
+	if err := store.Save(ctx, ab); err != nil {
+		t.Fatal(err)
+	}
+
+	listA, err := store.List(ctx, execA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listA) != 1 || listA[0].Metadata.EventID != a.Metadata.EventID {
+		t.Fatalf("exec_a returned the wrong events: %+v", listA)
+	}
+
+	listAB, err := store.List(ctx, execAB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listAB) != 1 || listAB[0].Metadata.EventID != ab.Metadata.EventID {
+		t.Fatalf("exec_ab returned the wrong events: %+v", listAB)
 	}
 }

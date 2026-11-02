@@ -19,7 +19,14 @@ type CapabilityRuntimeType string
 
 // CoreTypes lists the core capability runtimes N.O.R.E. registers in-process
 // at startup.
-var CoreTypes = []string{"set", "ai", "command", "delay", "http", "log"}
+//
+// It is derived from the built-in descriptors so the runtime registers
+// exactly the built-ins the contract declares, and so there is one
+// authoritative list rather than a name list that can drift from it.
+//
+// The names are the bare forms; the canonical namespaced form of a core
+// capability runtime is neuron:core:<name>.
+var CoreTypes = BuiltinTypeNames()
 
 // CoreName returns the canonical namespaced name for a core capability
 // runtime, e.g. CoreName("set") == "neuron:core:set".

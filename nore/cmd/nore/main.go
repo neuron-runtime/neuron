@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,8 +24,10 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
-	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
+	_ "github.com/neuron-runtime/neuron/nore/internal/storage/postgres"
+	_ "github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/version"
 )
@@ -39,6 +43,9 @@ func main() {
 		socket               string
 		workers              int
 		dataDir              string
+		storageDriver        string
+		storagePath          string
+		storageDSN           string
 		tokenArg             string
 		detachedDrainTimeout time.Duration
 		capabilityStore      string
@@ -47,12 +54,16 @@ func main() {
 		projectMode          bool
 		projectRoot          string
 		host                 string
+		builtinPolicyArg     string
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
 	flag.StringVar(&socket, "socket", defaultSocket(), "Unix socket for local CLI clients; empty disables Unix socket")
 	flag.IntVar(&workers, "workers", 8, "capability runtime worker count")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "persistent data directory")
+	flag.StringVar(&storageDriver, "storage-driver", defaultStorageDriver(), "storage backend driver (default: sqlite)")
+	flag.StringVar(&storagePath, "storage-path", "", "storage path override (sqlite)")
+	flag.StringVar(&storageDSN, "storage-dsn", os.Getenv("NEURON_DATABASE_URL"), "storage DSN (postgres)")
 	flag.StringVar(&tokenArg, "token", "", "API token for authenticating requests; empty loads the token from the socket's token file")
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
@@ -61,11 +72,28 @@ func main() {
 	flag.BoolVar(&projectMode, "project", false, "run in project runtime mode (foreground, loopback TCP, auto port)")
 	flag.StringVar(&projectRoot, "project-root", "", "project root directory (required with --project)")
 	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
+	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
 	flag.Parse()
+
+	if envDriver := os.Getenv("NEURON_STORAGE_DRIVER"); envDriver != "" {
+		storageDriver = envDriver
+	}
+	if envDSN := os.Getenv("NEURON_DATABASE_URL"); envDSN != "" {
+		storageDSN = envDSN
+	}
 
 	if showVer {
 		fmt.Println(version.String())
 		return
+	}
+
+	// The built-in capability policy is resolved once, at the process boundary:
+	// the policy may arrive from a project configuration over the command line,
+	// and it is resolved against the ceilings compiled into this binary so a
+	// policy that arrived from outside cannot widen what a capability reaches.
+	builtinPolicy, err := resolveBuiltinPolicy(builtinPolicyArg)
+	if err != nil {
+		log.Fatalf("resolve built-in capability policy: %v", err)
 	}
 
 	// Direct invocation mode: host a single installed Capability Runtime for one
@@ -73,7 +101,7 @@ func main() {
 	if invokeMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := invoke.Run(ctx, capabilityStore, os.Stdin, os.Stdout); err != nil {
+		if err := invoke.Run(ctx, capabilityStore, builtinPolicy, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -85,7 +113,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, capabilityStore, detachedDrainTimeout, tokenArg)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
 		return
 	}
 
@@ -110,11 +138,17 @@ func main() {
 
 	plugin.SetStoreRoot(capabilityStore)
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("create data directory %s: %v", dataDir, err)
+	storePath := dataDir
+	if storagePath != "" {
+		storePath = storagePath
+	}
+	if storageDriver == "" || storageDriver == "sqlite" {
+		if err := os.MkdirAll(storePath, 0o755); err != nil {
+			log.Fatalf("create data directory %s: %v", storePath, err)
+		}
 	}
 
-	store, err := sqlite.New(storage.Config{DataDir: dataDir})
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}
@@ -131,7 +165,11 @@ func main() {
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
+	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
+		instance.WithBuiltinPolicy(builtinPolicy))
+	if err != nil {
+		log.Fatalf("init instance manager: %v", err)
+	}
 	srv := api.NewServer(inst, assemblies, compiler, token)
 
 	type listenerEntry struct {
@@ -232,6 +270,32 @@ func shutdownRuntimes(srv *api.Server) {
 	}
 }
 
+// resolveBuiltinPolicy decodes the built-in capability policy the runtime was
+// started with.
+//
+// The policy travels as JSON on the command line because the runtime is a
+// separate process from the CLI. It is resolved against the ceilings compiled
+// into this binary, so a policy that arrives over a transport it did not come
+// from cannot widen what a capability may reach, and it is validated so a
+// policy that cannot be applied stops the runtime instead of being ignored.
+func resolveBuiltinPolicy(argument string) (builtins.Policy, error) {
+	var policy builtins.Policy
+	if strings.TrimSpace(argument) != "" {
+		if err := json.Unmarshal([]byte(argument), &policy); err != nil {
+			return builtins.Policy{}, fmt.Errorf("decode the built-in capability policy: %w", err)
+		}
+	}
+
+	effective, err := builtins.Effective(policy)
+	if err != nil {
+		return builtins.Policy{}, err
+	}
+	if err := effective.Validate(); err != nil {
+		return builtins.Policy{}, err
+	}
+	return effective, nil
+}
+
 // resolveAPIToken determines the token the API will require.
 //
 // The token is taken from the flag first, then from the token file beside the
@@ -285,6 +349,13 @@ func defaultSocket() string {
 	return filepath.Join(home, ".neuron", "nore.sock")
 }
 
+func defaultStorageDriver() string {
+	if value := os.Getenv("NEURON_STORAGE_PROVIDER"); value != "" {
+		return value
+	}
+	return storage.DefaultDriver
+}
+
 func defaultDataDir() string {
 	if value := os.Getenv("NEURON_DATA_DIR"); value != "" {
 		return value
@@ -309,7 +380,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
@@ -319,6 +390,12 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	if err != nil {
 		log.Fatalf("resolve project root: %v", err)
 	}
+
+	// The project root is the root the built-in capability runtimes are
+	// confined to. The runtime knows the project it was started for, so it
+	// states the root itself rather than trusting the one that arrived with
+	// the policy.
+	builtinPolicy.ProjectRoot = absRoot
 
 	// Generate an API token for this project runtime
 	token, err := generateProjectToken()
@@ -340,9 +417,23 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	}
 
 	// Create data directory
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("create data directory %s: %v", dataDir, err)
+	storePath := dataDir
+	if storagePath != "" {
+		storePath = storagePath
 	}
+	if storageDriver == "" || storageDriver == "sqlite" {
+		if err := os.MkdirAll(storePath, 0o755); err != nil {
+			log.Fatalf("create data directory %s: %v", storePath, err)
+		}
+	}
+
+	// Open storage before publishing the discovery record. A runtime that
+	// cannot initialize its durable state must not advertise itself as ready.
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
+	if err != nil {
+		log.Fatalf("init storage: %v", err)
+	}
+	defer store.Close()
 
 	// Publish the discovery record so `neuron run` can find this runtime. The
 	// record is owner-only: it carries the API token. Each session writes its
@@ -360,12 +451,6 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 
 	plugin.SetStoreRoot(capabilityStore)
 
-	store, err := sqlite.New(storage.Config{DataDir: dataDir})
-	if err != nil {
-		log.Fatalf("init storage: %v", err)
-	}
-	defer store.Close()
-
 	assemblies := assembly.NewRepository(store)
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
@@ -377,7 +462,11 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 		log.Fatalf("init planner: %v", err)
 	}
 
-	inst := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies)
+	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
+		instance.WithBuiltinPolicy(builtinPolicy))
+	if err != nil {
+		log.Fatalf("init instance manager: %v", err)
+	}
 	srv := api.NewServer(inst, assemblies, compiler, token)
 
 	// Serve on the listener

@@ -26,13 +26,14 @@ func New(m *instance.Manager, assemblies *assembly.Repository, compiler *planner
 // instance ID (inst_*) or a colon-encoded assembly key
 // (assemblyID:version:hash[:env]); keys resolve to an existing runtime without
 // creating one.
-func (h *Handler) resolveInstance(r *http.Request, id string) (*instance.Instance, bool) {
+func (h *Handler) resolveInstance(r *http.Request, id string) (*instance.Instance, bool, error) {
 	if strings.HasPrefix(id, "inst_") {
-		return h.instances.GetByID(id)
+		i, ok := h.instances.GetByID(id)
+		return i, ok, nil
 	}
 	key, err := protocol.ParseKey(id)
 	if err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	return h.instances.Resolve(r.Context(), key)
 }
@@ -62,9 +63,13 @@ func (h *Handler) runningInstance(r *http.Request, id string) (*instance.Instanc
 // registered key. This is what makes `neuron run` re-run an existing assembly
 // instead of failing with "instance is not running".
 func (h *Handler) runningInstanceByKey(ctx context.Context, key protocol.InstanceKey) (*instance.Instance, error) {
-	if i, ok := h.instances.Resolve(ctx, key); ok && i.Status() == instance.StatusRunning {
+	i, ok, err := h.instances.Resolve(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if ok && i.Status() == instance.StatusRunning {
 		return i, nil
 	}
-	i, _, err := h.instances.GetOrCreate(ctx, key)
+	i, _, err = h.instances.GetOrCreate(ctx, key)
 	return i, err
 }

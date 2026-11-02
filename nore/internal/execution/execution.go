@@ -79,6 +79,20 @@ type Execution struct {
 	// state; Wait and Done poll it. It is a runtime-only device and is not
 	// serialized in snapshots.
 	done chan struct{}
+
+	// revision is the durable compare-and-swap version of this execution. It is
+	// serialized in snapshots and incremented only after a successful save.
+	revision uint64
+
+	// saveMu serializes saves of this Execution value. Two writers sharing the
+	// same value cannot produce a false conflict; only a distinct copy with an
+	// older revision triggers storage.ErrConflict.
+	saveMu sync.Mutex
+
+	// joinState tracks completion of predecessor bindings for join targets.
+	// Each key is a target capability ID; the value records which predecessor
+	// bindings have completed and what inputs they contributed.
+	joinState map[shared.ID]*joinStateInfo
 }
 
 func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID) (*Execution, error) {
@@ -96,7 +110,8 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
 		status: StatusPending, initialParams: make(map[string]any),
 		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
-		done: make(chan struct{}),
+		done:      make(chan struct{}),
+		joinState: make(map[shared.ID]*joinStateInfo),
 	}, nil
 }
 
@@ -265,7 +280,9 @@ func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, er
 	if e.inFlight <= 0 {
 		return e.inFlight, errors.New("execution in-flight counter is invalid")
 	}
-	e.inFlight += nextCapabilityCount - 1
+	if nextCapabilityCount > 0 {
+		e.inFlight += nextCapabilityCount - 1
+	}
 	return e.inFlight, nil
 }
 
@@ -351,6 +368,20 @@ func (e *Execution) IsTerminal() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.isTerminalLocked()
+}
+
+// Revision reports the durable revision this execution was last saved at. A
+// newly created execution has revision 0 until its first successful Add.
+func (e *Execution) Revision() uint64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.revision
+}
+
+func (e *Execution) setRevision(revision uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.revision = revision
 }
 
 func (e *Execution) Params(capabilityID shared.ID) map[string]any {
@@ -448,4 +479,158 @@ func pathValue(payload any, path []string, source *shared.ValueRef) (any, error)
 		current = next
 	}
 	return nil, fmt.Errorf("%s reference path %q: unexpected end", source.Kind, strings.Join(path, "."))
+}
+
+// joinStateInfo holds the state for a join target capability.
+type joinStateInfo struct {
+	CompletedBindings map[shared.ID]bool
+	PredecessorInputs map[shared.ID]map[string]any
+	Dispatched        bool
+}
+
+// RecordCompletedBinding marks a binding as completed for a join target.
+// It is safe to call even if the binding was already completed; it is idempotent.
+// Returns true if the join target is now ready (all predecessors completed).
+func (e *Execution) RecordCompletedBinding(capabilityID shared.ID, bindingID shared.ID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return false
+	}
+
+	if ji.CompletedBindings == nil {
+		ji.CompletedBindings = make(map[shared.ID]bool)
+	}
+	ji.CompletedBindings[bindingID] = true
+
+	node := e.Blueprint.Nodes[capabilityID]
+	required := len(node.Predecessors)
+
+	if required == 0 {
+		ji.Dispatched = true
+		return true
+	}
+
+	allCompleted := true
+	for i := 0; i < required; i++ {
+		found := false
+		for completedID := range ji.CompletedBindings {
+			if completedID == node.Predecessors[i].BindingID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allCompleted = false
+			break
+		}
+	}
+
+	if allCompleted && !ji.Dispatched {
+		ji.Dispatched = true
+	}
+
+	return allCompleted
+}
+
+// RecordPredecessorInput stores the output of a completed predecessor capability
+// as an input for the join target.
+func (e *Execution) RecordPredecessorInput(capabilityID shared.ID, bindingID shared.ID, input map[string]any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return
+	}
+
+	if ji.PredecessorInputs == nil {
+		ji.PredecessorInputs = make(map[shared.ID]map[string]any)
+	}
+	ji.PredecessorInputs[bindingID] = input
+}
+
+// ReadyForJoin checks if a join target capability is ready to execute.
+func (e *Execution) ReadyForJoin(capabilityID shared.ID) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return false
+	}
+
+	node := e.Blueprint.Nodes[capabilityID]
+	if len(node.Predecessors) == 0 {
+		return true
+	}
+
+	required := len(node.Predecessors)
+	completed := 0
+	for _, pred := range node.Predecessors {
+		if ji.CompletedBindings != nil {
+			for completedID := range ji.CompletedBindings {
+				if completedID == pred.BindingID {
+					completed++
+					break
+				}
+			}
+		}
+	}
+
+	return completed >= required
+}
+
+// MergeCompletedInputs gathers all inputs from completed predecessors.
+func (e *Execution) MergeCompletedInputs(capabilityID shared.ID) map[string]any {
+	e.mu.RLock()
+	ji, exists := e.joinState[capabilityID]
+	e.mu.RUnlock()
+	if !exists {
+		return nil
+	}
+
+	if ji.PredecessorInputs == nil {
+		return map[string]any{}
+	}
+
+	merged := make(map[string]any, len(ji.PredecessorInputs))
+	for _, input := range ji.PredecessorInputs {
+		for k, v := range input {
+			merged[k] = v
+		}
+	}
+	return merged
+}
+
+// DispatchedOnce checks if work has already been dispatched for a join target.
+func (e *Execution) DispatchedOnce(capabilityID shared.ID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return false
+	}
+
+	if ji.Dispatched {
+		return true
+	}
+
+	ji.Dispatched = true
+	return true
+}
+
+// mergeWithTransitionInput combines merged predecessor inputs with transition mappings.
+func mergeWithTransitionInput(merged map[string]any, transitionInput map[string]any, transition types.ExecutionTransition) map[string]any {
+	result := map[string]any{}
+	for k, v := range merged {
+		result[k] = v
+	}
+	for k, v := range transitionInput {
+		result[k] = v
+	}
+	return result
 }

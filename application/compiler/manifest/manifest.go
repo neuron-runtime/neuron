@@ -108,8 +108,15 @@ type CapabilityRuntimeSpec struct {
 
 // Binding describes a directed edge between two capabilities.
 type Binding struct {
-	From        string              `json:"from"`
-	To          string              `json:"to"`
+	From string `json:"from"`
+	To   string `json:"to"`
+
+	// JoinPolicy selects when To becomes ready when several bindings converge
+	// on it. It is omitted when the author declares nothing, which means
+	// core.JoinPolicyAll. Every incoming binding for one target must declare
+	// the same effective policy.
+	JoinPolicy core.JoinPolicy `json:"joinPolicy,omitempty"`
+
 	Mappings    []BindingMapping    `json:"mappings"`
 	Validations []BindingValidation `json:"validations"`
 }

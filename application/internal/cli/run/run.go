@@ -21,6 +21,7 @@ import (
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
 	"github.com/neuron-runtime/neuron/application/internal/ref"
 	"github.com/neuron-runtime/neuron/application/project"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
@@ -178,6 +179,12 @@ func runDirect(cmd *cobra.Command, reference string) error {
 		return fmt.Errorf("capability runtime name is required (e.g. neuron:core:set)")
 	}
 
+	// A reference to a built-in that does not exist is a mistake in the
+	// invocation, and the error says which built-ins exist.
+	if err := core.UnknownBuiltinError(core.CapabilityRuntimeType(typ)); err != nil {
+		return err
+	}
+
 	execParams, err := loadExecParams()
 	if err != nil {
 		return err
@@ -196,8 +203,7 @@ func runDirect(cmd *cobra.Command, reference string) error {
 				typ, version, core.CanonicalCoreType(coreType))
 		}
 		req.CoreType = string(core.CanonicalCoreType(coreType))
-	} else {
-		// Direct invocation is project-independent, so it resolves against the
+	} else { // Direct invocation is project-independent, so it resolves against the
 		// default machine-global store — exactly where `neuron add` installs when
 		// no store directory is configured. Requiring the artifact to be installed
 		// keeps direct invocation free of implicit resolution or installation.
@@ -231,6 +237,24 @@ func runDirect(cmd *cobra.Command, reference string) error {
 	if storeDir != "" {
 		childArgs = append(childArgs, "--capability-runtime-store", storeDir)
 	}
+
+	// A direct invocation is project-independent, so it runs under the
+	// compiled-in ceilings. The policy travels with the request so the child
+	// enforces the same limits the parent would.
+	//
+	// Private networks are permitted here because the request is the
+	// operator's own: someone running a capability runtime by hand is
+	// reaching a service they chose, not an address that came out of an
+	// assembly's input.
+	policy, err := builtins.Effective(builtins.Policy{AllowPrivateNetworks: true})
+	if err != nil {
+		return fmt.Errorf("resolve the built-in capability policy: %w", err)
+	}
+	policyJSON, err := config.BuiltinPolicyJSON(policy)
+	if err != nil {
+		return err
+	}
+	childArgs = append(childArgs, "--builtin-policy", policyJSON)
 	child := exec.CommandContext(ctx, noreBin, childArgs...)
 	child.Stdin = bytes.NewReader(requestJSON)
 	child.Stderr = cmd.ErrOrStderr()

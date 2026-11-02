@@ -302,29 +302,47 @@ function collectBindings(
   const bindings: BindingManifest[] = [];
   const seen = new Set<string>();
 
+  // R3-10: Track target param paths per capability to reject duplicate
+  // target field mappings. Two incoming bindings must not write to the same
+  // target param field path; if they do, compilation fails with a clear error.
+  const assignedPaths: Map<string, Set<string>> = new Map();
+
   for (const node of nodes) {
     const uniqueSources = Array.from(new Set(node.sources.filter(Boolean)));
     const sourceRefs = uniqueSources.length > 0 ? uniqueSources : node.anchor ? [node.anchor] : [];
     if (sourceRefs.length === 0) continue;
 
-    if (sourceRefs.length > 1) {
-      throw new Error(
-        `Capability "${node.capabilityRef}" reads inputs from multiple sources (${sourceRefs.join(", ")}). ` +
-        `Execution does not support fan-in; route the inputs through an aggregation capability instead.`
-      );
+    // R3-10: Check for duplicate target field mappings across bindings to the
+    // same capability. Each source emits one binding; if two sources map to the
+    // same target path, compilation fails.
+    for (const from of sourceRefs) {
+      const key = `${from}->${node.capabilityRef}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      // R3-10: Validate that this binding's target paths do not conflict with
+      // previously assigned paths for the same target capability.
+      const targetCap = node.capabilityRef;
+      const existingPaths = assignedPaths.get(targetCap) || new Set();
+      const mappings = bindingMappings(from, node, capabilities);
+      for (const mapping of mappings) {
+        const targetPath = mapping.target;
+        if (existingPaths.has(targetPath)) {
+          throw new Error(
+            `capability ${targetCap} has duplicate target path ${targetPath} ` +
+            `from bindings ${from} and ${Array.from(assignedPaths.keys()).find(k => assignedPaths.get(k)!.has(targetPath)) || 'unknown'}`,
+          );
+        }
+        existingPaths.add(targetPath);
+      }
+      assignedPaths.set(targetCap, existingPaths);
+
+      const validations = node.incomingConditions.map((c) => ({
+        expression: c.expression,
+        message: c.message ?? "",
+      }));
+      bindings.push({ from, to: node.capabilityRef, mappings, validations });
     }
-
-    const from = sourceRefs[0]!;
-    const key = `${from}->${node.capabilityRef}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const mappings = bindingMappings(from, node, capabilities);
-    const validations = node.incomingConditions.map((c) => ({
-      expression: c.expression,
-      message: c.message ?? "",
-    }));
-    bindings.push({ from, to: node.capabilityRef, mappings, validations });
   }
 
   return bindings;
@@ -335,10 +353,16 @@ function bindingMappings(
   target: CapabilityTarget,
   capabilities: Map<string, CapabilityDefinition<object, object>>
 ): BindingManifest["mappings"] {
-  const explicit = Object.entries(target.bindings).map(([name, source]) => ({
-    target: name,
-    source: qualifySource(source, fromRef, name, target.capabilityRef),
-  }));
+  const explicit = Object.entries(target.bindings).map(([name, source]) => {
+    const mapped = qualifySource(source, fromRef, name, target.capabilityRef);
+    // For capabilityResult/capabilityParams, only include mappings that reference
+    // this binding's from capability. This enables fan-in: each source emits a
+    // binding with only its own mappings. Other kinds (e.g. assemblyParams) are
+    // always included.
+    const isCapRef = mapped.kind === "capabilityResult" || mapped.kind === "capabilityParams";
+    if (isCapRef && mapped.capability !== fromRef) return null;
+    return { target: name, source: mapped };
+  }).filter((m): m is NonNullable<typeof m> => m !== null);
   if (explicit.length > 0) return explicit;
 
   const from = capabilities.get(fromRef)?.toManifest();

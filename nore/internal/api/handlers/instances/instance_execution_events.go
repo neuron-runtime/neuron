@@ -2,11 +2,13 @@ package instances
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
@@ -28,8 +30,12 @@ func (h *Handler) StreamExecutionEvents(w http.ResponseWriter, r *http.Request) 
 		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", instID))
 		return
 	}
-	if _, ok := i.GetExecution(execID); !ok {
-		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("execution %s not found", execID))
+	if _, err := i.GetExecution(r.Context(), execID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, instance.ErrExecutionNotFound) {
+			status = http.StatusNotFound
+		}
+		utils.ErrorJSON(w, status, err)
 		return
 	}
 

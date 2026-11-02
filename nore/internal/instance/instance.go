@@ -22,6 +22,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/stream"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
@@ -48,6 +49,10 @@ type options struct {
 	// detachedDrainTimeout is how long detached work may keep running after the
 	// instance stops. A non-positive value selects the engine default.
 	detachedDrainTimeout time.Duration
+
+	// builtinPolicy bounds the built-in capability runtimes this instance
+	// registers.
+	builtinPolicy builtins.Policy
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -65,6 +70,20 @@ func WithResolvedCapabilityRuntimes(resolved []capabilityrt.ResolvedCapabilityRu
 func WithDetachedDrainTimeout(timeout time.Duration) Option {
 	return func(o *options) {
 		o.detachedDrainTimeout = timeout
+	}
+}
+
+// WithBuiltinPolicy sets the policy the built-in capability runtimes run
+// under.
+//
+// The policy bounds what the built-ins may reach: the directories they may
+// read, the programs they may run, the hosts they may contact. It is
+// resolved against the compiled-in ceilings when the runtimes are registered,
+// so a policy that reaches the runtime from outside cannot widen what a
+// capability may do.
+func WithBuiltinPolicy(policy builtins.Policy) Option {
+	return func(o *options) {
+		o.builtinPolicy = policy
 	}
 }
 
@@ -131,7 +150,11 @@ func New(
 	scopes := execution.NewScopeRegistry(ctx)
 
 	reg := registry.New()
-	reg.RegisterCoreRuntimes()
+	if err := reg.RegisterCoreRuntimes(optsApplied.builtinPolicy); err != nil {
+		cancel()
+		bus.Close()
+		return nil, fmt.Errorf("register core capability runtimes: %w", err)
+	}
 
 	if err := plugin.RegisterResolvedCapabilityRuntimes(reg, optsApplied.resolvedCapabilityRuntimes); err != nil {
 		cancel()
@@ -293,7 +316,9 @@ func (i *Instance) Stop() error {
 		i.wg.Wait()
 	}
 
-	sweepAbandonedExecutions(i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
+	sweepCtx, cancelSweep := context.WithTimeout(context.Background(), sweepPersistenceTimeout)
+	defer cancelSweep()
+	sweepErr := sweepAbandonedExecutions(sweepCtx, i.store, shared.ID(i.ID), stoppedBeforeFinished(i.ID))
 
 	// Release capability runtime-backed resources (wasm runtimes) now that no execution
 	// can be in flight.
@@ -310,7 +335,7 @@ func (i *Instance) Stop() error {
 	i.mu.Lock()
 	i.status = StatusStopped
 	i.mu.Unlock()
-	return nil
+	return sweepErr
 }
 
 func (i *Instance) Status() Status {
@@ -343,7 +368,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	if err != nil {
 		return nil, err
 	}
-	if err := i.store.Add(exec); err != nil {
+	if err := i.store.Add(ctx, exec); err != nil {
 		return nil, err
 	}
 
@@ -381,9 +406,12 @@ var ErrExecutionNotCancellable = errors.New("execution already reached a termina
 // decision. A restored instance has no scheduler -- and therefore no work to
 // stop -- so there the execution's record is simply corrected and persisted.
 func (i *Instance) CancelExecution(ctx context.Context, executionID shared.ID, reason error) error {
-	exec, exists := i.store.Get(executionID)
-	if !exists {
+	exec, err := i.store.Get(ctx, executionID)
+	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("%w: %s", ErrExecutionNotFound, executionID)
+	}
+	if err != nil {
+		return fmt.Errorf("load execution %s: %w", executionID, err)
 	}
 	if exec.IsTerminal() {
 		return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
@@ -393,24 +421,35 @@ func (i *Instance) CancelExecution(ctx context.Context, executionID shared.ID, r
 		if !exec.MarkCancelled(reason) {
 			return fmt.Errorf("%w: %s is %s", ErrExecutionNotCancellable, executionID, exec.Status())
 		}
-		if err := i.store.Save(context.Background(), exec); err != nil {
+		if err := i.store.Save(ctx, exec); err != nil {
 			return fmt.Errorf("persist cancelled execution %s: %w", executionID, err)
 		}
 		return nil
 	}
 
-	if !i.scheduler.CancelExecution(ctx, executionID, reason) {
+	cancelled, err := i.scheduler.CancelExecution(ctx, executionID, reason)
+	if err != nil {
+		return err
+	}
+	if !cancelled {
 		return fmt.Errorf("%w: %s", ErrExecutionNotCancellable, executionID)
 	}
 	return nil
 }
 
-func (i *Instance) ListExecutions() []*execution.Execution {
-	return i.store.ListByInstance(shared.ID(i.ID))
+func (i *Instance) ListExecutions(ctx context.Context) ([]*execution.Execution, error) {
+	return i.store.ListByInstance(ctx, shared.ID(i.ID))
 }
 
-func (i *Instance) GetExecution(id shared.ID) (*execution.Execution, bool) {
-	return i.store.Get(id)
+func (i *Instance) GetExecution(ctx context.Context, id shared.ID) (*execution.Execution, error) {
+	exec, err := i.store.Get(ctx, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrExecutionNotFound, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return exec, nil
 }
 
 func (i *Instance) ListExecutionEvents(ctx context.Context, executionID shared.ID) ([]event.Event, error) {

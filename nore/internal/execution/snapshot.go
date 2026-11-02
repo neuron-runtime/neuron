@@ -13,6 +13,7 @@ type ExecutionSnapshot struct {
 	CorrelationID     core.ID                              `json:"correlation_id"`
 	InstanceID        core.ID                              `json:"instance_id,omitempty"`
 	ParentExecutionID core.ID                              `json:"parent_execution_id,omitempty"`
+	Revision          uint64                               `json:"revision"`
 	Status            Status                               `json:"status"`
 	InitialParams     map[string]any                       `json:"initial_params,omitempty"`
 	Params            map[core.ID]map[string]any           `json:"params,omitempty"`
@@ -27,7 +28,17 @@ type ExecutionSnapshot struct {
 func (e *Execution) Snapshot() *ExecutionSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.snapshotLocked(e.revision)
+}
 
+func (e *Execution) snapshotAt(revision uint64) *ExecutionSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.snapshotLocked(revision)
+}
+
+// snapshotLocked builds a snapshot while the caller holds e.mu.
+func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 	states := make(map[core.ID]CapabilityExecutionState, len(e.states))
 	for id, state := range e.states {
 		states[id] = state
@@ -38,6 +49,7 @@ func (e *Execution) Snapshot() *ExecutionSnapshot {
 		CorrelationID:     e.CorrelationID,
 		InstanceID:        e.InstanceID,
 		ParentExecutionID: e.ParentExecutionID,
+		Revision:          revision,
 		Status:            e.status,
 		InitialParams:     data.CanonicalMap(e.initialParams),
 		Params:            cloneParamsMap(e.params),
@@ -55,6 +67,7 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 	defer e.mu.Unlock()
 
 	e.status = snapshot.Status
+	e.revision = snapshot.Revision
 	e.initialParams = data.CanonicalMap(snapshot.InitialParams)
 	e.params = cloneParamsMap(snapshot.Params)
 	e.results = cloneParamsMap(snapshot.Results)
@@ -82,6 +95,7 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		CorrelationID:     snap.CorrelationID,
 		InstanceID:        snap.InstanceID,
 		ParentExecutionID: snap.ParentExecutionID,
+		revision:          snap.Revision,
 		status:            snap.Status,
 		initialParams:     snap.InitialParams,
 		params:            snap.Params,

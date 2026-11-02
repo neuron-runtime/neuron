@@ -18,7 +18,11 @@ import (
 
 func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 	id := utils.PathID(r.PathValue("id"))
-	i, ok := h.resolveInstance(r, id)
+	i, ok, resolveErr := h.resolveInstance(r, id)
+	if resolveErr != nil {
+		utils.ErrorJSON(w, http.StatusInternalServerError, resolveErr)
+		return
+	}
 	if !ok {
 		// The target may still be addressable: a assembly key that names a
 		// registered but never-instantiated assembly has no runtime, yet its
@@ -27,7 +31,12 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 		// before the first execution. Unknown instances and assemblies 404.
 		if !strings.HasPrefix(id, "inst_") {
 			if key, err := protocol.ParseKey(id); err == nil {
-				if exists, existsErr := h.assemblies.Exists(r.Context(), key); existsErr == nil && exists {
+				exists, existsErr := h.assemblies.Exists(r.Context(), key)
+				if existsErr != nil {
+					utils.ErrorJSON(w, http.StatusInternalServerError, existsErr)
+					return
+				}
+				if exists {
 					utils.WriteJSON(w, http.StatusOK, protocol.Response{
 						Message: "executions",
 						Status:  http.StatusOK,
@@ -41,8 +50,14 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	executions, err := i.ListExecutions(r.Context())
+	if err != nil {
+		utils.ErrorJSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	items := make([]protocol.ExecutionItem, 0)
-	for _, exec := range i.ListExecutions() {
+	for _, exec := range executions {
 		item := protocol.ExecutionItem{
 			ID:                exec.ID,
 			CorrelationID:     exec.CorrelationID,
@@ -146,9 +161,13 @@ func (h *Handler) GetExecutionState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exec, ok := i.GetExecution(core.ID(execID))
-	if !ok {
-		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("execution %s not found", execID))
+	exec, err := i.GetExecution(r.Context(), core.ID(execID))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, instance.ErrExecutionNotFound) {
+			status = http.StatusNotFound
+		}
+		utils.ErrorJSON(w, status, err)
 		return
 	}
 
@@ -217,7 +236,7 @@ func (h *Handler) CancelExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exec, _ := i.GetExecution(core.ID(execID))
+	exec, _ := i.GetExecution(r.Context(), core.ID(execID))
 	item := protocol.ExecutionItem{ID: core.ID(execID)}
 	if exec != nil {
 		item.Status = string(exec.Status())

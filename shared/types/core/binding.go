@@ -74,6 +74,11 @@ type Binding struct {
 	From Endpoint
 	To   Endpoint
 
+	// JoinPolicy selects when To becomes ready when several bindings converge
+	// on it. An empty policy means JoinPolicyAll. Every incoming binding for one
+	// target must declare the same effective policy.
+	JoinPolicy JoinPolicy `json:"joinPolicy,omitempty"`
+
 	Mappings    []MappingRule
 	Validations []ValidationRule
 }

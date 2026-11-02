@@ -2,8 +2,8 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	core2 "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
@@ -33,14 +34,24 @@ type Manager struct {
 	// finish after the instance stops. A non-positive value selects the engine
 	// default.
 	detachedDrainTimeout time.Duration
+
+	// builtinPolicy bounds the built-in capability runtimes every instance
+	// this manager creates registers.
+	builtinPolicy builtins.Policy
 }
 
-func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository) *Manager {
+func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) (*Manager, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
 	if workers <= 0 {
 		workers = 8
+	}
+	var optsApplied options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&optsApplied)
+		}
 	}
 	m := &Manager{
 		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
@@ -51,30 +62,36 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 		metadata:             newMetadataStore(store),
 		assemblies:           assemblies,
 		detachedDrainTimeout: detachedDrainTimeout,
+		builtinPolicy:        optsApplied.builtinPolicy,
 	}
-	m.reconcile()
-	return m
+	if err := m.reconcile(parent); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // reconcile registers instances whose metadata was persisted by a previous
 // process so their executions and events remain queryable after a restart.
 // Instances are restored as metadata-only records and are not started.
-func (m *Manager) reconcile() {
-	records, err := m.metadata.List(context.Background())
+func (m *Manager) reconcile(ctx context.Context) error {
+	records, err := m.metadata.List(ctx)
 	if err != nil {
-		log.Printf("load instance metadata: %v", err)
-		return
+		return fmt.Errorf("load instance metadata: %w", err)
 	}
 	for _, rec := range records {
-		i := restoreInstance(
+		i, err := restoreInstance(
 			m.parent,
 			rec,
 			execution.NewExecutionStore(m.store),
 			event.NewStore(m.store),
 		)
+		if err != nil {
+			return fmt.Errorf("restore instance %s: %w", rec.ID, err)
+		}
 		m.instancesByID[rec.ID] = i
 		m.instancesByKey[i.Key] = i
 	}
+	return nil
 }
 
 func (m *Manager) Get(key protocol.InstanceKey) (*Instance, bool) {
@@ -96,23 +113,27 @@ func (m *Manager) GetByID(id string) (*Instance, bool) {
 // or env) is resolved through the registered assemblies so version-without-hash
 // addresses the most recently registered artifact. Returns false when no
 // instance exists for the key.
-func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Instance, bool) {
+func (m *Manager) Resolve(ctx context.Context, key protocol.InstanceKey) (*Instance, bool, error) {
 	m.mu.RLock()
 	if i, ok := m.instancesByKey[key]; ok {
 		m.mu.RUnlock()
-		return i, true
+		return i, true, nil
 	}
 	m.mu.RUnlock()
 
-	if reg, err := m.assemblies.Resolve(ctx, key); err == nil {
-		m.mu.RLock()
-		if i, ok := m.instancesByKey[reg.Key]; ok {
-			m.mu.RUnlock()
-			return i, true
-		}
-		m.mu.RUnlock()
+	reg, err := m.assemblies.Resolve(ctx, key)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, false, nil
 	}
-	return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if i, ok := m.instancesByKey[reg.Key]; ok {
+		return i, true, nil
+	}
+	return nil, false, nil
 }
 
 // GetOrCreate returns the live runtime for key, lazily constructing it from
@@ -150,7 +171,7 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 		return nil, false, err
 	}
 	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store,
-		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout))
+		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy))
 	if err != nil {
 		return nil, false, err
 	}
@@ -160,8 +181,14 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 
 	m.instancesByKey[canonical] = i
 	m.instancesByID[string(id)] = i
-	if err := m.metadata.Save(context.Background(), recordFor(i, i.Status())); err != nil {
-		log.Printf("persist instance metadata for %s: %v", i.ID, err)
+	if err := m.metadata.Save(ctx, recordFor(i, i.Status())); err != nil {
+		delete(m.instancesByKey, canonical)
+		delete(m.instancesByID, string(id))
+		stopErr := i.Stop()
+		return nil, false, errors.Join(
+			fmt.Errorf("persist instance metadata for %s: %w", i.ID, err),
+			stopErr,
+		)
 	}
 	return i, true, nil
 }
@@ -199,7 +226,7 @@ func withCapabilityRuntimes(reg assembly.RegisteredAssembly) (Option, error) {
 	return WithResolvedCapabilityRuntimes(resolved), nil
 }
 
-func (m *Manager) Stop(id string) error {
+func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.mu.RLock()
 	i, ok := m.instancesByID[id]
 	m.mu.RUnlock()
@@ -213,8 +240,8 @@ func (m *Manager) Stop(id string) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.metadata.Save(context.Background(), recordFor(i, StatusStopped)); err != nil {
-		log.Printf("persist instance metadata for %s: %v", i.ID, err)
+	if err := m.metadata.Save(ctx, recordFor(i, StatusStopped)); err != nil {
+		return fmt.Errorf("persist instance metadata for %s: %w", i.ID, err)
 	}
 	return nil
 }
@@ -236,7 +263,10 @@ func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err 
 	if err != nil {
 		return false, fmt.Errorf("invalid instance target %q: %w", target, err)
 	}
-	inst, ok := m.Resolve(ctx, key)
+	inst, ok, err := m.Resolve(ctx, key)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
 		return false, nil
 	}
@@ -245,26 +275,66 @@ func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err 
 
 // removeInstance deletes an instance's runtime, executions, events and
 // metadata. It is safe for both live and metadata-only (restored) instances.
+// All deletions are performed atomically in a single storage transaction when
+// possible; in-memory state is only removed after successful commit.
 func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 	if err := inst.Stop(); err != nil {
 		return err
 	}
 
-	for _, exec := range inst.ListExecutions() {
-		inst.Store().Delete(exec.ID)
-		if err := inst.EventStore().DeleteExecution(ctx, exec.ID); err != nil {
-			log.Printf("delete events for execution %s on %s: %v", exec.ID, inst.ID, err)
-		}
+	executions, err := inst.ListExecutions(ctx)
+	if err != nil {
+		return fmt.Errorf("list executions for instance %s: %w", inst.ID, err)
 	}
+
+	var keys []string
+	for _, exec := range executions {
+		k, err := storage.Key("executions", string(exec.ID))
+		if err != nil {
+			return err
+		}
+		keys = append(keys, k)
+		prefix, err := storage.Prefix("events", string(exec.ID))
+		if err != nil {
+			return err
+		}
+		ekeys, err := m.store.List(ctx, prefix)
+		if err != nil {
+			return fmt.Errorf("list events for execution %s on %s: %w", exec.ID, inst.ID, err)
+		}
+		keys = append(keys, ekeys...)
+	}
+	mkey, err := storage.Key("instances", inst.ID)
+	if err != nil {
+		return err
+	}
+	keys = append(keys, mkey)
+
+	if err := m.store.WithTx(ctx, func(tx storage.Tx) error {
+		for _, k := range keys {
+			if err := tx.Delete(ctx, k); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Clear memory caches if present (best effort)
+	for _, exec := range executions {
+		if es := inst.Store(); es != nil {
+			_ = es.Delete(ctx, exec.ID)
+		}
+		_ = inst.EventStore().DeleteExecution(ctx, exec.ID)
+	}
+	// metadata already deleted in tx; ensure mem cleared
+	_ = m.metadata.Delete(ctx, inst.ID)
 
 	m.mu.Lock()
 	delete(m.instancesByID, inst.ID)
 	delete(m.instancesByKey, inst.Key)
 	m.mu.Unlock()
-
-	if err := m.metadata.Delete(ctx, inst.ID); err != nil {
-		log.Printf("delete instance metadata for %s: %v", inst.ID, err)
-	}
 	return nil
 }
 
@@ -302,11 +372,11 @@ func (m *Manager) Clear(ctx context.Context) error {
 	}
 	m.mu.RUnlock()
 
-	var firstErr error
+	var failures []error
 	for _, inst := range instances {
-		if err := m.removeInstance(ctx, inst); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.removeInstance(ctx, inst); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	return firstErr
+	return errors.Join(failures...)
 }

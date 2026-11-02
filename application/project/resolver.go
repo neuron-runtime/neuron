@@ -274,6 +274,9 @@ func (r *Resolver) resolveBindings(
 			if connRef.To != "" {
 				connFile.To = connRef.To
 			}
+			if connRef.JoinPolicy != "" {
+				connFile.JoinPolicy = connRef.JoinPolicy
+			}
 		} else {
 			// Inline binding
 			connFile = BindingFile{
@@ -285,6 +288,7 @@ func (r *Resolver) resolveBindings(
 				},
 				From:        connRef.From,
 				To:          connRef.To,
+				JoinPolicy:  connRef.JoinPolicy,
 				Mappings:    connRef.Mappings,
 				Validations: connRef.Validations,
 			}

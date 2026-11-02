@@ -488,10 +488,19 @@ func resolveFrozenCapabilityRuntimes(ctx context.Context, cfg config.Config, req
 
 	capabilityRuntimeReqs := make([]capabilityruntime.Requirement, 0, len(requirements))
 	for _, req := range requirements {
-		// Core capability runtimes (neuron:core:*) run in-process inside N.O.R.E. and
-		// the legacy bare core names too; there is nothing to resolve or
-		// install for them.
-		if core.IsCoreRuntimeType(core.CapabilityRuntimeType(req.Name)) {
+		runtimeType := core.CapabilityRuntimeType(req.Name)
+
+		// A reference to a built-in that does not exist is a mistake in the
+		// assembly. It is reported here, where the author can see it, rather
+		// than being sent to the package resolver.
+		if err := core.UnknownBuiltinError(runtimeType); err != nil {
+			return nil, err
+		}
+
+		// Built-in capability runtimes (neuron:core:*) run in-process inside
+		// N.O.R.E. and the legacy bare core names too; there is nothing to
+		// resolve or install for them.
+		if core.IsCoreRuntimeType(runtimeType) {
 			continue
 		}
 		var registries []string

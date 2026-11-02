@@ -57,6 +57,11 @@ build record.
 - Internal storage keys (including `capabilityRuntimes.storeDir`) and
   `providers.storeDir` are rejected from project configuration; use the
   documented environment overrides where a non-default location is required.
+- The internal storage provider now names a registered storage driver and
+  defaults to `sqlite`. The retired `file` value is not a driver and is
+  rejected. Select a driver with `--storage-driver` or
+  `NEURON_STORAGE_PROVIDER`; storage settings remain engine-owned and are not
+  accepted in project configuration files.
 - The old configuration file names `neuron.yaml` and `neuron.yml` are no longer
   read. Rename the file to `neuron.config.yaml` (or `neuron.config.json`).
 - The global configuration file may not declare Assembly identity or entries
@@ -117,6 +122,29 @@ params or result fields. Add `paramsSchema(...)` / `resultSchema(...)` plus
 `.result({...})` where callers need a contract. A result field must use a
 structured reference (`capability.result.x`, `assembly.params.x`, or a literal);
 arbitrary expression strings are not evaluated for result fields.
+
+### Built-in capability runtimes
+
+The SDK now exports every built-in capability runtime from `@neuronruntime/sdk/core`:
+
+```ts
+import { set, http, command, filesystem } from "@neuronruntime/sdk/core";
+
+const fetchUser = http("users.get");
+const listFiles = filesystem("files.list");
+```
+
+- `set` is the default runtime for a capability that declares none; most
+  assemblies never name it explicitly.
+- `http` now accepts `query`, `contentType`, `auth`, and `retry` params, and
+  produces `content_type` and `duration_ms` results — matching the runtime's
+  published contract.
+- `delay` is removed: it only waited, which is a sequencing concern rather than
+  a capability. Use an explicit dependency between the capabilities that must
+  run in order instead.
+- A built-in capability runtime runs in-process and is never resolved or
+  installed, so its manifest declaration carries no version and no registry.
+  The SDK no longer writes `version: "latest", registry: "local"` for a built-in.
 
 ## Expressions and structured references
 

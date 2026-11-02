@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
 )
 
 func TestResolveAPITokenPrefersExplicitFlag(t *testing.T) {
@@ -154,5 +155,43 @@ func TestListenProjectOccupiedPortFails(t *testing.T) {
 	if listener, err := listenProject("127.0.0.1", port); err == nil {
 		listener.Close()
 		t.Fatalf("binding occupied port %s succeeded, want an error", port)
+	}
+}
+
+func TestResolveBuiltinPolicyWithoutAnArgumentUsesTheCeilings(t *testing.T) {
+	policy, err := resolveBuiltinPolicy("")
+	if err != nil {
+		t.Fatalf("resolveBuiltinPolicy: %v", err)
+	}
+
+	ceilings := builtins.DefaultPolicy()
+	if policy.MaxCommandOutputBytes != ceilings.MaxCommandOutputBytes {
+		t.Errorf("maxCommandOutputBytes = %d, want %d", policy.MaxCommandOutputBytes, ceilings.MaxCommandOutputBytes)
+	}
+	if policy.DefaultTimeout != ceilings.DefaultTimeout {
+		t.Errorf("defaultTimeout = %q, want %q", policy.DefaultTimeout, ceilings.DefaultTimeout)
+	}
+}
+
+func TestResolveBuiltinPolicyAppliesAConfiguredPolicy(t *testing.T) {
+	policy, err := resolveBuiltinPolicy(`{"allowedHTTPHosts":["api.example.com"],"maxHTTPResponseBytes":1024}`)
+	if err != nil {
+		t.Fatalf("resolveBuiltinPolicy: %v", err)
+	}
+
+	if len(policy.AllowedHTTPHosts) != 1 || policy.AllowedHTTPHosts[0] != "api.example.com" {
+		t.Errorf("allowedHTTPHosts = %v, want [api.example.com]", policy.AllowedHTTPHosts)
+	}
+	if policy.MaxHTTPResponseBytes != 1024 {
+		t.Errorf("maxHTTPResponseBytes = %d, want 1024", policy.MaxHTTPResponseBytes)
+	}
+}
+
+func TestResolveBuiltinPolicyRefusesAnUnusablePolicy(t *testing.T) {
+	if _, err := resolveBuiltinPolicy("{not json"); err == nil {
+		t.Fatal("resolveBuiltinPolicy accepted a malformed policy")
+	}
+	if _, err := resolveBuiltinPolicy(`{"maxHTTPResponseBytes":1073741824}`); err == nil {
+		t.Fatal("resolveBuiltinPolicy accepted a limit above the compiled-in ceiling")
 	}
 }

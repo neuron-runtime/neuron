@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
+// MemoryStore is the in-process execution repository. It implements the same
+// boundary as ExecutionStore so scheduler and engine tests exercise the real
+// interface instead of a looser test-only shape.
 type MemoryStore struct {
 	mu         sync.RWMutex
 	executions map[core.ID]*Execution
@@ -17,24 +21,27 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{executions: make(map[core.ID]*Execution)}
 }
 
-func (s *MemoryStore) Add(execution *Execution) error {
+func (s *MemoryStore) Add(_ context.Context, execution *Execution) error {
 	if execution == nil {
 		return fmt.Errorf("execution is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.executions[execution.ID]; exists {
-		return fmt.Errorf("execution %s already exists", execution.ID)
+		return fmt.Errorf("%w: execution %s", storage.ErrAlreadyExists, execution.ID)
 	}
 	s.executions[execution.ID] = execution
 	return nil
 }
 
-func (s *MemoryStore) Get(executionID core.ID) (*Execution, bool) {
+func (s *MemoryStore) Get(_ context.Context, executionID core.ID) (*Execution, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	execution, exists := s.executions[executionID]
-	return execution, exists
+	if !exists {
+		return nil, fmt.Errorf("%w: execution %s", storage.ErrNotFound, executionID)
+	}
+	return execution, nil
 }
 
 // Save records the current state of an execution, inserting it when it is not
@@ -55,13 +62,14 @@ func (s *MemoryStore) Save(_ context.Context, execution *Execution) error {
 	return nil
 }
 
-func (s *MemoryStore) Delete(executionID core.ID) {
+func (s *MemoryStore) Delete(_ context.Context, executionID core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.executions, executionID)
+	return nil
 }
 
-func (s *MemoryStore) List() []*Execution {
+func (s *MemoryStore) List(_ context.Context) ([]*Execution, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -69,13 +77,12 @@ func (s *MemoryStore) List() []*Execution {
 	for _, exec := range s.executions {
 		list = append(list, exec)
 	}
-	return list
+	return list, nil
 }
 
-// ListByInstance returns every execution that belongs to instanceID. It is the
-// single implementation of the ownership filter, shared with the persistent
-// store so the two can never disagree about which executions an instance owns.
-func (s *MemoryStore) ListByInstance(instanceID core.ID) []*Execution {
+// ListByInstance returns every execution that belongs to instanceID. The
+// persistent store applies the same ownership predicate to its merged view.
+func (s *MemoryStore) ListByInstance(_ context.Context, instanceID core.ID) ([]*Execution, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -85,5 +92,5 @@ func (s *MemoryStore) ListByInstance(instanceID core.ID) []*Execution {
 			list = append(list, exec)
 		}
 	}
-	return list
+	return list, nil
 }

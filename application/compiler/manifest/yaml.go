@@ -149,8 +149,9 @@ func runtimeConfigFrom(spec project.CapabilitySpec) *core.RuntimeConfig {
 
 func bindingFrom(rc project.ResolvedBinding) Binding {
 	conn := Binding{
-		From: rc.Definition.From,
-		To:   rc.Definition.To,
+		From:       rc.Definition.From,
+		To:         rc.Definition.To,
+		JoinPolicy: rc.Definition.JoinPolicy,
 	}
 
 	for _, m := range rc.Definition.Mappings {

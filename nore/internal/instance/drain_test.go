@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 func newTestStore(t *testing.T) *sqlite.Store {
 	t.Helper()
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -24,31 +25,96 @@ func newTestStore(t *testing.T) *sqlite.Store {
 	return store
 }
 
-// delayAssembly is the assembly behind startDelayInstance: one capability whose
-// implementation blocks until its context dies.
-func delayAssembly() shared.Assembly {
+// blockingHelperMarker is the argument that tells a re-executed test binary to
+// act as the drain test's helper program.
+//
+// The built-in passes the program and its arguments to the operating system
+// separately, so the helper is selected by an argument rather than by an
+// environment variable or by a program that happens to be installed.
+const blockingHelperMarker = "neuron-drain-helper"
+
+// TestBlockingHelperProcess is the program the drain test's capability runs.
+//
+// It is not a test in its own right. It only blocks when the test binary has
+// been re-executed with blockingHelperMarker among its arguments, which is
+// how the drain test produces a capability that stays in flight until its
+// context dies without depending on a program being installed on the machine.
+func TestBlockingHelperProcess(t *testing.T) {
+	if !isBlockingHelperProcess() {
+		t.Skip("helper process: only meaningful when re-executed by the drain test")
+	}
+	for _, arg := range os.Args {
+		if arg == "complete" {
+			os.Exit(0)
+		}
+	}
+	time.Sleep(time.Minute)
+	os.Exit(0)
+}
+
+// isBlockingHelperProcess reports whether this test binary was re-executed to
+// act as the helper program.
+func isBlockingHelperProcess() bool {
+	for _, arg := range os.Args {
+		if arg == blockingHelperMarker {
+			return true
+		}
+	}
+	return false
+}
+
+// blockingAssembly is the assembly behind startBlockingInstance: one
+// capability whose implementation blocks until its context dies.
+func blockingAssembly() shared.Assembly {
 	return shared.Assembly{
-		Metadata: shared.Metadata{ID: "sys_delay", Name: "sys_delay", Version: "1.0.0"},
+		Metadata: shared.Metadata{ID: "sys_blocking", Name: "sys_blocking", Version: "1.0.0"},
 		Specification: shared.AssemblySpec{
 			Capabilities: []shared.Capability{{
-				Metadata: shared.Metadata{ID: "cap_wait", Name: "cap_wait", Version: "1.0.0"},
-				Type:     shared.CoreName("delay"),
-				Params:   []shared.Port{{Name: "duration", Type: shared.ValueString, Required: true}},
-				Results:  []shared.Port{{Name: "delayed_for", Type: shared.ValueString}},
+				Metadata: shared.Metadata{ID: "cap_blocking", Name: "cap_blocking", Version: "1.0.0"},
+				Type:     shared.CoreName("command"),
+				Params: []shared.Port{
+					{Name: "command", Type: shared.ValueString, Required: true},
+					{Name: "args", Type: shared.ValueArray},
+					{Name: "env", Type: shared.ValueObject},
+				},
+				Results: []shared.Port{
+					{Name: "exit_code", Type: shared.ValueNumber},
+					{Name: "stdout", Type: shared.ValueString},
+					{Name: "stderr", Type: shared.ValueString},
+					{Name: "success", Type: shared.ValueBool},
+				},
 			}},
 		},
 	}
 }
 
-// startDelayInstance brings up an instance whose single capability blocks on the
-// in-process delay runtime. A capability that blocks until its context dies is
-// what makes an execution genuinely in flight, so stopping the instance
-// exercises the window in which the scheduler can no longer report its outcome.
-func startDelayInstance(t *testing.T, store *sqlite.Store) *Instance {
+// blockingParams runs the test binary again as the blocking helper.
+func blockingParams() map[string]any {
+	return map[string]any{
+		"command": os.Args[0],
+		"args":    []any{"-test.run=^TestBlockingHelperProcess$", blockingHelperMarker},
+	}
+}
+
+// shortParams runs the test binary again as a helper that returns
+// immediately, which produces an execution that completes on its own.
+func shortParams() map[string]any {
+	return map[string]any{
+		"command": os.Args[0],
+		"args":    []any{"-test.run=^TestBlockingHelperProcess$", blockingHelperMarker, "complete"},
+	}
+}
+
+// startBlockingInstance brings up an instance whose single capability blocks on
+// the in-process command runtime. A capability that blocks until its context
+// dies is what makes an execution genuinely in flight, so stopping the
+// instance exercises the window in which the scheduler can no longer report
+// its outcome.
+func startBlockingInstance(t *testing.T, store *sqlite.Store) *Instance {
 	t.Helper()
-	assembly := delayAssembly()
-	i, err := New(context.Background(), "inst_delay", protocol.InstanceKey{
-		AssemblyID: "sys_delay", Version: "1.0.0",
+	assembly := blockingAssembly()
+	i, err := New(context.Background(), "inst_blocking", protocol.InstanceKey{
+		AssemblyID: "sys_blocking", Version: "1.0.0",
 	}, &assembly, 2, store)
 	if err != nil {
 		t.Fatalf("create instance: %v", err)
@@ -62,7 +128,7 @@ func startDelayInstance(t *testing.T, store *sqlite.Store) *Instance {
 
 func startBlockingExecution(t *testing.T, i *Instance) *execution.Execution {
 	t.Helper()
-	exec, err := i.Execute(context.Background(), map[string]any{"duration": "1m"})
+	exec, err := i.Execute(context.Background(), blockingParams())
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -85,7 +151,7 @@ func startBlockingExecution(t *testing.T, i *Instance) *execution.Execution {
 // the only thing that can give a still-running execution a terminal state.
 func TestStopDrivesInFlightExecutionsToTerminal(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.Stop(); err != nil {
@@ -115,7 +181,7 @@ func TestStopDrivesInFlightExecutionsToTerminal(t *testing.T) {
 // terminal.
 func TestStopIsIdempotentForExecutions(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	for attempt := 0; attempt < 3; attempt++ {
@@ -133,7 +199,7 @@ func TestStopIsIdempotentForExecutions(t *testing.T) {
 // the user-visible half of the same bug.
 func TestStopPersistsTerminalStateToStorage(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	if err := i.Stop(); err != nil {
@@ -141,9 +207,9 @@ func TestStopPersistsTerminalStateToStorage(t *testing.T) {
 	}
 
 	// Read through a fresh repository so the in-memory copy cannot answer.
-	reloaded, ok := execution.NewExecutionStore(store).Get(exec.ID)
-	if !ok {
-		t.Fatalf("execution %s not found in storage after the instance stopped", exec.ID)
+	reloaded, err := execution.NewExecutionStore(store).Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("execution %s not found in storage after the instance stopped: %v", exec.ID, err)
 	}
 	if got := reloaded.Status(); got != execution.StatusFailed {
 		t.Fatalf("persisted status = %s, want %s", got, execution.StatusFailed)
@@ -174,23 +240,26 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 	if err := exec.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start execution: %v", err)
 	}
-	if err := execution.NewExecutionStore(store).Add(exec); err != nil {
+	if err := execution.NewExecutionStore(store).Add(context.Background(), exec); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	restored := restoreInstance(
+	restored, err := restoreInstance(
 		context.Background(),
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
 	)
+	if err != nil {
+		t.Fatalf("restore instance: %v", err)
+	}
 	if restored.Status() != StatusFailed {
 		t.Fatalf("restored instance status = %s, want %s", restored.Status(), StatusFailed)
 	}
 
-	reloaded, ok := execution.NewExecutionStore(store).Get(exec.ID)
-	if !ok {
-		t.Fatalf("execution %s not found after restore", exec.ID)
+	reloaded, err := execution.NewExecutionStore(store).Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("execution %s not found after restore: %v", exec.ID, err)
 	}
 	if got := reloaded.Status(); got != execution.StatusFailed {
 		t.Fatalf("restored execution status = %s, want %s", got, execution.StatusFailed)
@@ -216,7 +285,7 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 // correct Stop has not swept yet, so the execution is still unfinished.
 func TestStopSweepsOnlyAfterRuntimeGoroutinesFinish(t *testing.T) {
 	store := newTestStore(t)
-	i := startDelayInstance(t, store)
+	i := startBlockingInstance(t, store)
 	exec := startBlockingExecution(t, i)
 
 	sweptDuringDrain := make(chan bool, 1)
@@ -278,7 +347,7 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 	if err := detached.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start detached task: %v", err)
 	}
-	if err := executions.Add(detached); err != nil {
+	if err := executions.Add(context.Background(), detached); err != nil {
 		t.Fatalf("add detached task: %v", err)
 	}
 
@@ -289,11 +358,11 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 	if err := ordinary.Start(map[string]any{}, 1); err != nil {
 		t.Fatalf("start execution: %v", err)
 	}
-	if err := executions.Add(ordinary); err != nil {
+	if err := executions.Add(context.Background(), ordinary); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	sweepAbandonedExecutions(executions, instanceID, stoppedBeforeFinished(string(instanceID)))
+	sweepAbandonedExecutions(context.Background(), executions, instanceID, stoppedBeforeFinished(string(instanceID)))
 
 	if !ordinary.IsTerminal() || ordinary.Status() != execution.StatusFailed {
 		t.Errorf("ordinary execution status = %s, want %s: work the instance owns must still be given a terminal state", ordinary.Status(), execution.StatusFailed)
@@ -302,9 +371,9 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 		t.Errorf("the detached task was driven to %s; the sweep must leave it for the restore path, which can report accurately", detached.Status())
 	}
 
-	reloaded, ok := executions.Get(detached.ID)
-	if !ok {
-		t.Fatalf("detached task %s not found", detached.ID)
+	reloaded, err := executions.Get(context.Background(), detached.ID)
+	if err != nil {
+		t.Fatalf("detached task %s not found: %v", detached.ID, err)
 	}
 	if reloaded.IsTerminal() {
 		t.Error("the detached task was persisted as terminal, so its truthful unfinished state would be lost on restart")
@@ -312,17 +381,20 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 
 	// A restart is what finally gives it a terminal state, and the reason it
 	// records is the accurate one rather than "the instance stopped".
-	restored := restoreInstance(
+	restored, err := restoreInstance(
 		context.Background(),
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
 	)
+	if err != nil {
+		t.Fatalf("restore instance: %v", err)
+	}
 	t.Cleanup(func() { _ = restored.Stop() })
 
-	recovered, ok := execution.NewExecutionStore(store).Get(detached.ID)
-	if !ok {
-		t.Fatalf("detached task %s not found after restore", detached.ID)
+	recovered, err := execution.NewExecutionStore(store).Get(context.Background(), detached.ID)
+	if err != nil {
+		t.Fatalf("detached task %s not found after restore: %v", detached.ID, err)
 	}
 	if !recovered.IsTerminal() {
 		t.Fatalf("restored detached task status = %s, want a terminal state: nothing can resume it", recovered.Status())

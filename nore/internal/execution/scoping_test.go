@@ -12,7 +12,8 @@ import (
 
 func openTestStore(t *testing.T) storage.Store {
 	t.Helper()
-	store, err := sqlite.New(storage.Config{DataDir: t.TempDir()})
+	ctx := context.Background()
+	store, err := sqlite.New(ctx, storage.Config{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -47,16 +48,22 @@ func TestListByInstanceScopesExecutions(t *testing.T) {
 	b1 := newTestExecution(t, bp, "inst_b")
 
 	for _, exec := range []*Execution{a1, a2, b1} {
-		if err := s.Add(exec); err != nil {
+		if err := s.Add(context.Background(), exec); err != nil {
 			t.Fatalf("add execution: %v", err)
 		}
 	}
 
-	gotA := s.ListByInstance("inst_a")
+	gotA, err := s.ListByInstance(context.Background(), "inst_a")
+	if err != nil {
+		t.Fatalf("list inst_a: %v", err)
+	}
 	if len(gotA) != 2 {
 		t.Fatalf("ListByInstance(inst_a) = %d executions, want 2", len(gotA))
 	}
-	gotB := s.ListByInstance("inst_b")
+	gotB, err := s.ListByInstance(context.Background(), "inst_b")
+	if err != nil {
+		t.Fatalf("list inst_b: %v", err)
+	}
 	if len(gotB) != 1 {
 		t.Fatalf("ListByInstance(inst_b) = %d executions, want 1", len(gotB))
 	}
@@ -68,7 +75,7 @@ func TestExecutionInstanceIDRoundTripsSnapshot(t *testing.T) {
 	bp := &types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}
 
 	exec := newTestExecution(t, bp, "inst_x")
-	if err := s.Add(exec); err != nil {
+	if err := s.Add(context.Background(), exec); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
 	if err := exec.Start(nil, 1); err != nil {
@@ -81,9 +88,9 @@ func TestExecutionInstanceIDRoundTripsSnapshot(t *testing.T) {
 		t.Fatalf("save execution: %v", err)
 	}
 
-	loaded, ok := s.Get(exec.ID)
-	if !ok {
-		t.Fatalf("get execution: not found")
+	loaded, err := s.Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
 	}
 	if loaded.InstanceID != "inst_x" {
 		t.Errorf("loaded InstanceID = %q, want inst_x", loaded.InstanceID)

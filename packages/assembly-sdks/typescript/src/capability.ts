@@ -89,6 +89,30 @@ export interface RuntimeDeclaration {
   runtimeConfig?: RuntimeConfig;
 }
 
+/**
+ * The core namespace holds the capability runtimes N.O.R.E. provides
+ * in-process. They are never resolved and never installed, so they have no
+ * version and no registry: a declaration that names one carries the name
+ * alone.
+ */
+const CORE_RUNTIME_NAMESPACE = "neuron:core:";
+
+/**
+ * The bare names of the built-in capability runtimes. They are the legacy
+ * form of the core namespace and the runtime still accepts them.
+ */
+const CORE_RUNTIME_NAMES = new Set(["set", "http", "command", "filesystem"]);
+
+/**
+ * Reports whether a runtime name refers to a built-in capability runtime.
+ *
+ * A built-in runs inside the runtime process. It is not a package, so it is
+ * never resolved against a registry and it has no version to resolve.
+ */
+function isCoreRuntime(name: string): boolean {
+  return name.startsWith(CORE_RUNTIME_NAMESPACE) || CORE_RUNTIME_NAMES.has(name);
+}
+
 export type Condition = {
   when: Expression<boolean>;
   message?: string;
@@ -265,7 +289,7 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
   constructor(ref: string, state?: Partial<CapabilityState>) {
     this.ref = ref;
     this._state = {
-      runtime: state?.runtime ?? { name: "neuron:core:set", version: "latest", registry: "local" },
+      runtime: state?.runtime ?? { name: "neuron:core:set" },
       paramPorts: state?.paramPorts ?? [],
       resultPorts: state?.resultPorts ?? [],
       paramRules: state?.paramRules ?? {},
@@ -414,9 +438,14 @@ function cloneRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
 function resolveRuntimeDeclaration(declaration: RuntimeDeclaration): CapabilityRuntimeManifest {
   const runtime: CapabilityRuntimeManifest = {
     name: declaration.name,
-    version: declaration.version ?? "latest",
-    registry: declaration.registry ?? "local",
   };
+  // A built-in capability runtime runs in-process. It is never resolved and
+  // never installed, so it carries no version and no registry: writing them
+  // would state that a package that does not exist has a version.
+  if (!isCoreRuntime(declaration.name)) {
+    runtime.version = declaration.version ?? "latest";
+    runtime.registry = declaration.registry ?? "local";
+  }
   if (declaration.runtimeConfig !== undefined) {
     runtime.runtimeConfig = cloneRuntimeConfig(declaration.runtimeConfig);
   }
@@ -431,7 +460,7 @@ export function Capability<TParams extends object = object, TResult extends obje
   name: string
 ): CapabilityDefinition<TParams, TResult> {
   return new CapabilityDefinition<TParams, TResult>(name, {
-    runtime: { name: "neuron:core:set", version: "latest", registry: "local" },
+    runtime: { name: "neuron:core:set" },
   });
 }
 
