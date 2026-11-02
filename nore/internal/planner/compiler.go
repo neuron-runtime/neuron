@@ -104,9 +104,6 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		joinPolicies[binding.To.CapabilityID] = joinPolicy
 
 		incoming[binding.To.CapabilityID]++
-		if incoming[binding.To.CapabilityID] > 1 {
-			return nil, fmt.Errorf("capability %s has multiple incoming bindings; use an aggregation capability", binding.To.CapabilityID)
-		}
 		predecessors[binding.To.CapabilityID] = append(predecessors[binding.To.CapabilityID], types.ExecutionPredecessor{
 			BindingID:    binding.Metadata.ID,
 			CapabilityID: binding.From.CapabilityID,
