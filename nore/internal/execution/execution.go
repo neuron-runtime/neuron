@@ -110,7 +110,7 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
 		status: StatusPending, initialParams: make(map[string]any),
 		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
-		done: make(chan struct{}),
+		done:      make(chan struct{}),
 		joinState: make(map[shared.ID]*joinStateInfo),
 	}, nil
 }

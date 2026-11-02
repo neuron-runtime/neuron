@@ -142,12 +142,12 @@ func (b *ExecutionBlueprint) Hash() (string, error) {
 }
 
 type normalizedBlueprintNode struct {
-	CapabilityID string                `json:"capabilityID"`
-	Type         string               `json:"type"`
-	Params       []shared.Port          `json:"params,omitempty"`
-	Results      []shared.Port          `json:"results,omitempty"`
+	CapabilityID string                  `json:"capabilityID"`
+	Type         string                  `json:"type"`
+	Params       []shared.Port           `json:"params,omitempty"`
+	Results      []shared.Port           `json:"results,omitempty"`
 	Predecessors []normalizedPredecessor `json:"predecessors,omitempty"`
-	JoinPolicy   shared.JoinPolicy      `json:"joinPolicy"`
+	JoinPolicy   shared.JoinPolicy       `json:"joinPolicy"`
 }
 
 type normalizedPredecessor struct {

@@ -307,7 +307,7 @@ func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 	mkey, err := storage.Key("instances", inst.ID)
 	if err != nil {
 		return err
-		}
+	}
 	keys = append(keys, mkey)
 
 	if err := m.store.WithTx(ctx, func(tx storage.Tx) error {
