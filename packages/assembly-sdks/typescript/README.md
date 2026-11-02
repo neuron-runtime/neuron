@@ -366,7 +366,23 @@ Assembly()
   ]);
 ```
 
-A capability that reads from **multiple** capabilities is fan-in and is rejected at `toManifest()` time — execution does not support it. Route such inputs through an aggregation capability instead.
+A capability that reads from **multiple** capabilities is **fan-in** and is now supported:
+each source gets its own binding with only that source's mappings; the execution
+engine merges inputs from all predecessors before dispatch. Route such inputs
+directly — no aggregation capability is needed.
+
+```ts
+const target = Capability("target").paramsSchema({ x: string(), y: string() });
+const sys = Assembly().run([
+  a.withParams({}),
+  b.withParams({}),
+  target.withParams({ x: a.result.x, y: b.result.y }),
+]);
+// toManifest() succeeds; manifest carries two bindings from a and b respectively.
+```
+
+Fan-out still works as before — multiple capabilities reading from the same source
+run in parallel.
 
 ---
 

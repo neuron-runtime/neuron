@@ -307,24 +307,20 @@ function collectBindings(
     const sourceRefs = uniqueSources.length > 0 ? uniqueSources : node.anchor ? [node.anchor] : [];
     if (sourceRefs.length === 0) continue;
 
-    if (sourceRefs.length > 1) {
-      throw new Error(
-        `Capability "${node.capabilityRef}" reads inputs from multiple sources (${sourceRefs.join(", ")}). ` +
-        `Execution does not support fan-in; route the inputs through an aggregation capability instead.`
-      );
+    // Emit one binding per source. For fan-in (multiple sources), each source gets its
+    // own binding with only that source's mappings; the execution engine merges inputs.
+    for (const from of sourceRefs) {
+      const key = `${from}->${node.capabilityRef}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const mappings = bindingMappings(from, node, capabilities);
+      const validations = node.incomingConditions.map((c) => ({
+        expression: c.expression,
+        message: c.message ?? "",
+      }));
+      bindings.push({ from, to: node.capabilityRef, mappings, validations });
     }
-
-    const from = sourceRefs[0]!;
-    const key = `${from}->${node.capabilityRef}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const mappings = bindingMappings(from, node, capabilities);
-    const validations = node.incomingConditions.map((c) => ({
-      expression: c.expression,
-      message: c.message ?? "",
-    }));
-    bindings.push({ from, to: node.capabilityRef, mappings, validations });
   }
 
   return bindings;
@@ -335,10 +331,16 @@ function bindingMappings(
   target: CapabilityTarget,
   capabilities: Map<string, CapabilityDefinition<object, object>>
 ): BindingManifest["mappings"] {
-  const explicit = Object.entries(target.bindings).map(([name, source]) => ({
-    target: name,
-    source: qualifySource(source, fromRef, name, target.capabilityRef),
-  }));
+  const explicit = Object.entries(target.bindings).map(([name, source]) => {
+    const mapped = qualifySource(source, fromRef, name, target.capabilityRef);
+    // For capabilityResult/capabilityParams, only include mappings that reference
+    // this binding's from capability. This enables fan-in: each source emits a
+    // binding with only its own mappings. Other kinds (e.g. assemblyParams) are
+    // always included.
+    const isCapRef = mapped.kind === "capabilityResult" || mapped.kind === "capabilityParams";
+    if (isCapRef && mapped.capability !== fromRef) return null;
+    return { target: name, source: mapped };
+  }).filter((m): m is NonNullable<typeof m> => m !== null);
   if (explicit.length > 0) return explicit;
 
   const from = capabilities.get(fromRef)?.toManifest();
