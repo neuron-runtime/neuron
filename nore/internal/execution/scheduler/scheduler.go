@@ -279,6 +279,20 @@ func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Ev
 		if !exists {
 			return fmt.Errorf("target capability %s is missing", transition.TargetCapabilityID)
 		}
+		targetNode := execution.Blueprint.Nodes[transition.TargetCapabilityID]
+		// For fan-in (JoinPolicyAll with multiple predecessors), check that all
+		// predecessors have completed before scheduling. RecordCompletedBinding
+		// is idempotent and tracks completion of each predecessor binding.
+		if len(targetNode.Predecessors) > 1 {
+			allCompleted := execution.RecordCompletedBinding(transition.TargetCapabilityID, transition.BindingID)
+			if !allCompleted {
+				continue
+			}
+		} else {
+			// For single-predecessor targets, record the binding completion so
+			// the join state is updated, but schedule immediately (original behavior).
+			execution.RecordCompletedBinding(transition.TargetCapabilityID, transition.BindingID)
+		}
 		environment := buildTransitionEnvironment(execution, node, output)
 		if err := validateTransition(ctx, environment, transition); err != nil {
 			return err
