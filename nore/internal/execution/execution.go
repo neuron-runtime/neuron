@@ -280,7 +280,9 @@ func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, er
 	if e.inFlight <= 0 {
 		return e.inFlight, errors.New("execution in-flight counter is invalid")
 	}
-	e.inFlight += nextCapabilityCount - 1
+	if nextCapabilityCount > 0 {
+		e.inFlight += nextCapabilityCount - 1
+	}
 	return e.inFlight, nil
 }
 

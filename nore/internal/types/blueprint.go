@@ -1,6 +1,11 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -35,7 +40,7 @@ type ExecutionBlueprint struct {
 }
 
 // ExecutionResult is the compiled Assembly result contract and field mappings.
-// It mirrors core.AssemblyResult but is defined here to avoid circular imports
+// It mirrors shared.AssemblyResult but is defined here to avoid circular imports
 // and to be the planner's canonical representation.
 type ExecutionResult struct {
 	Schema []shared.Port
@@ -100,4 +105,52 @@ type ExecutionTransition struct {
 
 	Mappings    []CompiledMapping
 	Validations []CompiledValidation
+}
+
+// Hash returns a deterministic content hash for this ExecutionBlueprint.
+// The hash includes each node's capability identity, predecessors (incoming
+// edges), and join policy. Two blueprints with the same hash have identical
+// structure including join policies and incoming edges. This enables graph
+// identity comparison for durable execution, fan-in verification, and recovery.
+func (b *ExecutionBlueprint) Hash() (string, error) {
+	nodes := make([]normalizedBlueprintNode, 0, len(b.Nodes))
+	for id, node := range b.Nodes {
+		predecessors := make([]normalizedPredecessor, 0, len(node.Predecessors))
+		for _, pred := range node.Predecessors {
+			predecessors = append(predecessors, normalizedPredecessor{
+				BindingID:    pred.BindingID,
+				CapabilityID: pred.CapabilityID,
+			})
+		}
+		cap := node.Capability
+		nodes = append(nodes, normalizedBlueprintNode{
+			CapabilityID: string(id),
+			Type:         string(cap.Type),
+			Params:       append([]shared.Port(nil), cap.Params...),
+			Results:      append([]shared.Port(nil), cap.Results...),
+			Predecessors: predecessors,
+			JoinPolicy:   node.JoinPolicy,
+		})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].CapabilityID < nodes[j].CapabilityID })
+	data, err := json.Marshal(nodes)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+type normalizedBlueprintNode struct {
+	CapabilityID string                `json:"capabilityID"`
+	Type         string               `json:"type"`
+	Params       []shared.Port          `json:"params,omitempty"`
+	Results      []shared.Port          `json:"results,omitempty"`
+	Predecessors []normalizedPredecessor `json:"predecessors,omitempty"`
+	JoinPolicy   shared.JoinPolicy      `json:"joinPolicy"`
+}
+
+type normalizedPredecessor struct {
+	BindingID    shared.ID `json:"bindingID"`
+	CapabilityID shared.ID `json:"capabilityID"`
 }

@@ -302,19 +302,41 @@ function collectBindings(
   const bindings: BindingManifest[] = [];
   const seen = new Set<string>();
 
+  // R3-10: Track target param paths per capability to reject duplicate
+  // target field mappings. Two incoming bindings must not write to the same
+  // target param field path; if they do, compilation fails with a clear error.
+  const assignedPaths: Map<string, Set<string>> = new Map();
+
   for (const node of nodes) {
     const uniqueSources = Array.from(new Set(node.sources.filter(Boolean)));
     const sourceRefs = uniqueSources.length > 0 ? uniqueSources : node.anchor ? [node.anchor] : [];
     if (sourceRefs.length === 0) continue;
 
-    // Emit one binding per source. For fan-in (multiple sources), each source gets its
-    // own binding with only that source's mappings; the execution engine merges inputs.
+    // R3-10: Check for duplicate target field mappings across bindings to the
+    // same capability. Each source emits one binding; if two sources map to the
+    // same target path, compilation fails.
     for (const from of sourceRefs) {
       const key = `${from}->${node.capabilityRef}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
+      // R3-10: Validate that this binding's target paths do not conflict with
+      // previously assigned paths for the same target capability.
+      const targetCap = node.capabilityRef;
+      const existingPaths = assignedPaths.get(targetCap) || new Set();
       const mappings = bindingMappings(from, node, capabilities);
+      for (const mapping of mappings) {
+        const targetPath = mapping.target;
+        if (existingPaths.has(targetPath)) {
+          throw new Error(
+            `capability ${targetCap} has duplicate target path ${targetPath} ` +
+            `from bindings ${from} and ${Array.from(assignedPaths.keys()).find(k => assignedPaths.get(k)!.has(targetPath)) || 'unknown'}`,
+          );
+        }
+        existingPaths.add(targetPath);
+      }
+      assignedPaths.set(targetCap, existingPaths);
+
       const validations = node.incomingConditions.map((c) => ({
         expression: c.expression,
         message: c.message ?? "",
