@@ -6,6 +6,7 @@ import (
 
 	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/shared/types/core"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 type ExecutionSnapshot struct {
@@ -19,6 +20,7 @@ type ExecutionSnapshot struct {
 	Params            map[core.ID]map[string]any           `json:"params,omitempty"`
 	Results           map[core.ID]map[string]any           `json:"results,omitempty"`
 	States            map[core.ID]CapabilityExecutionState `json:"states,omitempty"`
+	JoinState         map[shared.ID]*JoinState             `json:"join_state,omitempty"`
 	InFlight          int                                  `json:"in_flight"`
 	StartedAt         *time.Time                           `json:"started_at,omitempty"`
 	CompletedAt       *time.Time                           `json:"completed_at,omitempty"`
@@ -44,6 +46,11 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 		states[id] = state
 	}
 
+	joinState := make(map[shared.ID]*JoinState, len(e.joinState))
+	for id, ji := range e.joinState {
+		joinState[id] = ji.snapshot()
+	}
+
 	return &ExecutionSnapshot{
 		ID:                e.ID,
 		CorrelationID:     e.CorrelationID,
@@ -55,6 +62,7 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 		Params:            cloneParamsMap(e.params),
 		Results:           cloneParamsMap(e.results),
 		States:            states,
+		JoinState:         joinState,
 		InFlight:          e.inFlight,
 		StartedAt:         e.startedAt,
 		CompletedAt:       e.completedAt,
@@ -78,6 +86,14 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 
 	for id, state := range snapshot.States {
 		e.states[id] = state
+	}
+
+	// Rebuild join state from snapshot if present.
+	if snapshot.JoinState != nil {
+		e.joinState = make(map[shared.ID]*joinStateInfo, len(snapshot.JoinState))
+		for id, js := range snapshot.JoinState {
+			e.joinState[id] = joinStateFromSnapshot(js)
+		}
 	}
 }
 
@@ -106,6 +122,13 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		completedAt:       snap.CompletedAt,
 		executionError:    snap.Error,
 		done:              make(chan struct{}),
+	}
+	// Rebuild join state from snapshot if present.
+	if snap.JoinState != nil {
+		e.joinState = make(map[shared.ID]*joinStateInfo, len(snap.JoinState))
+		for id, js := range snap.JoinState {
+			e.joinState[id] = joinStateFromSnapshot(js)
+		}
 	}
 	// Restored executions are never resumed, but a terminal snapshot must not
 	// block a Wait caller forever, so signal completion eagerly.

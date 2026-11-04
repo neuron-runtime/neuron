@@ -103,15 +103,23 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		correlationID = shared.NewID("corr_")
 	}
 	states := make(map[shared.ID]CapabilityExecutionState, len(blueprint.Nodes))
-	for capabilityID := range blueprint.Nodes {
+	joinState := make(map[shared.ID]*joinStateInfo)
+	for capabilityID, node := range blueprint.Nodes {
 		states[capabilityID] = CapabilityExecutionState{Status: CapabilityPending}
+		// Every capability with an incoming edge is a join target: it becomes
+		// ready only once its predecessor bindings are satisfied. The state must
+		// exist up front, because contributions arrive through the scheduler and
+		// nothing else may create it lazily under a different lock.
+		if len(node.Predecessors) > 0 {
+			joinState[capabilityID] = newJoinState()
+		}
 	}
 	return &Execution{
 		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
 		status: StatusPending, initialParams: make(map[string]any),
 		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
 		done:      make(chan struct{}),
-		joinState: make(map[shared.ID]*joinStateInfo),
+		joinState: joinState,
 	}, nil
 }
 
@@ -341,6 +349,7 @@ func (e *Execution) MarkCancelled(reason error) bool {
 	e.status = StatusCancelled
 	e.completedAt = &now
 	e.inFlight = 0
+	e.joinState = make(map[shared.ID]*joinStateInfo)
 	for capabilityID, state := range e.states {
 		// Anything already terminal -- completed, failed, or handed off to a
 		// detached task -- reported its own outcome and keeps it. Cancelling must
@@ -484,156 +493,141 @@ func pathValue(payload any, path []string, source *shared.ValueRef) (any, error)
 	return nil, fmt.Errorf("%s reference path %q: unexpected end", source.Kind, strings.Join(path, "."))
 }
 
-// joinStateInfo holds the state for a join target capability.
+// joinStateInfo holds the completion and contribution state for a join target
+// capability. It is created for every capability with at least one incoming edge.
 type joinStateInfo struct {
 	CompletedBindings map[shared.ID]bool
 	PredecessorInputs map[shared.ID]map[string]any
 	Dispatched        bool
 }
 
-// RecordCompletedBinding marks a binding as completed for a join target.
-// It is safe to call even if the binding was already completed; it is idempotent.
-// Returns true if the join target is now ready (all predecessors completed).
-func (e *Execution) RecordCompletedBinding(capabilityID shared.ID, bindingID shared.ID) bool {
+func newJoinState() *joinStateInfo {
+	return &joinStateInfo{
+		CompletedBindings: make(map[shared.ID]bool),
+		PredecessorInputs: make(map[shared.ID]map[string]any),
+	}
+}
+
+// RecordJoinContribution records one predecessor binding's contribution to a
+// join target and reports whether this call completed the join.
+//
+// It is atomic and idempotent: only the call that satisfies the final required
+// predecessor returns ready=true, so a target can never be dispatched twice even
+// if completion events arrive concurrently or more than once. A call made after
+// the target was dispatched returns false and contributes nothing further.
+//
+// partialInput is the target params produced by this predecessor's binding
+// mappings. Contributions are merged in blueprint predecessor order (binding ID,
+// then capability ID), which makes the merged input deterministic regardless of
+// completion order; target paths are disjoint by construction (R3-4).
+func (e *Execution) RecordJoinContribution(capabilityID shared.ID, bindingID shared.ID, partialInput map[string]any) (bool, map[string]any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	node, exists := e.Blueprint.Nodes[capabilityID]
+	if !exists {
+		return false, nil, fmt.Errorf("capability %s is not in the blueprint", capabilityID)
+	}
 	ji, exists := e.joinState[capabilityID]
 	if !exists {
-		return false
+		return false, nil, fmt.Errorf("capability %s is not a join target", capabilityID)
 	}
-
+	if ji.Dispatched {
+		return false, nil, nil
+	}
 	if ji.CompletedBindings == nil {
 		ji.CompletedBindings = make(map[shared.ID]bool)
 	}
-	ji.CompletedBindings[bindingID] = true
-
-	node := e.Blueprint.Nodes[capabilityID]
-	required := len(node.Predecessors)
-
-	if required == 0 {
-		ji.Dispatched = true
-		return true
-	}
-
-	allCompleted := true
-	for i := 0; i < required; i++ {
-		found := false
-		for completedID := range ji.CompletedBindings {
-			if completedID == node.Predecessors[i].BindingID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			allCompleted = false
-			break
-		}
-	}
-
-	if allCompleted && !ji.Dispatched {
-		ji.Dispatched = true
-	}
-
-	return allCompleted
-}
-
-// RecordPredecessorInput stores the output of a completed predecessor capability
-// as an input for the join target.
-func (e *Execution) RecordPredecessorInput(capabilityID shared.ID, bindingID shared.ID, input map[string]any) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return
-	}
-
 	if ji.PredecessorInputs == nil {
 		ji.PredecessorInputs = make(map[shared.ID]map[string]any)
 	}
-	ji.PredecessorInputs[bindingID] = input
-}
 
-// ReadyForJoin checks if a join target capability is ready to execute.
-func (e *Execution) ReadyForJoin(capabilityID shared.ID) bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	ji.CompletedBindings[bindingID] = true
+	ji.PredecessorInputs[bindingID] = data.CanonicalMap(partialInput)
 
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return false
-	}
-
-	node := e.Blueprint.Nodes[capabilityID]
-	if len(node.Predecessors) == 0 {
-		return true
-	}
-
-	required := len(node.Predecessors)
-	completed := 0
-	for _, pred := range node.Predecessors {
-		if ji.CompletedBindings != nil {
-			for completedID := range ji.CompletedBindings {
-				if completedID == pred.BindingID {
-					completed++
-					break
-				}
-			}
+	// Readiness is decided from the blueprint's predecessor set, not from the
+	// number of contributions received: a stray or unknown binding can never
+	// satisfy a join.
+	for _, predecessor := range node.Predecessors {
+		if !ji.CompletedBindings[predecessor.BindingID] {
+			return false, nil, nil
 		}
-	}
-
-	return completed >= required
-}
-
-// MergeCompletedInputs gathers all inputs from completed predecessors.
-func (e *Execution) MergeCompletedInputs(capabilityID shared.ID) map[string]any {
-	e.mu.RLock()
-	ji, exists := e.joinState[capabilityID]
-	e.mu.RUnlock()
-	if !exists {
-		return nil
-	}
-
-	if ji.PredecessorInputs == nil {
-		return map[string]any{}
-	}
-
-	merged := make(map[string]any, len(ji.PredecessorInputs))
-	for _, input := range ji.PredecessorInputs {
-		for k, v := range input {
-			merged[k] = v
-		}
-	}
-	return merged
-}
-
-// DispatchedOnce checks if work has already been dispatched for a join target.
-func (e *Execution) DispatchedOnce(capabilityID shared.ID) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return false
-	}
-
-	if ji.Dispatched {
-		return true
 	}
 
 	ji.Dispatched = true
-	return true
+	merged := make(map[string]any)
+	for _, predecessor := range node.Predecessors {
+		mergeInto(merged, ji.PredecessorInputs[predecessor.BindingID])
+	}
+	return true, merged, nil
 }
 
-// mergeWithTransitionInput combines merged predecessor inputs with transition mappings.
-func mergeWithTransitionInput(merged map[string]any, transitionInput map[string]any, transition types.ExecutionTransition) map[string]any {
-	result := map[string]any{}
-	for k, v := range merged {
-		result[k] = v
+// JoinState returns a deep copy of the target's join state for serialization.
+// It returns nil for a capability that is not a join target.
+func (e *Execution) JoinState(capabilityID shared.ID) *JoinState {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return nil
 	}
-	for k, v := range transitionInput {
-		result[k] = v
+	return ji.snapshot()
+}
+
+// joinStateSnapshot returns a serializable copy. The caller must hold e.mu.
+func (ji *joinStateInfo) snapshot() *JoinState {
+	completed := make([]shared.ID, 0, len(ji.CompletedBindings))
+	for bindingID, done := range ji.CompletedBindings {
+		if done {
+			completed = append(completed, bindingID)
+		}
 	}
-	return result
+	inputs := make(map[shared.ID]map[string]any, len(ji.PredecessorInputs))
+	for bindingID, input := range ji.PredecessorInputs {
+		inputs[bindingID] = data.CanonicalMap(input)
+	}
+	return &JoinState{
+		CompletedBindings: completed,
+		PredecessorInputs: inputs,
+		Dispatched:        ji.Dispatched,
+	}
+}
+
+func joinStateFromSnapshot(snapshot *JoinState) *joinStateInfo {
+	ji := newJoinState()
+	if snapshot == nil {
+		return ji
+	}
+	for _, bindingID := range snapshot.CompletedBindings {
+		ji.CompletedBindings[bindingID] = true
+	}
+	for bindingID, input := range snapshot.PredecessorInputs {
+		ji.PredecessorInputs[bindingID] = data.CanonicalMap(input)
+	}
+	ji.Dispatched = snapshot.Dispatched
+	return ji
+}
+
+// mergeInto deep-merges src into dst. Object values are merged recursively so
+// two bindings targeting sibling paths ("profile.name" and "profile.age") both
+// survive. Leaf paths are disjoint by construction, so leaf overwrites only
+// occur when a caller supplies duplicate paths, which the compiler rejects.
+func mergeInto(dst, src map[string]any) {
+	for key, value := range src {
+		if existing, ok := dst[key].(map[string]any); ok {
+			if incoming, ok := value.(map[string]any); ok {
+				mergeInto(existing, incoming)
+				continue
+			}
+		}
+		dst[key] = value
+	}
+}
+
+// JoinState is a serializable snapshot of a join target's completion state.
+// It is returned by the Execution.JoinState method.
+type JoinState struct {
+	CompletedBindings []shared.ID
+	PredecessorInputs map[shared.ID]map[string]any
+	Dispatched        bool
 }
