@@ -6,7 +6,9 @@ package storagetest
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 )
@@ -155,6 +157,79 @@ func Run(t *testing.T, open func(t *testing.T) storage.Store) {
 		}
 		if got, err := store.Get(ctx, key); err != nil || string(got) != "committed" {
 			t.Fatalf("outer transaction write = %q, %v; want committed", got, err)
+		}
+	})
+
+	t.Run("concurrent transactions serialize", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "tx", "concurrent")
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for _, value := range []string{"first", "second"} {
+			value := value
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs <- store.WithTx(ctx, func(tx storage.Tx) error {
+					return tx.Put(ctx, key, []byte(value))
+				})
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent WithTx = %v, want success", err)
+			}
+		}
+		if _, err := store.Get(ctx, key); err != nil {
+			t.Fatalf("get after concurrent transactions: %v", err)
+		}
+	})
+
+	t.Run("concurrent plain operations wait for transaction", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "tx", "plain-concurrent")
+
+		txStarted := make(chan struct{})
+		release := make(chan struct{})
+		txErr := make(chan error, 1)
+		go func() {
+			txErr <- store.WithTx(ctx, func(tx storage.Tx) error {
+				close(txStarted)
+				<-release
+				return tx.Put(ctx, key, []byte("transaction"))
+			})
+		}()
+		<-txStarted
+
+		plainErr := make(chan error, 1)
+		go func() {
+			plainErr <- store.Put(ctx, key, []byte("plain"))
+		}()
+
+		select {
+		case err := <-plainErr:
+			t.Fatalf("plain Put returned while the transaction was active: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		close(release)
+		if err := <-txErr; err != nil {
+			t.Fatalf("transaction: %v", err)
+		}
+		if err := <-plainErr; err != nil {
+			t.Fatalf("concurrent plain Put: %v", err)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "plain" {
+			t.Fatalf("get after concurrent Put = %q, %v; want plain", got, err)
 		}
 	})
 

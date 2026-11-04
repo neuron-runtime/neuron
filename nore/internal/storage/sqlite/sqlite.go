@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
@@ -21,16 +20,15 @@ func init() {
 	})
 }
 
-// Store is the SQLite storage backend. It serializes access with one connection
-// so that a transaction can safely own the connection for its whole callback.
-// txActive is checked atomically before taking mu, which lets an operation
-// attempted during a transaction report ErrTransactionActive instead of blocking
-// until the transaction commits.
+// Store is the SQLite storage backend. A transaction owns the store for its
+// whole callback through the gate, so the single database connection cannot be
+// used by a plain operation while the transaction is active. Concurrent callers
+// wait for the transaction; re-entrant calls from inside the callback receive
+// the explicit transaction errors instead of deadlocking.
 type Store struct {
-	mu       sync.Mutex
-	db       *sql.DB
-	txActive atomic.Bool
-	closed   atomic.Bool
+	gate   storage.TransactionGate
+	db     *sql.DB
+	closed atomic.Bool
 }
 
 // New opens the SQLite database, initializes its schema, and verifies that it
@@ -86,14 +84,10 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
 	}
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	return get(ctx, s.db, key)
 }
 
@@ -101,14 +95,10 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	return put(ctx, s.db, key, data)
 }
 
@@ -116,14 +106,10 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	return del(ctx, s.db, key)
 }
 
@@ -131,14 +117,10 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
 	}
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	return list(ctx, s.db, prefix)
 }
 
@@ -146,14 +128,10 @@ func (s *Store) Ping(ctx context.Context) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	return s.db.PingContext(ctx)
 }
 
@@ -164,22 +142,15 @@ func (s *Store) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
 	if fn == nil {
 		return fmt.Errorf("transaction callback is required")
 	}
-	if s.txActive.Load() {
-		return storage.ErrNestedTransaction
+	if err := s.gate.Begin(); err != nil {
+		return err
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrNestedTransaction
-	}
+	defer s.gate.End()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sqlite begin: %w", err)
 	}
-	s.txActive.Store(true)
-	defer s.txActive.Store(false)
 
 	committed := false
 	defer func() {
@@ -202,14 +173,16 @@ func (s *Store) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
 }
 
 func (s *Store) Close() error {
-	if s.txActive.Load() {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if s.gate.Active() {
 		return storage.ErrTransactionActive
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.Begin(); err != nil {
+		return err
 	}
+	defer s.gate.End()
 	if s.closed.Swap(true) {
 		return nil
 	}

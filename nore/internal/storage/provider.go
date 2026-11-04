@@ -24,9 +24,9 @@ var (
 	// holds the transaction and must pass its Tx to nested work.
 	ErrNestedTransaction = errors.New("storage: nested transaction")
 
-	// ErrTransactionActive reports a plain Store operation attempted while a
-	// WithTx callback holds the store's transaction. Use the callback's Tx so
-	// the operation participates in the same atomic unit.
+	// ErrTransactionActive reports a plain Store operation attempted from
+	// inside a WithTx callback. Use the callback's Tx so the operation
+	// participates in the same atomic unit.
 	ErrTransactionActive = errors.New("storage: transaction already active")
 
 	// ErrUnknownDriver reports a storage driver that no backend registered.
@@ -65,8 +65,10 @@ type Store interface {
 	Ping(ctx context.Context) error
 
 	// WithTx runs fn inside one transaction. Returning an error from fn rolls
-	// the transaction back. Nested WithTx calls return ErrNestedTransaction;
-	// plain Store operations during fn return ErrTransactionActive.
+	// the transaction back. Concurrent WithTx calls wait for the active
+	// transaction; a WithTx call from inside fn returns ErrNestedTransaction.
+	// Plain Store operations from inside fn return ErrTransactionActive;
+	// concurrent plain operations wait for the transaction to finish.
 	WithTx(ctx context.Context, fn func(Tx) error) error
 
 	// Close releases the backend. Close during an active transaction returns

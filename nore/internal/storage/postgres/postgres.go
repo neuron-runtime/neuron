@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	_ "github.com/lib/pq"
@@ -22,10 +21,9 @@ func init() {
 }
 
 type Store struct {
-	mu       sync.Mutex
-	db       *sql.DB
-	txActive atomic.Bool
-	closed   atomic.Bool
+	gate   storage.TransactionGate
+	db     *sql.DB
+	closed atomic.Bool
 }
 
 func New(ctx context.Context, cfg storage.Config) (storage.Store, error) {
@@ -80,14 +78,10 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
 	}
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	var data []byte
 	err := s.db.QueryRowContext(ctx, "SELECT value FROM kv_store WHERE key = $1", key).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -103,14 +97,10 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	_, err := s.db.ExecContext(ctx, "INSERT INTO kv_store (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()", key, data)
 	if err != nil {
 		return fmt.Errorf("postgres put %q: %w", key, err)
@@ -122,14 +112,10 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	_, err := s.db.ExecContext(ctx, "DELETE FROM kv_store WHERE key = $1", key)
 	if err != nil {
 		return fmt.Errorf("postgres delete %q: %w", key, err)
@@ -148,14 +134,10 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
 	}
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return nil, storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	pattern := escapeLike(prefix) + "%"
 	rows, err := s.db.QueryContext(ctx, "SELECT key FROM kv_store WHERE key LIKE $1 ESCAPE '\\' ORDER BY key", pattern)
 	if err != nil {
@@ -180,14 +162,10 @@ func (s *Store) Ping(ctx context.Context) error {
 	if err := s.guard(); err != nil {
 		return err
 	}
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
+	if err := s.gate.BeginRead(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.txActive.Load() {
-		return storage.ErrTransactionActive
-	}
+	defer s.gate.EndRead()
 	if err := s.db.PingContext(ctx); err != nil {
 		return fmt.Errorf("postgres ping: %w", err)
 	}
@@ -201,25 +179,18 @@ func (s *Store) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
 	if fn == nil {
 		return fmt.Errorf("transaction callback is required")
 	}
-	if s.txActive.Load() {
-		return storage.ErrNestedTransaction
+	if err := s.gate.Begin(); err != nil {
+		return err
 	}
-	s.mu.Lock()
-	if s.txActive.Load() {
-		s.mu.Unlock()
-		return storage.ErrNestedTransaction
-	}
+	defer s.gate.End()
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		s.mu.Unlock()
 		return fmt.Errorf("postgres begin: %w", err)
 	}
-	s.txActive.Store(true)
-	s.mu.Unlock()
 
 	committed := false
 	defer func() {
-		s.txActive.Store(false)
 		if !committed {
 			_ = tx.Rollback()
 		}
@@ -293,11 +264,18 @@ func (t *txOps) List(ctx context.Context, prefix string) ([]string, error) {
 }
 
 func (s *Store) Close() error {
-	if !s.closed.CompareAndSwap(false, true) {
-		return nil
+	if err := s.guard(); err != nil {
+		return err
 	}
-	if s.txActive.Load() {
+	if s.gate.Active() {
 		return storage.ErrTransactionActive
+	}
+	if err := s.gate.Begin(); err != nil {
+		return err
+	}
+	defer s.gate.End()
+	if s.closed.Swap(true) {
+		return nil
 	}
 	if err := s.db.Close(); err != nil {
 		return fmt.Errorf("postgres close: %w", err)
