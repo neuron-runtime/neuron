@@ -280,9 +280,12 @@ func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, er
 	if e.inFlight <= 0 {
 		return e.inFlight, errors.New("execution in-flight counter is invalid")
 	}
-	if nextCapabilityCount > 0 {
-		e.inFlight += nextCapabilityCount - 1
-	}
+	// The capability that just reported an outcome is no longer in flight. Any
+	// capabilities scheduled from its completion replace it, so the count moves
+	// by nextCapabilityCount-1. That is true even when nothing is scheduled (a
+	// blocked fan-in or a detached hand-off): the completed capability must
+	// still be removed, or the execution can never drain.
+	e.inFlight += nextCapabilityCount - 1
 	return e.inFlight, nil
 }
 
