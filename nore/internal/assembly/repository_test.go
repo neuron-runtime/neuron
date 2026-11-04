@@ -38,7 +38,7 @@ func testRegistration(assemblyID, version, hash, env string) RegisteredAssembly 
 func register(t *testing.T, repo *Repository, assemblyID, version, hash, env string) {
 	t.Helper()
 
-	if _, _, err := repo.Register(context.Background(), testRegistration(assemblyID, version, hash, env)); err != nil {
+	if _, _, err := repo.Register(context.Background(), testRegistration(assemblyID, version, hash, env), nil); err != nil {
 		t.Fatalf("register %s:%s#%s:%s: %v", assemblyID, version, hash, env, err)
 	}
 }
@@ -325,7 +325,7 @@ func TestRegisterIsAtomicWhenIndexWriteFails(t *testing.T) {
 	}
 
 	failingRepo := NewRepository(&failingIndexStore{Store: store, failSuffix: indexFileName})
-	_, _, err = failingRepo.Register(ctx, testRegistration("app", "1.0.0", "hash-v1", "dev"))
+	_, _, err = failingRepo.Register(ctx, testRegistration("app", "1.0.0", "hash-v1", "dev"), nil)
 	if err == nil {
 		t.Fatal("registration should fail when the index write fails")
 	}

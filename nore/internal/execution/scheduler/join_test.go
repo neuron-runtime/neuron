@@ -61,7 +61,7 @@ func TestFanInJoinExecution(t *testing.T) {
 		EntryCapabilityIDs: []core.ID{core.ID("a")},
 	}
 
-	parent, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1")
+	parent, err := execution.NewExecution(NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;)
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

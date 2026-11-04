@@ -38,7 +38,7 @@ func blueprintForJoin(capC1ID shared.ID) *types.ExecutionBlueprint {
 
 func TestJoinCompletingAllPredecessorsYieldsReady(t *testing.T) {
 	bp := blueprintForJoin(capC1)
-	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"))
+	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"), "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestJoinCompletingAllPredecessorsYieldsReady(t *testing.T) {
 
 func TestJoinUnknownBindingCannotSatisfy(t *testing.T) {
 	bp := blueprintForJoin(capC1)
-	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"))
+	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"), "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestJoinUnknownBindingCannotSatisfy(t *testing.T) {
 
 func TestJoinSnapshotRoundTrip(t *testing.T) {
 	bp := blueprintForJoin(capC1)
-	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"))
+	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"), "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

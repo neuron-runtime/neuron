@@ -364,7 +364,7 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	// a TypeScript-authored assembly) once so every expression resolves.
 	input = data.SnakeMap(input)
 
-	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID))
+	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID), i.Key.AssemblyID, i.Key.Version, i.Key.Hash, i.Key.Env)
 	if err != nil {
 		return nil, err
 	}

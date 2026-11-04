@@ -25,6 +25,10 @@ type ExecutionSnapshot struct {
 	StartedAt         *time.Time                           `json:"started_at,omitempty"`
 	CompletedAt       *time.Time                           `json:"completed_at,omitempty"`
 	Error             string                               `json:"error,omitempty"`
+	AssemblyID        string                               `json:"assembly_id,omitempty"`
+	Version           string                               `json:"version,omitempty"`
+	Hash              string                               `json:"hash,omitempty"`
+	Env               string                               `json:"env,omitempty"`
 }
 
 func (e *Execution) Snapshot() *ExecutionSnapshot {

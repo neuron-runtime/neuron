@@ -133,7 +133,7 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 	go func() { _ = scheduler.Run(ctx) }()
 	go func() { _ = engineInstance.Run(ctx) }()
 
-	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1")
+	parent, err := execution.NewExecution(detachBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestDetachedWorkSurvivesInstanceShutdown(t *testing.T) {
 	engineDone := make(chan error, 1)
 	go func() { engineDone <- engineInstance.Run(ctx) }()
 
-	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1")
+	parent, err := execution.NewExecution(detachBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestOrdinaryWorkIsStillCancelledAtShutdown(t *testing.T) {
 	// One capability and no detached scopes, so the only work that exists is
 	// ordinary work the instance owns.
 	blueprint := singleCapabilityBlueprint("slow")
-	root, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1")
+	root, err := execution.NewExecution(NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;NewExecution(blueprint, "corr_1", "inst_1")NewExecution(blueprint, "corr_1", "inst_1")nbsp;)
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

@@ -233,7 +233,7 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 			"cap_slow": {Capability: shared.Capability{Metadata: shared.Metadata{ID: "cap_slow"}}},
 		},
 		EntryCapabilityIDs: []shared.ID{"cap_slow"},
-	}, shared.NewID("request_"), instanceID)
+	}, shared.NewID("request_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 		t.Fatalf("add detached task: %v", err)
 	}
 
-	ordinary, err := execution.NewExecution(blueprint, shared.NewID("request_"), instanceID)
+	ordinary, err := execution.NewExecution(blueprint, shared.NewID("request_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 
 func newScopedExecution(t *testing.T, instanceID shared.ID) *Execution {
 	t.Helper()
-	exec, err := NewExecution(blueprintFor("cap_a", "cap_b"), shared.NewID("request_"), instanceID)
+	exec, err := NewExecution(blueprintFor("cap_a", "cap_b"), shared.NewID("request_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

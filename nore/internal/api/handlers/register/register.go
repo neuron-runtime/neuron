@@ -52,7 +52,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, replaced, err := h.assemblies.Register(r.Context(), reg)
+	created, replaced, err := h.assemblies.Register(r.Context(), reg, nil)
 	if err != nil {
 		utils.ErrorJSON(w, http.StatusInternalServerError, err)
 		return

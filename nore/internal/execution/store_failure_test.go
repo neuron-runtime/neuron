@@ -63,7 +63,7 @@ func (f *faultStore) Close() error               { return nil }
 
 func testExecution(t *testing.T) *Execution {
 	t.Helper()
-	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test")
+	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test", "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

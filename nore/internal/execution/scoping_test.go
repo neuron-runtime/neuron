@@ -23,7 +23,7 @@ func openTestStore(t *testing.T) storage.Store {
 
 func newTestExecution(t *testing.T, bp *types.ExecutionBlueprint, instanceID shared.ID) *Execution {
 	t.Helper()
-	exec, err := NewExecution(bp, shared.NewID("corr_"), instanceID)
+	exec, err := NewExecution(bp, shared.NewID("corr_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

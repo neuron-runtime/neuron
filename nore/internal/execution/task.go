@@ -29,7 +29,7 @@ func NewDetachedTask(scope *types.ExecutionBlueprint, correlationID, instanceID,
 	if parentExecutionID == "" {
 		return nil, errors.New("detached task requires the execution it was handed off from")
 	}
-	task, err := NewExecution(scope, correlationID, instanceID)
+	task, err := NewExecution(scope, correlationID, instanceID, "", "", "", "")
 	if err != nil {
 		return nil, err
 	}

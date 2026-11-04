@@ -93,9 +93,18 @@ type Execution struct {
 	// Each key is a target capability ID; the value records which predecessor
 	// bindings have completed and what inputs they contributed.
 	joinState map[shared.ID]*joinStateInfo
+
+	// Assembly identity: the instance key that created this execution.
+	// Populated when the execution is created from an Instance; used by
+	// durable execution recovery (Phase 4) to resume against the correct
+	// immutable assembly artifact.
+	AssemblyID  string
+	Version     string
+	Hash        string
+	Env         string
 }
 
-func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID) (*Execution, error) {
+func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID, assemblyID, version, hash, env string) (*Execution, error) {
 	if blueprint == nil {
 		return nil, errors.New("execution blueprint is required")
 	}
@@ -115,11 +124,21 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		}
 	}
 	return &Execution{
-		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
-		status: StatusPending, initialParams: make(map[string]any),
-		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
-		done:      make(chan struct{}),
-		joinState: joinState,
+		ID:            shared.NewID("exec_"),
+		CorrelationID: correlationID,
+		InstanceID:    instanceID,
+		Blueprint:     blueprint,
+		status:        StatusPending,
+		initialParams: make(map[string]any),
+		params:        make(map[shared.ID]map[string]any),
+		results:       make(map[shared.ID]map[string]any),
+		states:        states,
+		done:          make(chan struct{}),
+		joinState:     joinState,
+		AssemblyID:    assemblyID,
+		Version:       version,
+		Hash:          hash,
+		Env:           env,
 	}, nil
 }
 

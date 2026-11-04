@@ -78,7 +78,7 @@ func singleCapabilityBlueprint(capabilityID core.ID) *types.ExecutionBlueprint {
 // does, which is the scheduler's only entry point into an execution's plan.
 func startExecution(t *testing.T, ctx context.Context, bus *event.Bus, store *executionmodel.MemoryStore, blueprint *types.ExecutionBlueprint) *executionmodel.Execution {
 	t.Helper()
-	exec, err := executionmodel.NewExecution(blueprint, core.NewID("corr_"), "inst_1")
+	exec, err := execution.NewExecution(blueprint, core.NewID("corr_"), "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestCancelExecutionRefusesUnknownAndTerminalExecutions(t *testing.T) {
 		t.Errorf("CancelExecution() = (%v, %v), want (false, nil)", cancelled, err)
 	}
 
-	exec, err := executionmodel.NewExecution(singleCapabilityBlueprint("slow"), "corr_1", "inst_1")
+	exec, err := execution.NewExecution(singleCapabilityBlueprint("slow"), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

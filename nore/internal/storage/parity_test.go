@@ -120,7 +120,7 @@ func TestCrossBackendExecutionParity(t *testing.T) {
 	pgExecStore := execution.NewExecutionStore(pgStore)
 
 	execID := shared.NewID("exec_test")
-	exec, err := execution.NewExecution(blueprint, shared.NewID("corr_"), shared.NewID("inst_test"))
+	exec, err := execution.NewExecution(blueprint, shared.NewID("corr_"), shared.NewID("inst_test"), "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

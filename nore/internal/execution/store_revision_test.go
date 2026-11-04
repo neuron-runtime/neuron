@@ -15,7 +15,7 @@ func TestSaveRejectsStaleWriter(t *testing.T) {
 	store := openTestStore(t)
 	s := NewExecutionStore(store)
 	ctx := context.Background()
-	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test")
+	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test", "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestSaveUsesCallerCancellation(t *testing.T) {
 	store := openTestStore(t)
 	s := NewExecutionStore(store)
 	ctx := context.Background()
-	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test")
+	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test", "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

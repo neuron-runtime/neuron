@@ -47,7 +47,12 @@ func NewRepository(store storage.Store) *Repository {
 // happen in one transaction, so a failed registration leaves no partial state.
 // The request is idempotent when the exact same artifact is already current:
 // created=false, replaced=false.
-func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly) (created bool, replaced bool, err error) {
+//
+// If referencedHashes is provided, only artifact hashes not in the set will be
+// pruned; referenced hashes (e.g. those persisted by durable executions) are
+// retained. If referencedHashes is nil or empty, the previous unconditional
+// pruning behaviour is preserved for backward compatibility.
+func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly, referencedHashes map[string]bool) (created bool, replaced bool, err error) {
 	if reg.Key.AssemblyID == "" {
 		return false, false, fmt.Errorf("register requires a assembly id")
 	}
@@ -80,7 +85,9 @@ func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly) (crea
 
 		// Enforce a single artifact per version: clear every other artifact
 		// previously recorded under assemblies/{id}/{version}/*.
-		if err := r.pruneVersionArtifacts(ctx, tx, reg.Key); err != nil {
+		// Only hashes not in referencedHashes will be pruned; referenced hashes
+		// (e.g. those persisted by durable executions) are retained.
+		if err := r.pruneVersionArtifacts(ctx, tx, reg.Key, referencedHashes); err != nil {
 			return err
 		}
 
@@ -370,8 +377,48 @@ func (r *Repository) List(ctx context.Context) ([]RegisteredAssembly, error) {
 }
 
 // pruneVersionArtifacts deletes every artifact under assemblies/{id}/{version}/*
-// except the just-written one for new.
-func (r *Repository) pruneVersionArtifacts(ctx context.Context, kv storage.KV, new protocol.InstanceKey) error {
+// except the just-written one for new. Only hashes not in referencedHashes will
+// be pruned; referenced hashes are retained (e.g. executions that durable-
+// execution mode has persisted against that artifact).
+func (r *Repository) pruneVersionArtifacts(ctx context.Context, kv storage.KV, new protocol.InstanceKey, referencedHashes map[string]bool) error {
+	if referencedHashes == nil {
+		return r.pruneVersionArtifactsUnconditional(ctx, kv, new)
+	}
+	prefix, err := storage.Prefix("assemblies", new.AssemblyID, new.Version)
+	if err != nil {
+		return err
+	}
+	newKey, err := r.key(new)
+	if err != nil {
+		return err
+	}
+	keys, err := kv.List(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	for _, storageKey := range keys {
+		if !strings.HasSuffix(storageKey, "/manifest") || storageKey == newKey {
+			continue
+		}
+		reg, err := r.getByStorageKey(ctx, kv, storageKey)
+		if err != nil {
+			return err
+		}
+		// If this artifact's hash is referenced by a durable execution, retain it.
+		if referencedHashes[reg.Key.Hash] {
+			continue
+		}
+		if err := kv.Delete(ctx, storageKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneVersionArtifactsUnconditional is the original unconditional pruning
+// behaviour: deletes every artifact under assemblies/{id}/{version}/* except the
+// just-written one.
+func (r *Repository) pruneVersionArtifactsUnconditional(ctx context.Context, kv storage.KV, new protocol.InstanceKey) error {
 	prefix, err := storage.Prefix("assemblies", new.AssemblyID, new.Version)
 	if err != nil {
 		return err

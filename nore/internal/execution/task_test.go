@@ -88,7 +88,7 @@ func TestDetachedTaskSnapshotRoundTrip(t *testing.T) {
 }
 
 func TestRootExecutionHasNoParent(t *testing.T) {
-	root, err := NewExecution(detachedScopeBlueprint(), "corr_1", "inst_1")
+	root, err := NewExecution(detachedScopeBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
