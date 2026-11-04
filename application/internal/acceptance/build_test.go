@@ -158,9 +158,6 @@ bindings:
         message: "greeting validation failed"
   - from: greet
     to: branch
-    mappings:
-      - target: token
-        expression: "source.result.greeting"
 
 result:
   schema:
