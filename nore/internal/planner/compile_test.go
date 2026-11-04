@@ -3,6 +3,7 @@ package planner
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
@@ -103,5 +104,52 @@ func TestCompileRejectsOperatorExpressionAtPlanTime(t *testing.T) {
 	assembly := planningAssembly([]shared.MappingRule{legacyRule(t, "source.result.amount_cents >= 1000")})
 	if _, err := compiler.Compile(assembly); err == nil {
 		t.Fatal("an operator expression on a mapping must be rejected at plan time")
+	}
+}
+
+func TestCompileRejectsConflictingTargetPathsAcrossBindings(t *testing.T) {
+	compiler, err := NewCompiler(stubExpressionCompiler{})
+	if err != nil {
+		t.Fatalf("new compiler: %v", err)
+	}
+	// Fan-in lets multiple bindings target the same capability, but each target
+	// path must have exactly one writer. Otherwise the merged value depends on
+	// the order bindings happen to complete.
+	assembly := shared.Assembly{
+		Metadata: shared.Metadata{Name: "fan-in", Version: "1.0.0"},
+		Specification: shared.AssemblySpec{
+			Capabilities: []shared.Capability{
+				{Metadata: shared.Metadata{ID: "a", Name: "a", Version: "1"}, Type: "neuron:core:set"},
+				{Metadata: shared.Metadata{ID: "c", Name: "c", Version: "1"}, Type: "neuron:core:set"},
+				{Metadata: shared.Metadata{ID: "b", Name: "b", Version: "1"}, Type: "neuron:core:set"},
+			},
+			Bindings: []shared.Binding{
+				{
+					Metadata: shared.Metadata{ID: "binding_a"},
+					From:     shared.Endpoint{CapabilityID: "a"},
+					To:       shared.Endpoint{CapabilityID: "b"},
+					Mappings: []shared.MappingRule{{
+						TargetPath: "amount",
+						Source:     &shared.ValueRef{Kind: shared.ValueRefCapabilityResult, Capability: "a", Path: []string{"amount"}},
+					}},
+				},
+				{
+					Metadata: shared.Metadata{ID: "binding_c"},
+					From:     shared.Endpoint{CapabilityID: "c"},
+					To:       shared.Endpoint{CapabilityID: "b"},
+					Mappings: []shared.MappingRule{{
+						TargetPath: "amount",
+						Source:     &shared.ValueRef{Kind: shared.ValueRefCapabilityResult, Capability: "c", Path: []string{"amount"}},
+					}},
+				},
+			},
+		},
+	}
+	_, err = compiler.Compile(assembly)
+	if err == nil {
+		t.Fatal("bindings writing the same target path into one capability must be rejected")
+	}
+	if !strings.Contains(err.Error(), "conflicting target path") {
+		t.Fatalf("error = %q, want it to describe the conflicting target path", err)
 	}
 }

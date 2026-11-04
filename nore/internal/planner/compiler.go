@@ -59,6 +59,7 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	incoming := make(map[shared.ID]int, len(capabilities))
 	predecessors := make(map[shared.ID][]types.ExecutionPredecessor, len(capabilities))
 	joinPolicies := make(map[shared.ID]shared.JoinPolicy, len(capabilities))
+	targetPaths := make(map[shared.ID]map[string]shared.ID, len(capabilities))
 	for id, capability := range capabilities {
 		compiledConfig, err := c.expressions.CompileCapabilityConfigurations(capability.CapabilityConfigurations)
 		if err != nil {
@@ -112,6 +113,22 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		transition, err := c.compileTransition(binding)
 		if err != nil {
 			return nil, err
+		}
+		// R3-4: Two bindings feeding the same capability must not write the same
+		// target path. Fan-in merges predecessor outputs before dispatch, but a
+		// shared path would make the merged value depend on binding order.
+		paths := targetPaths[binding.To.CapabilityID]
+		if paths == nil {
+			paths = make(map[string]shared.ID)
+			targetPaths[binding.To.CapabilityID] = paths
+		}
+		for _, mapping := range transition.Mappings {
+			if existingBindingID, exists := paths[mapping.TargetPath]; exists {
+				return nil, fmt.Errorf(
+					"capability %s has conflicting target path %q between bindings %s and %s",
+					binding.To.CapabilityID, mapping.TargetPath, existingBindingID, binding.Metadata.ID)
+			}
+			paths[mapping.TargetPath] = binding.Metadata.ID
 		}
 		node := nodes[binding.From.CapabilityID]
 		node.Next = append(node.Next, transition)
