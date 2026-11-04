@@ -10,6 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TestMigrateEmptySQLite applies the full migration set to an empty SQLite database
+// and asserts the resulting schema is usable by the contract suite. After migration,
+// a basic KV write confirms the schema is functional.
 func TestMigrateEmptySQLite(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

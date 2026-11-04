@@ -3,8 +3,8 @@ package execution
 import (
 	"testing"
 
-	shared "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
+	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 var capA = shared.NewID("cap_a")
@@ -30,8 +30,8 @@ func blueprintForJoin(capC1ID shared.ID) *types.ExecutionBlueprint {
 	}
 
 	return &types.ExecutionBlueprint{
-		Metadata: shared.Metadata{ID: "test_bp", Name: "test", Version: "1.0.0"},
-		Nodes:    nodes,
+		Metadata:           shared.Metadata{ID: "test_bp", Name: "test", Version: "1.0.0"},
+		Nodes:              nodes,
 		EntryCapabilityIDs: []shared.ID{capA, capB},
 	}
 }

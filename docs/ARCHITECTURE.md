@@ -311,6 +311,40 @@ N.O.R.E. deliberately does **not**:
 
 The canonical manifest is compiled by the CLI; N.O.R.E. receives the compiled core assembly representation.
 
+## Storage backup, restore, and upgrade
+
+### Backup and restore
+
+| Backend | Backup | Restore |
+| --- | --- | --- |
+| **SQLite** | Offline copy of the database file (`<path>/nore.db`) while N.O.R.E. is stopped. Optionally checkpoint the WAL before copying to produce a consistent single-file snapshot: `sqlite3 <db> "PRAGMA wal_checkpoint(TRUNCATE)"`. | Place the backup file at the target path and start N.O.R.E. The SQLite driver will open the database and apply any pending WAL migrations automatically. |
+| **PostgreSQL** | `pg_dump -Fc <dsn> > nore.backup.dump` while N.O.R.E. is stopped. This produces a custom-format dump that preserves schemas, data, and ownership. | `pg_restore -d <dsn> nore.backup.dump`. The target database must have the same or compatible schema version. |
+
+### Upgrade path from existing SQLite DB
+
+Neuron uses schema version tracking via a `schema_migrations` table to determine whether the stored schema is compatible with the running binary. The table location per backend:
+
+| Backend | `schema_migrations` table |
+| --- | --- |
+| **SQLite** | `sqlite_master` catalog row where `name = 'schema_migrations'` (or the dedicated table created by the migration framework). Records store the applied migration version. |
+| **PostgreSQL** | `schema_migrations` table (created by the migration framework) with columns `version BIGINT PRIMARY KEY`, `description TEXT`, `applied_at TIMESTAMPTZ`, `dirty BOOLEAN`. |
+
+**Upgrade steps from a previous SQLite schema:**
+
+1. **Ensure N.O.R.E. is stopped** — do not attempt an online migration.
+2. **Run the migration framework** against the existing SQLite database to bring it to the current schema version. The `migrate.Migrate` function applies pending migrations in order, recording each in `schema_migrations`.
+3. **Verify the `schema_migrations` table** reflects the target version. For SQLite, query: `SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 1;`
+4. **Start N.O.R.E.** The binary will refuse to start if the schema version is newer than this binary understands (see `ErrNewerSchema` in `nore/internal/storage/migrate`). If the schema is exactly at the current version, N.O.R.E. will start normally.
+5. **If the previous schema is ahead of this binary's supported maximum**, the startup will fail with a precise error naming the current maximum supported version. In that case, apply compatible migrations backward (or forward via an intermediate binary) before restarting.
+
+The storage configuration remains **machine-level, not project-configured**. It is set via `storage.driver` (or `NEURON_STORAGE_DRIVER` / `--storage-driver` CLI flag) at deployment time and is rejected from project configuration files so an assembly never embeds database settings.
+
+## Indexed query operations decision
+
+In this phase, no indexed query operations were added behind the neutral `storage.Store` interface. The PostgreSQL backend includes an index on the `key` column of the `kv_store` table (`CREATE INDEX IF NOT EXISTS idx_kv_store_key ON kv_store (key)`) to accelerate `List(prefix)` lookups, but this was added without formal measurement of performance impact or extension of the neutral backend interface. The decision is recorded here for future optimization if measurement confirms indexed queries are needed. The SQLite backend performs full table scans via `LIKE` prefix matching, which is acceptable for the expected workloads in this phase.
+
+Users requiring optimized prefix listings for large datasets should consider the PostgreSQL backend or add custom query methods outside the neutral contract in a later phase.
+
 ## Internal architecture
 
 ```mermaid

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
 	executionmodelTypes "github.com/neuron-runtime/neuron/nore/internal/types"
-	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -39,7 +39,7 @@ func TestFanInJoinExecution(t *testing.T) {
 	tNode := executionmodelTypes.ExecutionNode{
 		Capability: core.Capability{
 			Metadata: core.Metadata{ID: "t", Name: "t", Version: "1.0.0"},
-			Type:       "test:stub",
+			Type:     "test:stub",
 		},
 		Configurations: staticConfigurations{},
 		Predecessors: []executionmodelTypes.ExecutionPredecessor{
