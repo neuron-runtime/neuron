@@ -33,11 +33,12 @@ var (
 // exactly one artifact, the newest one. Artifacts are therefore not
 // content-addressed immutable; that retention limitation remains until Phase 4.
 type Repository struct {
-	store storage.Store
+	store          storage.Store
+	referencedHashes map[string]bool
 }
 
 func NewRepository(store storage.Store) *Repository {
-	return &Repository{store: store}
+	return &Repository{store: store, referencedHashes: make(map[string]bool)}
 }
 
 // Register persists reg durably and makes (assemblyID, version) point at it.
@@ -81,9 +82,16 @@ func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly, refer
 
 		if err := tx.Put(ctx, storageKey, data); err != nil {
 			return err
-		}
+}
 
-		// Enforce a single artifact per version: clear every other artifact
+// Store referenced hashes for reference-aware deletion.
+if referencedHashes != nil {
+	for h := range referencedHashes {
+		r.referencedHashes[h] = true
+	}
+}
+
+// Enforce a single artifact per version: clear every other artifact
 		// previously recorded under assemblies/{id}/{version}/*.
 		// Only hashes not in referencedHashes will be pruned; referenced hashes
 		// (e.g. those persisted by durable executions) are retained.
@@ -320,6 +328,11 @@ func (r *Repository) Exists(ctx context.Context, key protocol.InstanceKey) (bool
 // deletes and index update happen in one transaction.
 func (r *Repository) Delete(ctx context.Context, key protocol.InstanceKey) error {
 	return r.store.WithTx(ctx, func(tx storage.Tx) error {
+		// Refuse to delete an artifact that is referenced by a durable execution.
+		if r.referencedHashes[key.Hash] {
+			return fmt.Errorf("assembly: artifact %q is referenced by a durable execution; use --force to also remove it", key.Hash)
+		}
+
 		idx, err := r.loadIndex(ctx, tx, key.AssemblyID)
 		if err != nil {
 			return err
