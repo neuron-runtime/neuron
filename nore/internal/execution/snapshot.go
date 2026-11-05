@@ -71,6 +71,10 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 		StartedAt:         e.startedAt,
 		CompletedAt:       e.completedAt,
 		Error:             e.executionError,
+		AssemblyID:        e.AssemblyID,
+		Version:           e.Version,
+		Hash:              e.Hash,
+		Env:               e.Env,
 	}
 }
 
@@ -127,6 +131,11 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		executionError:    snap.Error,
 		done:              make(chan struct{}),
 	}
+	// Restore assembly identity from snapshot.
+	e.AssemblyID = snap.AssemblyID
+	e.Version = snap.Version
+	e.Hash = snap.Hash
+	e.Env = snap.Env
 	// Rebuild join state from snapshot if present.
 	if snap.JoinState != nil {
 		e.joinState = make(map[shared.ID]*joinStateInfo, len(snap.JoinState))
