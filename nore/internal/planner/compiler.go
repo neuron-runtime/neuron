@@ -151,7 +151,7 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		nodes[capabilityID] = node
 	}
 
-// R3-16: A detached capability must not participate in a fan-in (multiple
+	// R3-16: A detached capability must not participate in a fan-in (multiple
 	// incoming bindings). Detached branches run in a separate execution that the
 	// parent does not wait for; a join spanning detached and non-detached work
 	// would create ambiguous ownership. Reject such configurations at build time.
@@ -164,9 +164,9 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 						"a detached branch may not participate in a join; "+
 						"use an aggregation capability or restructure the graph",
 					capabilityID, count)
-				}
 			}
 		}
+	}
 
 	// R3-16 extended: reject any join where a predecessor comes from a detached scope.
 	// A detached branch runs in a separate execution that the parent never waits for;

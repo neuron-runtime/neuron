@@ -33,7 +33,7 @@ var (
 // exactly one artifact, the newest one. Artifacts are therefore not
 // content-addressed immutable; that retention limitation remains until Phase 4.
 type Repository struct {
-	store          storage.Store
+	store            storage.Store
 	referencedHashes map[string]bool
 }
 
@@ -82,16 +82,16 @@ func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly, refer
 
 		if err := tx.Put(ctx, storageKey, data); err != nil {
 			return err
-}
+		}
 
-// Store referenced hashes for reference-aware deletion.
-if referencedHashes != nil {
-	for h := range referencedHashes {
-		r.referencedHashes[h] = true
-	}
-}
+		// Store referenced hashes for reference-aware deletion.
+		if referencedHashes != nil {
+			for h := range referencedHashes {
+				r.referencedHashes[h] = true
+			}
+		}
 
-// Enforce a single artifact per version: clear every other artifact
+		// Enforce a single artifact per version: clear every other artifact
 		// previously recorded under assemblies/{id}/{version}/*.
 		// Only hashes not in referencedHashes will be pruned; referenced hashes
 		// (e.g. those persisted by durable executions) are retained.

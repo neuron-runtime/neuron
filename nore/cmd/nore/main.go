@@ -38,25 +38,25 @@ import (
 const capabilityRuntimeShutdownTimeout = 10 * time.Second
 
 func main() {
-var (
-	port                 string
-	socket               string
-	workers              int
-	dataDir              string
-	storageDriver        string
-	storagePath          string
-	storageDSN           string
-	durability           string
-	tokenArg             string
-	detachedDrainTimeout time.Duration
-	capabilityStore      string
-	showVer              bool
-	invokeMode           bool
-	projectMode          bool
-	projectRoot          string
-	host                 string
-	builtinPolicyArg     string
-)
+	var (
+		port                 string
+		socket               string
+		workers              int
+		dataDir              string
+		storageDriver        string
+		storagePath          string
+		storageDSN           string
+		durability           string
+		tokenArg             string
+		detachedDrainTimeout time.Duration
+		capabilityStore      string
+		showVer              bool
+		invokeMode           bool
+		projectMode          bool
+		projectRoot          string
+		host                 string
+		builtinPolicyArg     string
+	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
 	flag.StringVar(&socket, "socket", defaultSocket(), "Unix socket for local CLI clients; empty disables Unix socket")

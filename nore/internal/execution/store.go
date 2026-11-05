@@ -275,12 +275,12 @@ func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
 // should claim and dispatch. It is persisted so that a restart does not lose
 // track of ready capabilities.
 type DispatchIntent struct {
-	ExecutionID   shared.ID `json:"execution_id"`
-	CapabilityID  shared.ID `json:"capability_id"`
-	ReadyToRun    bool      `json:"ready_to_run"`
-	AttemptID     shared.ID `json:"attempt_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	Owner         string    `json:"owner,omitempty"`
+	ExecutionID  shared.ID `json:"execution_id"`
+	CapabilityID shared.ID `json:"capability_id"`
+	ReadyToRun   bool      `json:"ready_to_run"`
+	AttemptID    shared.ID `json:"attempt_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	Owner        string    `json:"owner,omitempty"`
 }
 
 // key returns a storage key for dispatch intents.
