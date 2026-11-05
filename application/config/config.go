@@ -190,6 +190,13 @@ type StorageConfig struct {
 
 	// DSN is the PostgreSQL connection string. Must not be committed.
 	DSN string `yaml:"dsn" mapstructure:"dsn"`
+
+	// Durability is the execution durability mode. This is a deployment-level setting
+	// that cannot be configured in project configuration. Modes:
+	//   "none"     - no durability guarantees (current behavior: executions failed on interrupt)
+	//   "history"  - observability only (history survives restart, but unfinished work is failed) -- default
+	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
+	Durability string `yaml:"durability" mapstructure:"durability"`
 }
 
 // CapabilityRuntimesConfig lists the executable registries Neuron can resolve capabilities

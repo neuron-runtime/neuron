@@ -213,6 +213,12 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	if cfg.Storage.DSN != "" {
 		noreArgs = append(noreArgs, "--storage-dsn", cfg.Storage.DSN)
 	}
+
+	// Add durability mode (deployment-level; project config rejects it)
+	durability := cfg.Storage.Durability
+	if durability != "" {
+		noreArgs = append(noreArgs, "--durability", durability)
+	}
 	// The built-in capability policy travels with the runtime: it states what
 	// the built-in capability runtimes may reach, and the runtime enforces it.
 	policy, err := cfg.BuiltinPolicy()

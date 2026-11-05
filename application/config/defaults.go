@@ -41,6 +41,7 @@ func Defaults() Config {
 			Driver:    "sqlite",
 			Directory: DefaultDataDir(),
 			Path:      DefaultDataDir(),
+			Durability: "history",
 		},
 
 		// No registries are compiled in. A project that resolves external

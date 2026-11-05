@@ -38,24 +38,25 @@ import (
 const capabilityRuntimeShutdownTimeout = 10 * time.Second
 
 func main() {
-	var (
-		port                 string
-		socket               string
-		workers              int
-		dataDir              string
-		storageDriver        string
-		storagePath          string
-		storageDSN           string
-		tokenArg             string
-		detachedDrainTimeout time.Duration
-		capabilityStore      string
-		showVer              bool
-		invokeMode           bool
-		projectMode          bool
-		projectRoot          string
-		host                 string
-		builtinPolicyArg     string
-	)
+var (
+	port                 string
+	socket               string
+	workers              int
+	dataDir              string
+	storageDriver        string
+	storagePath          string
+	storageDSN           string
+	durability           string
+	tokenArg             string
+	detachedDrainTimeout time.Duration
+	capabilityStore      string
+	showVer              bool
+	invokeMode           bool
+	projectMode          bool
+	projectRoot          string
+	host                 string
+	builtinPolicyArg     string
+)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
 	flag.StringVar(&socket, "socket", defaultSocket(), "Unix socket for local CLI clients; empty disables Unix socket")
@@ -64,6 +65,7 @@ func main() {
 	flag.StringVar(&storageDriver, "storage-driver", defaultStorageDriver(), "storage backend driver (default: sqlite)")
 	flag.StringVar(&storagePath, "storage-path", "", "storage path override (sqlite)")
 	flag.StringVar(&storageDSN, "storage-dsn", os.Getenv("NEURON_DATABASE_URL"), "storage DSN (postgres)")
+	flag.StringVar(&durability, "durability", "", "execution durability mode: none, history, or durable (default: from config)")
 	flag.StringVar(&tokenArg, "token", "", "API token for authenticating requests; empty loads the token from the socket's token file")
 	flag.DurationVar(&detachedDrainTimeout, "detached-drain-timeout", engine.DefaultDetachedDrainTimeout, "how long detached capability work may run after the daemon begins shutting down")
 	flag.StringVar(&capabilityStore, "capability-runtime-store", defaultCapabilityRuntimeStore(), "capability runtime store directory for resolving installed artifacts")
@@ -113,7 +115,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, durability, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
 		return
 	}
 
@@ -148,7 +150,7 @@ func main() {
 		}
 	}
 
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN, Durability: durability})
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}
@@ -380,7 +382,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, durability string, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
