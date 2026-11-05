@@ -98,10 +98,10 @@ type Execution struct {
 	// Populated when the execution is created from an Instance; used by
 	// durable execution recovery (Phase 4) to resume against the correct
 	// immutable assembly artifact.
-	AssemblyID  string
-	Version     string
-	Hash        string
-	Env         string
+	AssemblyID string
+	Version    string
+	Hash       string
+	Env        string
 }
 
 func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID, assemblyID, version, hash, env string) (*Execution, error) {
