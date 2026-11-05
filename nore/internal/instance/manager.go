@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +15,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
-	core2 "github.com/neuron-runtime/neuron/shared/types/core"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
@@ -91,6 +92,60 @@ func (m *Manager) reconcile(ctx context.Context) error {
 		m.instancesByID[rec.ID] = i
 		m.instancesByKey[i.Key] = i
 	}
+	// Phase 4: recover unfinished durable executions.
+	if err := m.recoverExecutions(ctx); err != nil {
+		return fmt.Errorf("recover executions: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) recoverExecutions(ctx context.Context) error {
+	// Load all execution records from storage.
+	prefix, err := storage.Prefix("executions")
+	if err != nil {
+		return fmt.Errorf("prefix executions: %w", err)
+	}
+	keys, err := m.store.List(ctx, prefix)
+	if err != nil {
+		return fmt.Errorf("list executions: %w", err)
+	}
+	for _, k := range keys {
+		// Parse execution ID from the storage key prefix "executions/".
+		idStr := string(k)
+		if len(idStr) <= len(prefix) || idStr[:len(prefix)] != prefix {
+			continue
+		}
+		// Retrieve the execution data.
+		data, err := m.store.Get(ctx, k)
+		if err != nil {
+			continue
+		}
+		var exec execution.Execution
+		if err := json.Unmarshal(data, &exec); err != nil {
+			continue
+		}
+		// Check if this is a durable execution (has assembly identity).
+		if exec.AssemblyID == "" || exec.Version == "" {
+			// Non-durable execution: behavior unchanged (fail on interrupt).
+			continue
+		}
+		// Resolve the immutable assembly artifact.
+		reg, err := m.assemblies.Resolve(ctx, protocol.InstanceKey{
+			AssemblyID: exec.AssemblyID,
+			Version:    exec.Version,
+			Hash:       exec.Hash,
+			Env:        exec.Env,
+		})
+		if err != nil {
+			// Artifact no longer available; per R4-3, this is a GC decision.
+			// The execution cannot resume; it will be treated as non-resumable.
+			continue
+		}
+		// TODO: restore capability, join, attempt, wait state from snapshot.
+		// TODO: re-queue ready-but-undispatched work via dispatch intents.
+		// TODO: restore retry timers and suspended waits (Phase 5).
+		_ = reg
+	}
 	return nil
 }
 
@@ -159,9 +214,9 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	id := core2.NewID("inst_")
+	id := core.NewID("inst_")
 	if previous, ok := m.instancesByKey[canonical]; ok {
-		id = core2.ID(previous.ID)
+		id = core.ID(previous.ID)
 		delete(m.instancesByKey, canonical)
 		delete(m.instancesByID, previous.ID)
 	}
