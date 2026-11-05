@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
@@ -268,4 +269,139 @@ func storedRevision(ctx context.Context, tx storage.Tx, key string) (uint64, err
 
 func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
 	return json.Marshal(execution.snapshotAt(revision))
+}
+
+// DispatchIntent represents a unit of ready work that the reconcile worker
+// should claim and dispatch. It is persisted so that a restart does not lose
+// track of ready capabilities.
+type DispatchIntent struct {
+	ExecutionID   shared.ID `json:"execution_id"`
+	CapabilityID  shared.ID `json:"capability_id"`
+	ReadyToRun    bool      `json:"ready_to_run"`
+	AttemptID     shared.ID `json:"attempt_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	Owner         string    `json:"owner,omitempty"`
+}
+
+// key returns a storage key for dispatch intents.
+func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) string {
+	return "dispatch_intents/" + string(executionID) + "/" + string(capabilityID) + "/" + string(attemptID)
+}
+
+// listDispatchIntents returns all dispatch intents for a given execution and capability.
+func (s *ExecutionStore) listDispatchIntents(ctx context.Context, executionID, capabilityID shared.ID) ([]*DispatchIntent, error) {
+	prefix, err := storage.Prefix("dispatch_intents", string(executionID), string(capabilityID))
+	if err != nil {
+		return nil, fmt.Errorf("prefix dispatch intents: %w", err)
+	}
+	keys, err := s.store.List(ctx, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("list dispatch intents: %w", err)
+	}
+	var ints []*DispatchIntent
+	for _, k := range keys {
+		data, err := s.store.Get(ctx, k)
+		if err != nil {
+			continue
+		}
+		var did DispatchIntent
+		if err := json.Unmarshal(data, &did); err != nil {
+			continue
+		}
+		ints = append(ints, &did)
+	}
+	return ints, nil
+}
+
+// claimDispatchIntent atomically claims a dispatch intent for dispatch.
+func (s *ExecutionStore) claimDispatchIntent(ctx context.Context, did *DispatchIntent) (*DispatchIntent, error) {
+	key := dispatchIntentKey(did.ExecutionID, did.CapabilityID, did.AttemptID)
+	var existing *DispatchIntent
+	err := s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if err != nil {
+			if storage.ErrNotFound == err {
+				return nil // already claimed/deleted
+			}
+			return err
+		}
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return err
+		}
+		// Only claim if not already claimed.
+		if existing.Owner != "" {
+			return nil
+		}
+		// Mark as claimed with a lease derived from current time.
+		existing.Owner = fmt.Sprintf("lease_%d", time.Now().UnixNano())
+		bytes, err := json.Marshal(existing)
+		if err != nil {
+			return err
+		}
+		return tx.Put(ctx, key, bytes)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+func (s *ExecutionStore) ReconcileDispatchIntents(ctx context.Context) (int, error) {
+	prefix, err := storage.Prefix("dispatch_intents")
+	if err != nil {
+		return 0, fmt.Errorf("prefix dispatch intents: %w", err)
+	}
+	keys, err := s.store.List(ctx, prefix)
+	if err != nil {
+		return 0, err
+	}
+	claimed := 0
+	for _, k := range keys {
+		data, err := s.store.Get(ctx, k)
+		if err != nil {
+			continue
+		}
+		var did DispatchIntent
+		if err := json.Unmarshal(data, &did); err != nil {
+			continue
+		}
+		if !did.ReadyToRun {
+			continue // only claim intents that are marked ready
+		}
+		// Attempt to claim via CAS.
+		var existing *DispatchIntent
+		err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+			data, err := tx.Get(ctx, k)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(data, &did); err != nil {
+				return err
+			}
+			if did.Owner != "" {
+				return nil // already claimed by another worker
+			}
+			// Claim it.
+			bytes, err := json.Marshal(&did)
+			if err != nil {
+				return err
+			}
+			if err := tx.Put(ctx, k, bytes); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			continue
+		}
+		if existing != nil && existing.Owner != "" {
+			claimed++
+		}
+	}
+	return claimed, nil
+}
+
+// executionKey returns the storage key for an execution.
+func executionKey(id shared.ID) string {
+	return "executions/" + string(id)
 }
