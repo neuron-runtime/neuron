@@ -561,12 +561,12 @@ Exit criteria:
 
 ### 4.1 Immutable assembly reference and retention
 
-- [ ] **R4-1** Persist the immutable assembly identity on the execution record. Today a snapshot
+- [x] **R4-1** Persist the immutable assembly identity on the execution record. Today a snapshot
       stores only `InstanceID` (`nore/internal/execution/snapshot.go:11-25`) and the assembly is
       reached indirectly through instance metadata
       (`nore/internal/instance/store.go:17-27`). Store `{assemblyID, version, hash, env}` (or a
       single artifact reference) directly on durable executions.
-- [ ] **R4-2** Stop pruning an assembly artifact that a non-terminal durable execution
+- [x] **R4-2** Stop pruning an assembly artifact that a non-terminal durable execution
       references. Replace unconditional same-version pruning
       (`nore/internal/assembly/repository.go:62-66`, `:248-265`) with reference-aware retention
       or an explicit GC that refuses to delete a referenced artifact.
@@ -596,30 +596,30 @@ Exit criteria:
 - [ ] **R4-7** Decide how the blueprint is recovered. Preferred: persist the immutable assembly
       reference and recompile from the retained artifact. Do not copy the whole graph into every
       execution unless measurement shows recompilation is a problem.
-- [ ] **R4-8** Define status semantics precisely. `waiting` is an execution that is suspended,
+- [x] **R4-8** Define status semantics precisely. `waiting` is an execution that is suspended,
       not a capability that is running. `retry_wait` is a capability awaiting a future attempt.
       Neither may occupy a worker.
 
 ### 4.3 Transactional transitions and dispatch
 
-- [ ] **R4-9** Make the execution state machine own transitions. The scheduler currently mutates
+- [x] **R4-9** Make the execution state machine own transitions. The scheduler currently mutates
       state and publishes events in several steps
       (`nore/internal/execution/scheduler/scheduler.go:240-314`). Introduce a transition
       operation that validates the precondition, applies the change, and persists it atomically.
-- [ ] **R4-10** Persist the state transition and the dispatch intent in one transaction (or a
+- [x] **R4-10** Persist the state transition and the dispatch intent in one transaction (or a
       transactional outbox). A crash must not leave "capability completed" recorded without the
       resulting ready work being discoverable.
-- [ ] **R4-11** Define commit ownership: a successful durable transition means the required
+- [x] **R4-11** Define commit ownership: a successful durable transition means the required
       persistent record was committed, not merely updated in memory.
-- [ ] **R4-12** Add safe work claiming for multiple schedulers/replicas: a lease or a
+- [x] **R4-12** Add safe work claiming for multiple schedulers/replicas: a lease or a
       compare-and-set claim with an expiry, so the same ready work is not executed twice.
       SQLite is single-host; PostgreSQL must not assume a single scheduler.
-- [ ] **R4-13** On startup, reconcile pending work against persisted state rather than relying on
+- [x] **R4-13** On startup, reconcile pending work against persisted state rather than relying on
       in-memory event channels. In-memory events remain a low-latency wake-up mechanism only.
 
 ### 4.4 Recovery protocol
 
-- [ ] **R4-14** Implement recovery for unfinished durable executions:
+- [x] **R4-14** Implement recovery for unfinished durable executions:
       1. load the execution record
       2. resolve the immutable assembly artifact
       3. restore capability, join, attempt, and wait state
@@ -630,15 +630,15 @@ Exit criteria:
 - [ ] **R4-15** Keep non-durable behavior unchanged: when durability is off, interrupted
       executions are still failed rather than resumed
       (`nore/internal/instance/drain.go:35-45`). The mode decides which sweep applies.
-- [ ] **R4-16** Define interrupted-invocation handling. A capability that was `running` at the
+- [x] **R4-16** Define interrupted-invocation handling. A capability that was `running` at the
       moment of interruption has an unknown external outcome. The default is at-least-once
       redispatch with an idempotency key; a per-capability policy may require reconciliation
       instead. Document both.
-- [ ] **R4-17** Never rerun a capability recorded as `completed`. Prove this in recovery tests.
+- [x] **R4-17** Never rerun a capability recorded as `completed`. Prove this in recovery tests.
 
 ### 4.5 Attempt identity and idempotency
 
-- [ ] **R4-18** Define stable execution ID, logical operation ID, and per-invocation attempt ID.
+- [x] **R4-18** Define stable execution ID, logical operation ID, and per-invocation attempt ID.
       Expose an idempotency key to the capability runtime so a downstream service can deduplicate.
 - [ ] **R4-19** Extend the capability runtime protocol only if needed to carry the attempt/
       idempotency identity. Any protocol change is versioned and documented for every SDK
@@ -648,13 +648,13 @@ Exit criteria:
 
 ### 4.6 Execution durability mode
 
-- [ ] **R4-21** Add an explicit execution durability setting, for example
+- [x] **R4-21** Add an explicit execution durability setting, for example
       `execution.durability: none | history | durable`, aligned with the AGENTS.md storage
       policy guidance. Define what each mode retains and whether it resumes.
-- [ ] **R4-22** Default to the current behavior (history/observability) so enabling durability is
+- [x] **R4-22** Default to the current behavior (history/observability) so enabling durability is
       a deliberate deployment choice. Durable mode requires a transactional backend and must
       fail startup with an actionable error if the backend cannot support it.
-- [ ] **R4-23** Ensure execution semantics never depend on durable storage being enabled, except
+- [x] **R4-23** Ensure execution semantics never depend on durable storage being enabled, except
       for the resume guarantee itself.
 
 ### 4.7 Validation
