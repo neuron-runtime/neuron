@@ -137,6 +137,110 @@ func (s *ExecutionStore) Save(ctx context.Context, execution *Execution) error {
 	return nil
 }
 
+// SaveTransition atomically persists an execution's next revision together with
+// the dispatch intents produced by that state transition.
+//
+// A successful return is the commit-ownership boundary: the execution snapshot
+// and every provided intent are durably committed, not merely updated in memory.
+// If any write fails the transaction rolls back, so a caller never observes a
+// transition whose intents were lost, or intents whose transition was lost.
+// Intents are written directly through the transaction; SaveTransition must not
+// call EnqueueDispatchIntent because that would open a nested transaction.
+//
+// The revision contract matches Save: a stale execution reports
+// storage.ErrConflict and leaves both durable and in-memory state untouched.
+func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Execution, intents []*DispatchIntent) error {
+	if execution == nil {
+		return fmt.Errorf("execution is required")
+	}
+	execution.saveMu.Lock()
+	defer execution.saveMu.Unlock()
+
+	key, err := s.key(execution.ID)
+	if err != nil {
+		return err
+	}
+
+	// Resolve every intent key before opening the transaction so invalid input
+	// fails fast. CreatedAt is applied to copies and only written back to the
+	// caller's intents after the commit, so a rolled-back transition does not
+	// mutate them.
+	type pendingIntent struct {
+		key          string
+		record       DispatchIntent
+		setCreatedAt bool
+	}
+	pending := make([]pendingIntent, 0, len(intents))
+	for _, intent := range intents {
+		if intent == nil {
+			return fmt.Errorf("dispatch intent is required")
+		}
+		if intent.ExecutionID == "" || intent.CapabilityID == "" || intent.AttemptID == "" {
+			return fmt.Errorf("dispatch intent requires execution, capability, and attempt IDs")
+		}
+		intentKey, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+		if err != nil {
+			return err
+		}
+		pending = append(pending, pendingIntent{
+			key:          intentKey,
+			record:       *intent,
+			setCreatedAt: intent.CreatedAt.IsZero(),
+		})
+	}
+
+	var nextRevision uint64
+	createdAt := time.Now().UTC()
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		currentRevision, err := storedRevision(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		if execution.Revision() != currentRevision {
+			return fmt.Errorf("%w: execution %s is at revision %d, stored revision is %d",
+				storage.ErrConflict, execution.ID, execution.Revision(), currentRevision)
+		}
+
+		nextRevision = currentRevision + 1
+		data, err := marshalExecutionAt(execution, nextRevision)
+		if err != nil {
+			return err
+		}
+		if err := tx.Put(ctx, key, data); err != nil {
+			return err
+		}
+
+		for i := range pending {
+			item := &pending[i]
+			if item.setCreatedAt {
+				item.record.CreatedAt = createdAt
+			}
+			encoded, err := json.Marshal(&item.record)
+			if err != nil {
+				return fmt.Errorf("marshal dispatch intent %s: %w", item.key, err)
+			}
+			if err := tx.Put(ctx, item.key, encoded); err != nil {
+				return fmt.Errorf("write dispatch intent %s: %w", item.key, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("persist execution %s transition: %w", execution.ID, err)
+	}
+
+	execution.setRevision(nextRevision)
+	for i := range pending {
+		if pending[i].setCreatedAt {
+			intents[i].CreatedAt = pending[i].record.CreatedAt
+		}
+	}
+	if err := s.mem.Save(ctx, execution); err != nil {
+		return fmt.Errorf("record execution %s in memory after durable transition: %w", execution.ID, err)
+	}
+	return nil
+}
+
 // Delete removes the durable record before the in-memory record. A failed
 // durable delete leaves memory intact so the execution remains readable.
 func (s *ExecutionStore) Delete(ctx context.Context, executionID shared.ID) error {
@@ -287,6 +391,18 @@ type DispatchIntent struct {
 
 func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) (string, error) {
 	return storage.Key("dispatch_intents", string(executionID), string(capabilityID), string(attemptID))
+}
+
+// dispatchIntentFor builds the ready dispatch intent for one capability attempt.
+// It keeps intent construction in one place so callers do not duplicate the
+// identity fields that the store indexes intents by.
+func dispatchIntentFor(executionID, capabilityID, attemptID shared.ID) *DispatchIntent {
+	return &DispatchIntent{
+		ExecutionID:  executionID,
+		CapabilityID: capabilityID,
+		AttemptID:    attemptID,
+		ReadyToRun:   true,
+	}
 }
 
 // EnqueueDispatchIntent records a ready dispatch intent. It is idempotent: an
