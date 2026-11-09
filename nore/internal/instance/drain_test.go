@@ -249,6 +249,7 @@ func TestRestoreInstanceDrainsExecutionsLeftRunning(t *testing.T) {
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
+		false,
 	)
 	if err != nil {
 		t.Fatalf("restore instance: %v", err)
@@ -386,6 +387,7 @@ func TestSweepLeavesDetachedExecutionsForRestore(t *testing.T) {
 		metadata{ID: string(instanceID), Status: StatusRunning},
 		execution.NewExecutionStore(store),
 		event.NewStore(store),
+		false,
 	)
 	if err != nil {
 		t.Fatalf("restore instance: %v", err)

@@ -39,6 +39,11 @@ type Manager struct {
 	// builtinPolicy bounds the built-in capability runtimes every instance
 	// this manager creates registers.
 	builtinPolicy builtins.Policy
+
+	// durability is the execution durability mode ("none", "history", or
+	// "durable"). It decides whether interrupted executions are failed on
+	// restart or left for recovery to resume.
+	durability string
 }
 
 func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) (*Manager, error) {
@@ -54,6 +59,10 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 			opt(&optsApplied)
 		}
 	}
+	durability := optsApplied.Durability
+	if durability == "" {
+		durability = "history"
+	}
 	m := &Manager{
 		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
 		instancesByID:        make(map[string]*Instance),
@@ -64,6 +73,7 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 		assemblies:           assemblies,
 		detachedDrainTimeout: detachedDrainTimeout,
 		builtinPolicy:        optsApplied.builtinPolicy,
+		durability:           durability,
 	}
 	if err := m.reconcile(parent); err != nil {
 		return nil, err
@@ -79,12 +89,17 @@ func (m *Manager) reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load instance metadata: %w", err)
 	}
+	// Only durable mode may leave interrupted executions non-terminal for
+	// recovery. "none" and "history" keep the previous behavior: an execution
+	// with no runtime to advance it is failed during restore.
+	resumeDurable := m.durability == "durable"
 	for _, rec := range records {
 		i, err := restoreInstance(
 			m.parent,
 			rec,
 			execution.NewExecutionStore(m.store),
 			event.NewStore(m.store),
+			resumeDurable,
 		)
 		if err != nil {
 			return fmt.Errorf("restore instance %s: %w", rec.ID, err)
@@ -100,6 +115,12 @@ func (m *Manager) reconcile(ctx context.Context) error {
 }
 
 func (m *Manager) recoverExecutions(ctx context.Context) error {
+	// Recovery is meaningful only in durable mode. In "none" and "history"
+	// modes restoreInstance has already failed every unfinished execution, so
+	// there is nothing to resume and recovery is deliberately a no-op.
+	if m.durability != "durable" {
+		return nil
+	}
 	// Load all execution records from storage.
 	prefix, err := storage.Prefix("executions")
 	if err != nil {
