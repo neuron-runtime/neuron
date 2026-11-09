@@ -142,6 +142,12 @@ type ExecutionConfig struct {
 	// Timeout is a duration string such as "30m". Kept as a string so it
 	// unmarshals from YAML without custom parsing.
 	Timeout string `yaml:"timeout" mapstructure:"timeout"`
+
+	// Durability is the execution durability mode. Modes:
+	//   "none"     - no durability guarantees (executions failed on interrupt)
+	//   "history"  - observability only (history survives restart, but unfinished work is failed)
+	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
+	Durability string `yaml:"durability" mapstructure:"durability"`
 }
 
 // WorkerConfig describes the capability runtime worker pool.
@@ -190,16 +196,8 @@ type StorageConfig struct {
 
 	// DSN is the PostgreSQL connection string. Must not be committed.
 	DSN string `yaml:"dsn" mapstructure:"dsn"`
-
-	// Durability is the execution durability mode. This is a deployment-level setting
-	// that cannot be configured in project configuration. Modes:
-	//   "none"     - no durability guarantees (current behavior: executions failed on interrupt)
-	//   "history"  - observability only (history survives restart, but unfinished work is failed) -- default
-	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
-	Durability string `yaml:"durability" mapstructure:"durability"`
 }
 
-// CapabilityRuntimesConfig lists the executable registries Neuron can resolve capabilities
 // against. A capability only declares `type`/`version`; the registry resolution
 // assembly determines where the capability runtime comes from.
 type CapabilityRuntimesConfig struct {

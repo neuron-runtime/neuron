@@ -20,8 +20,9 @@ func Defaults() Config {
 			Host: "localhost",
 			Port: RuntimePort{Mode: RuntimePortAuto},
 			Execution: ExecutionConfig{
-				Mode:    "wait",
-				Timeout: "30m",
+				Mode:       "wait",
+				Timeout:    "30m",
+				Durability: "history",
 			},
 			Workers: WorkerConfig{
 				Min: 1,
@@ -41,12 +42,7 @@ func Defaults() Config {
 			Driver:    "sqlite",
 			Directory: DefaultDataDir(),
 			Path:      DefaultDataDir(),
-			Durability: "history",
 		},
-
-		// No registries are compiled in. A project that resolves external
-		// capability runtimes must declare them; the default registry list is only the
-		// fallback for Requirements that name no registry.
 		CapabilityRuntimes: CapabilityRuntimesConfig{
 			StoreDir:          DefaultStoreDir(),
 			DefaultRegistries: []string{"local"},

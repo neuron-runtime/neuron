@@ -83,6 +83,9 @@ func main() {
 	if envDSN := os.Getenv("NEURON_DATABASE_URL"); envDSN != "" {
 		storageDSN = envDSN
 	}
+	if envDurability := os.Getenv("NEURON_EXECUTION_DURABILITY"); envDurability != "" {
+		durability = envDurability
+	}
 
 	if showVer {
 		fmt.Println(version.String())
@@ -156,6 +159,19 @@ func main() {
 	}
 	defer store.Close()
 
+	// When durability is "durable", the storage backend must support transactions.
+	// Verify the backend can open a transaction; if it cannot, fail startup with
+	// an actionable error indicating which backend was selected and that a
+	// transactional backend (e.g., sqlite, postgres) is required.
+	if durability == "durable" {
+		txCtx, txCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer txCancel()
+		if err := store.WithTx(txCtx, func(_ storage.Tx) error { return nil }); err != nil {
+			log.Fatalf("durable mode requires a transactional storage backend; "+
+				"the selected driver %q does not support transactions: %v", storageDriver, err)
+		}
+	}
+
 	assemblies := assembly.NewRepository(store)
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
@@ -168,7 +184,8 @@ func main() {
 	}
 
 	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
-		instance.WithBuiltinPolicy(builtinPolicy))
+		instance.WithBuiltinPolicy(builtinPolicy),
+		instance.WithDurability(durability))
 	if err != nil {
 		log.Fatalf("init instance manager: %v", err)
 	}
@@ -431,7 +448,7 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 
 	// Open storage before publishing the discovery record. A runtime that
 	// cannot initialize its durable state must not advertise itself as ready.
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN})
+	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN, Durability: durability})
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}
@@ -465,7 +482,8 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	}
 
 	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
-		instance.WithBuiltinPolicy(builtinPolicy))
+		instance.WithBuiltinPolicy(builtinPolicy),
+		instance.WithDurability(durability))
 	if err != nil {
 		log.Fatalf("init instance manager: %v", err)
 	}

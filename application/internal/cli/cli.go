@@ -215,7 +215,7 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add durability mode (deployment-level; project config rejects it)
-	durability := cfg.Storage.Durability
+	durability := cfg.Runtime.Execution.Durability
 	if durability != "" {
 		noreArgs = append(noreArgs, "--durability", durability)
 	}

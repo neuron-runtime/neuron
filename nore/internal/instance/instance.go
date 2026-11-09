@@ -53,6 +53,9 @@ type options struct {
 	// builtinPolicy bounds the built-in capability runtimes this instance
 	// registers.
 	builtinPolicy builtins.Policy
+
+	// durability is the execution durability mode. Controls recovery behavior.
+	Durability string
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -84,6 +87,14 @@ func WithDetachedDrainTimeout(timeout time.Duration) Option {
 func WithBuiltinPolicy(policy builtins.Policy) Option {
 	return func(o *options) {
 		o.builtinPolicy = policy
+	}
+}
+
+// WithDurability sets the execution durability mode for the instance.
+// Valid values are "none", "history", and "durable".
+func WithDurability(d string) Option {
+	return func(o *options) {
+		o.Durability = d
 	}
 }
 
