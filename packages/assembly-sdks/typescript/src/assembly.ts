@@ -291,8 +291,11 @@ function collectMissingRefs(
 // produces one incoming binding; zero sources fall back to the positional
 // anchor from `.bind()` when present (otherwise the node is an entry point and
 // runs from the assembly's execution params, in parallel with other entries);
-// more than one source is execution fan-in and is rejected — it requires an
-// aggregation capability.
+// more than one source is execution fan-in: each source emits one binding
+    // with its own mappings. The target implicitly becomes an "all-required join":
+    // all sources must provide their data before the target can execute. An
+    // explicit join declaration is only added when the implicit form is ambiguous
+    // (e.g. when some sources are optional or when a join capability is needed).
 // ---------------------------------------------------------------------------
 
 function collectBindings(

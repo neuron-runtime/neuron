@@ -28,7 +28,7 @@ func registerRunnableAssembly(t *testing.T, h *Handler, key protocol.InstanceKey
 				}},
 			},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("register runnable assembly %s: %v", key.String(), err)
 	}

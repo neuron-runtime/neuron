@@ -90,7 +90,7 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	}
 	defer os.RemoveAll(stage)
 
-	if err := i.materialize(pkg, stage); err != nil {
+	if err := i.materialize(ctx, pkg, stage); err != nil {
 		return nil, fmt.Errorf("install provider %s@%s: %w", pkg.Name, pkg.Version, err)
 	}
 
@@ -174,7 +174,7 @@ func (i *Installer) Install(ctx context.Context, pkg *Package) (*InstallResult, 
 	return &InstallResult{Installed: installed}, nil
 }
 
-func (i *Installer) materialize(pkg *Package, stage string) error {
+func (i *Installer) materialize(ctx context.Context, pkg *Package, stage string) error {
 	if pkg.Source != "" {
 		info, err := os.Stat(pkg.Source)
 		if err != nil {
@@ -193,7 +193,7 @@ func (i *Installer) materialize(pkg *Package, stage string) error {
 		if i.Downloader == nil {
 			return fmt.Errorf("provider %s@%s: artifact %s requires a downloader", pkg.Name, pkg.Version, pkg.Artifact.URL)
 		}
-		downloaded, err := i.Downloader.Download(context.Background(), pkg.Artifact.URL, pkg.Artifact.SHA256)
+		downloaded, err := i.Downloader.Download(ctx, pkg.Artifact.URL, pkg.Artifact.SHA256)
 		if err != nil {
 			return err
 		}

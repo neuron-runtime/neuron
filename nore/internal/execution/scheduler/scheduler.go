@@ -337,6 +337,24 @@ func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionm
 	}))
 }
 
+// failExecution handles a capability failure. For fan-in executions, the
+// following failure semantics apply:
+//
+//   - Required predecessors that permanently fail cause the join to fail fast,
+//     which prevents the target from ever running and marks the execution as
+//     failed. This is the "one failure fails the execution" behavior.
+//
+//   - Retryable failures (classified by the engine's retry policy) are still
+//     retryable: the capability may be re-attempted, and if it eventually
+//     succeeds, its contribution is recorded toward the join as normal.
+//
+//   - If any required predecessor has permanently failed, the join cannot be
+//     satisfied and the execution fails. The execution error contains the first
+//     failure reason received.
+//
+// MarkFailed is called on the execution state; once the execution is terminal,
+// further capability completions are ignored (onCapabilityCompleted returns
+// early when execution.IsTerminal()).
 func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err error) {
 	execution, loadErr := s.executions.Get(ctx, executionID)
 	if errors.Is(loadErr, storage.ErrNotFound) {

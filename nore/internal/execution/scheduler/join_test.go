@@ -33,9 +33,23 @@ func TestFanInJoinExecution(t *testing.T) {
 	go func() { _ = engineInstance.Run(ctx) }()
 
 	a := stubNode("a", core.RuntimeExecutionModeWait)
-	a.Next = []executionmodelTypes.ExecutionTransition{{BindingID: "a-t", TargetCapabilityID: "t"}}
+	a.Next = []executionmodelTypes.ExecutionTransition{{
+		BindingID:          "a-t",
+		TargetCapabilityID: "t",
+		Mappings: []executionmodelTypes.CompiledMapping{{
+			TargetPath: "x",
+			Source:     core.ValueRef{Kind: core.ValueRefLiteral, Value: "from-a"},
+		}},
+	}}
 	b := stubNode("b", core.RuntimeExecutionModeWait)
-	b.Next = []executionmodelTypes.ExecutionTransition{{BindingID: "b-t", TargetCapabilityID: "t"}}
+	b.Next = []executionmodelTypes.ExecutionTransition{{
+		BindingID:          "b-t",
+		TargetCapabilityID: "t",
+		Mappings: []executionmodelTypes.CompiledMapping{{
+			TargetPath: "y",
+			Source:     core.ValueRef{Kind: core.ValueRefLiteral, Value: "from-b"},
+		}},
+	}}
 	tNode := executionmodelTypes.ExecutionNode{
 		Capability: core.Capability{
 			Metadata: core.Metadata{ID: "t", Name: "t", Version: "1.0.0"},
@@ -58,7 +72,7 @@ func TestFanInJoinExecution(t *testing.T) {
 			core.ID("t"): tNode,
 			core.ID("d"): d,
 		},
-		EntryCapabilityIDs: []core.ID{core.ID("a")},
+		EntryCapabilityIDs: []core.ID{core.ID("a"), core.ID("b")},
 	}
 
 	parent, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1", "", "", "", "")

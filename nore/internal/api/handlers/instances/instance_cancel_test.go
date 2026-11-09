@@ -43,7 +43,7 @@ func newCancellationHandler(t *testing.T) (*Handler, *instance.Instance) {
 				}},
 			},
 		},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("register assembly: %v", err)
 	}
 
