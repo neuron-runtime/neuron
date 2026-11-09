@@ -124,6 +124,11 @@ type Instance struct {
 	analytics *analytics.Analytics
 
 	execPersister *executionPersister
+
+	// durability is the execution durability mode. In non-durable mode the
+	// event-driven execution persister persists snapshots; in durable mode
+	// the scheduler owns transition persistence.
+	durability string
 }
 
 func New(
@@ -150,6 +155,9 @@ func New(
 		if opt != nil {
 			opt(&optsApplied)
 		}
+	}
+	if optsApplied.Durability == "" {
+		optsApplied.Durability = "history"
 	}
 
 	store := execution.NewExecutionStore(persistentStore)
@@ -239,6 +247,7 @@ func New(
 		registry:      reg,
 		analytics:     anly,
 		execPersister: persister,
+		durability:    optsApplied.Durability,
 	}
 
 	return i, nil
