@@ -20,6 +20,8 @@ const (
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
+	StatusWaiting   Status = "waiting"
+	StatusRetryWait Status = "retry_wait"
 )
 
 type CapabilityStatus string
@@ -30,6 +32,8 @@ const (
 	CapabilityRunning   CapabilityStatus = "running"
 	CapabilityCompleted CapabilityStatus = "completed"
 	CapabilityFailed    CapabilityStatus = "failed"
+	CapabilityWaiting   CapabilityStatus = "waiting"
+	CapabilityRetryWait CapabilityStatus = "retry_wait"
 
 	// CapabilityDetached marks a capability whose work was handed off to a
 	// separate execution instead of being run in place. It is terminal for the
@@ -46,10 +50,28 @@ const (
 )
 
 type CapabilityExecutionState struct {
-	Status      CapabilityStatus
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	Error       string
+	Status       CapabilityStatus
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+	Error        string
+	AttemptCount int
+
+	// FailureClassification classifies the nature of a failure for
+	// retry policy decisions. Empty when the capability has not failed
+	// or when the status is not failed.
+	FailureClassification string
+
+	// NextAttemptAt is the earliest time at which a failed capability
+	// may be re-attempted. Nil when the capability is not awaiting a retry.
+	NextAttemptAt *time.Time
+
+	// DispatchState tracks whether the capability has been dispatched
+	// and prevents duplicate dispatch. Values: "dispatched", "pending".
+	DispatchState string
+
+	// Deadline is the execution-level deadline for this capability's
+	// attempt. Zero value means no deadline is set.
+	Deadline *time.Time
 }
 
 type Execution struct {
@@ -102,6 +124,15 @@ type Execution struct {
 	Version    string
 	Hash       string
 	Env        string
+
+	// LogicalOperationID is a stable identifier for the logical operation
+	// being performed. It is preserved across restarts and used for
+	// idempotency and diagnostics.
+	LogicalOperationID shared.ID
+
+	// AttemptID is the per-invocation attempt identifier. It increments
+	// when a capability is re-attempted after a failure or wait.
+	AttemptID shared.ID
 }
 
 func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID, assemblyID, version, hash, env string) (*Execution, error) {
@@ -124,21 +155,23 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		}
 	}
 	return &Execution{
-		ID:            shared.NewID("exec_"),
-		CorrelationID: correlationID,
-		InstanceID:    instanceID,
-		Blueprint:     blueprint,
-		status:        StatusPending,
-		initialParams: make(map[string]any),
-		params:        make(map[shared.ID]map[string]any),
-		results:       make(map[shared.ID]map[string]any),
-		states:        states,
-		done:          make(chan struct{}),
-		joinState:     joinState,
-		AssemblyID:    assemblyID,
-		Version:       version,
-		Hash:          hash,
-		Env:           env,
+		ID:                 shared.NewID("exec_"),
+		CorrelationID:      correlationID,
+		InstanceID:         instanceID,
+		Blueprint:          blueprint,
+		status:             StatusPending,
+		initialParams:      make(map[string]any),
+		params:             make(map[shared.ID]map[string]any),
+		results:            make(map[shared.ID]map[string]any),
+		states:             states,
+		done:               make(chan struct{}),
+		joinState:          joinState,
+		AssemblyID:         assemblyID,
+		Version:            version,
+		Hash:               hash,
+		Env:                env,
+		LogicalOperationID: shared.NewID("logop_"),
+		AttemptID:          shared.NewID("attempt_"),
 	}, nil
 }
 
@@ -543,6 +576,9 @@ func (e *Execution) RecordJoinContribution(capabilityID shared.ID, bindingID sha
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	if e.Blueprint == nil {
+		return false, nil, fmt.Errorf("execution %s has no blueprint; cannot record join contribution", e.ID)
+	}
 	node, exists := e.Blueprint.Nodes[capabilityID]
 	if !exists {
 		return false, nil, fmt.Errorf("capability %s is not in the blueprint", capabilityID)

@@ -109,6 +109,9 @@ func TestJoinSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalExecution: %v", err)
 	}
+	// The snapshot does not carry the blueprint; recovery recompiles it from
+	// the immutable assembly artifact and attaches it to the restored execution.
+	restored.AttachBlueprint(bp)
 
 	// Check that the restored execution has the right status
 	if restored.Status() != exec.Status() {

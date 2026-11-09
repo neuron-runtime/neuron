@@ -583,7 +583,7 @@ Exit criteria:
 
 ### 4.2 Recoverable execution state
 
-- [ ] **R4-6** Version the execution snapshot schema and add a migration path
+- [x] **R4-6** Version the execution snapshot schema and add a migration path
       (`nore/internal/execution/snapshot.go`). Add at least:
       - immutable assembly reference (R4-1)
       - per-capability state including `pending`, `ready`, `running`, `retry_wait`, `waiting`,
