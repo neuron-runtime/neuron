@@ -271,26 +271,245 @@ func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
 	return json.Marshal(execution.snapshotAt(revision))
 }
 
-// DispatchIntent represents a unit of ready work that the reconcile worker
-// should claim and dispatch. It is persisted so that a restart does not lose
-// track of ready capabilities.
+// DispatchIntent represents a unit of ready work that a worker should claim and
+// dispatch. It is persisted so that a restart does not lose track of ready
+// capabilities. Owner identifies the current claim; LeaseExpiresAt bounds it so
+// a crashed owner's work becomes claimable again.
 type DispatchIntent struct {
-	ExecutionID  shared.ID `json:"execution_id"`
-	CapabilityID shared.ID `json:"capability_id"`
-	ReadyToRun   bool      `json:"ready_to_run"`
-	AttemptID    shared.ID `json:"attempt_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	Owner        string    `json:"owner,omitempty"`
+	ExecutionID    shared.ID  `json:"execution_id"`
+	CapabilityID   shared.ID  `json:"capability_id"`
+	ReadyToRun     bool       `json:"ready_to_run"`
+	AttemptID      shared.ID  `json:"attempt_id"`
+	CreatedAt      time.Time  `json:"created_at"`
+	Owner          string     `json:"owner,omitempty"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
 }
 
-// key returns a storage key for dispatch intents.
-func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) string {
-	return "dispatch_intents/" + string(executionID) + "/" + string(capabilityID) + "/" + string(attemptID)
+func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) (string, error) {
+	return storage.Key("dispatch_intents", string(executionID), string(capabilityID), string(attemptID))
 }
 
-// listDispatchIntents returns all dispatch intents for a given execution and capability.
-func (s *ExecutionStore) listDispatchIntents(ctx context.Context, executionID, capabilityID shared.ID) ([]*DispatchIntent, error) {
-	prefix, err := storage.Prefix("dispatch_intents", string(executionID), string(capabilityID))
+// EnqueueDispatchIntent records a ready dispatch intent. It is idempotent: an
+// intent already stored under the same execution/capability/attempt key keeps
+// its original creation time and any existing claim, so replaying readiness
+// cannot steal work that a worker is already running.
+func (s *ExecutionStore) EnqueueDispatchIntent(ctx context.Context, intent *DispatchIntent) error {
+	if intent == nil {
+		return fmt.Errorf("dispatch intent is required")
+	}
+	key, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+	if err != nil {
+		return err
+	}
+
+	setCreatedAt := intent.CreatedAt.IsZero()
+	var persistedCreatedAt time.Time
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		record := *intent
+		data, err := tx.Get(ctx, key)
+		switch {
+		case err == nil:
+			var existing DispatchIntent
+			if err := json.Unmarshal(data, &existing); err != nil {
+				return fmt.Errorf("decode dispatch intent %s: %w", key, err)
+			}
+			if !existing.CreatedAt.IsZero() {
+				record.CreatedAt = existing.CreatedAt
+			}
+			if existing.Owner != "" {
+				record.Owner = existing.Owner
+				record.LeaseExpiresAt = existing.LeaseExpiresAt
+			}
+		case !errors.Is(err, storage.ErrNotFound):
+			return fmt.Errorf("read dispatch intent %s: %w", key, err)
+		}
+
+		if record.CreatedAt.IsZero() {
+			record.CreatedAt = time.Now().UTC()
+		}
+		persistedCreatedAt = record.CreatedAt
+		encoded, err := json.Marshal(&record)
+		if err != nil {
+			return fmt.Errorf("marshal dispatch intent %s: %w", key, err)
+		}
+		return tx.Put(ctx, key, encoded)
+	})
+	if err != nil {
+		return fmt.Errorf("persist dispatch intent %s: %w", key, err)
+	}
+	if setCreatedAt {
+		intent.CreatedAt = persistedCreatedAt
+	}
+	return nil
+}
+
+// ClaimDispatchIntent attempts to take ownership of a dispatch intent. A claim
+// succeeds only while the intent is ready and is either unowned or has an
+// expired lease. The read, eligibility check, and write happen in one
+// transaction so concurrent callers cannot both observe the intent as
+// claimable. It returns (nil, false, nil) when the intent is missing, unready,
+// or held under a live lease.
+func (s *ExecutionStore) ClaimDispatchIntent(ctx context.Context, intent *DispatchIntent, owner string, lease time.Duration) (*DispatchIntent, bool, error) {
+	if intent == nil {
+		return nil, false, fmt.Errorf("dispatch intent is required")
+	}
+	if owner == "" {
+		return nil, false, fmt.Errorf("dispatch intent owner is required")
+	}
+	if lease <= 0 {
+		return nil, false, fmt.Errorf("dispatch intent lease must be positive")
+	}
+	key, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+	if err != nil {
+		return nil, false, err
+	}
+	return s.claimDispatchIntent(ctx, key, owner, lease)
+}
+
+func (s *ExecutionStore) claimDispatchIntent(ctx context.Context, key, owner string, lease time.Duration) (*DispatchIntent, bool, error) {
+	var claimed *DispatchIntent
+	err := s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read dispatch intent %s: %w", key, err)
+		}
+
+		var intent DispatchIntent
+		if err := json.Unmarshal(data, &intent); err != nil {
+			return fmt.Errorf("decode dispatch intent %s: %w", key, err)
+		}
+		now := time.Now().UTC()
+		if !dispatchIntentClaimable(&intent, now) {
+			return nil
+		}
+
+		expires := now.Add(lease)
+		intent.Owner = owner
+		intent.LeaseExpiresAt = &expires
+		encoded, err := json.Marshal(&intent)
+		if err != nil {
+			return fmt.Errorf("marshal dispatch intent %s: %w", key, err)
+		}
+		if err := tx.Put(ctx, key, encoded); err != nil {
+			return fmt.Errorf("write dispatch intent %s: %w", key, err)
+		}
+		claimed = &intent
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return claimed, claimed != nil, nil
+}
+
+// dispatchIntentClaimable reports whether a stored intent may be claimed at
+// now. An intent held by an owner without a lease expiry is treated as live so
+// a malformed claim cannot cause duplicate dispatch.
+func dispatchIntentClaimable(intent *DispatchIntent, now time.Time) bool {
+	if !intent.ReadyToRun {
+		return false
+	}
+	if intent.Owner == "" {
+		return true
+	}
+	return intent.LeaseExpiresAt != nil && !intent.LeaseExpiresAt.After(now)
+}
+
+// ReleaseDispatchIntent clears the claim only when owner still holds it. It is a
+// no-op for a missing intent or a different owner, so a stale worker cannot
+// release work that has since been re-claimed.
+func (s *ExecutionStore) ReleaseDispatchIntent(ctx context.Context, executionID, capabilityID, attemptID shared.ID, owner string) error {
+	if owner == "" {
+		return fmt.Errorf("dispatch intent owner is required")
+	}
+	key, err := dispatchIntentKey(executionID, capabilityID, attemptID)
+	if err != nil {
+		return err
+	}
+
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read dispatch intent %s: %w", key, err)
+		}
+
+		var intent DispatchIntent
+		if err := json.Unmarshal(data, &intent); err != nil {
+			return fmt.Errorf("decode dispatch intent %s: %w", key, err)
+		}
+		if intent.Owner != owner {
+			return nil
+		}
+
+		intent.Owner = ""
+		intent.LeaseExpiresAt = nil
+		encoded, err := json.Marshal(&intent)
+		if err != nil {
+			return fmt.Errorf("marshal dispatch intent %s: %w", key, err)
+		}
+		return tx.Put(ctx, key, encoded)
+	})
+	if err != nil {
+		return fmt.Errorf("release dispatch intent %s: %w", key, err)
+	}
+	return nil
+}
+
+// CompleteDispatchIntent deletes the intent only when owner still holds it. It
+// is idempotent: a missing intent or a different owner is a no-op, so a late
+// completion cannot delete a newer claim.
+func (s *ExecutionStore) CompleteDispatchIntent(ctx context.Context, executionID, capabilityID, attemptID shared.ID, owner string) error {
+	if owner == "" {
+		return fmt.Errorf("dispatch intent owner is required")
+	}
+	key, err := dispatchIntentKey(executionID, capabilityID, attemptID)
+	if err != nil {
+		return err
+	}
+
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read dispatch intent %s: %w", key, err)
+		}
+
+		var intent DispatchIntent
+		if err := json.Unmarshal(data, &intent); err != nil {
+			return fmt.Errorf("decode dispatch intent %s: %w", key, err)
+		}
+		if intent.Owner != owner {
+			return nil
+		}
+		return tx.Delete(ctx, key)
+	})
+	if err != nil {
+		return fmt.Errorf("complete dispatch intent %s: %w", key, err)
+	}
+	return nil
+}
+
+// ClaimReadyDispatchIntents claims every ready, claimable intent for owner and
+// returns only the intents this call won. It is the startup reconciliation
+// primitive: leases that outlived a crashed owner become claimable once they
+// expire, while intents under a live lease are left untouched. Intents are
+// claimed individually, so a concurrent reconciler may win some of them.
+func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner string, lease time.Duration) ([]*DispatchIntent, error) {
+	if owner == "" {
+		return nil, fmt.Errorf("dispatch intent owner is required")
+	}
+	if lease <= 0 {
+		return nil, fmt.Errorf("dispatch intent lease must be positive")
+	}
+	prefix, err := storage.Prefix("dispatch_intents")
 	if err != nil {
 		return nil, fmt.Errorf("prefix dispatch intents: %w", err)
 	}
@@ -298,110 +517,16 @@ func (s *ExecutionStore) listDispatchIntents(ctx context.Context, executionID, c
 	if err != nil {
 		return nil, fmt.Errorf("list dispatch intents: %w", err)
 	}
-	var ints []*DispatchIntent
-	for _, k := range keys {
-		data, err := s.store.Get(ctx, k)
-		if err != nil {
-			continue
-		}
-		var did DispatchIntent
-		if err := json.Unmarshal(data, &did); err != nil {
-			continue
-		}
-		ints = append(ints, &did)
-	}
-	return ints, nil
-}
 
-// claimDispatchIntent atomically claims a dispatch intent for dispatch.
-func (s *ExecutionStore) claimDispatchIntent(ctx context.Context, did *DispatchIntent) (*DispatchIntent, error) {
-	key := dispatchIntentKey(did.ExecutionID, did.CapabilityID, did.AttemptID)
-	var existing *DispatchIntent
-	err := s.store.WithTx(ctx, func(tx storage.Tx) error {
-		data, err := tx.Get(ctx, key)
+	claimed := make([]*DispatchIntent, 0, len(keys))
+	for _, key := range keys {
+		intent, won, err := s.claimDispatchIntent(ctx, key, owner, lease)
 		if err != nil {
-			if storage.ErrNotFound == err {
-				return nil // already claimed/deleted
-			}
-			return err
+			return claimed, fmt.Errorf("claim dispatch intents: %w", err)
 		}
-		if err := json.Unmarshal(data, &existing); err != nil {
-			return err
-		}
-		// Only claim if not already claimed.
-		if existing.Owner != "" {
-			return nil
-		}
-		// Mark as claimed with a lease derived from current time.
-		existing.Owner = fmt.Sprintf("lease_%d", time.Now().UnixNano())
-		bytes, err := json.Marshal(existing)
-		if err != nil {
-			return err
-		}
-		return tx.Put(ctx, key, bytes)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return existing, nil
-}
-
-func (s *ExecutionStore) ReconcileDispatchIntents(ctx context.Context) (int, error) {
-	prefix, err := storage.Prefix("dispatch_intents")
-	if err != nil {
-		return 0, fmt.Errorf("prefix dispatch intents: %w", err)
-	}
-	keys, err := s.store.List(ctx, prefix)
-	if err != nil {
-		return 0, err
-	}
-	claimed := 0
-	for _, k := range keys {
-		data, err := s.store.Get(ctx, k)
-		if err != nil {
-			continue
-		}
-		var did DispatchIntent
-		if err := json.Unmarshal(data, &did); err != nil {
-			continue
-		}
-		if !did.ReadyToRun {
-			continue // only claim intents that are marked ready
-		}
-		// Attempt to claim via CAS.
-		var existing *DispatchIntent
-		err = s.store.WithTx(ctx, func(tx storage.Tx) error {
-			data, err := tx.Get(ctx, k)
-			if err != nil {
-				return err
-			}
-			if err := json.Unmarshal(data, &did); err != nil {
-				return err
-			}
-			if did.Owner != "" {
-				return nil // already claimed by another worker
-			}
-			// Claim it.
-			bytes, err := json.Marshal(&did)
-			if err != nil {
-				return err
-			}
-			if err := tx.Put(ctx, k, bytes); err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			continue
-		}
-		if existing != nil && existing.Owner != "" {
-			claimed++
+		if won {
+			claimed = append(claimed, intent)
 		}
 	}
 	return claimed, nil
-}
-
-// executionKey returns the storage key for an execution.
-func executionKey(id shared.ID) string {
-	return "executions/" + string(id)
 }
