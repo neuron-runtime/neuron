@@ -90,6 +90,53 @@ func TestUndocumentedCapabilityListIsNotACommand(t *testing.T) {
 	}
 }
 
+// TestProjectRuntimeReceivesDurability pins the deployment-level durability
+// flag to the runtime it starts. Durability is rejected in the project file, so
+// the flag and environment are the only authoring surfaces that must reach nore.
+func TestProjectRuntimeReceivesDurability(t *testing.T) {
+	dir := t.TempDir()
+
+	argsFile := filepath.Join(dir, "nore-args.txt")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\" >> " + argsFile + "; done\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write the project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore, "--durability", "durable"})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("bare `neuron`: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read the runtime arguments: %v", err)
+	}
+	args := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--durability" && args[i+1] == "durable" {
+			return
+		}
+	}
+	t.Fatalf("the runtime was not started with the durability mode: %v", args)
+}
+
 // TestProjectRuntimeReceivesTheBuiltinPolicy pins the wiring between the
 // project's built-in policy and the runtime that enforces it. The policy
 // travels with the runtime, because a configuration the runtime never

@@ -23,6 +23,7 @@ func noreArgs(t *testing.T, args []string) []string {
 	_ = fs.String("storage-path", "", "")
 	_ = fs.String("storage-dsn", "", "")
 	_ = fs.String("detached-drain-timeout", "30s", "")
+	_ = fs.String("durability", "", "")
 
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("nore flag set rejected daemon args %q: %v", args, err)
@@ -87,6 +88,26 @@ func TestConfigFromEffectiveOmitsEmptyDetachedDrainTimeout(t *testing.T) {
 	// default must apply, not an empty flag argument.
 	if hasArgPair(ConfigFromEffective(config.Config{}).Args, "--detached-drain-timeout", "") {
 		t.Fatal("an empty detached drain timeout must not be forwarded")
+	}
+}
+
+func TestConfigFromEffectiveCarriesDurability(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Runtime.Execution.Durability = config.DurabilityDurable
+
+	c := ConfigFromEffective(cfg)
+
+	if pos := noreArgs(t, c.Args); len(pos) > 0 {
+		t.Fatalf("daemon args contain positional arguments: %v", pos)
+	}
+	if !hasArgPair(c.Args, "--durability", config.DurabilityDurable) {
+		t.Fatalf("daemon args %v must carry the configured durability mode", c.Args)
+	}
+}
+
+func TestConfigFromEffectiveOmitsEmptyDurability(t *testing.T) {
+	if hasArgPair(ConfigFromEffective(config.Config{}).Args, "--durability", "") {
+		t.Fatal("an empty durability mode must not be forwarded")
 	}
 }
 

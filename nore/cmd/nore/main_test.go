@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/neuron-runtime/neuron/nore/internal/instance"
+	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
 )
@@ -193,5 +198,56 @@ func TestResolveBuiltinPolicyRefusesAnUnusablePolicy(t *testing.T) {
 	}
 	if _, err := resolveBuiltinPolicy(`{"maxHTTPResponseBytes":1073741824}`); err == nil {
 		t.Fatal("resolveBuiltinPolicy accepted a limit above the compiled-in ceiling")
+	}
+}
+
+type nonTransactionalStore struct{}
+
+func (nonTransactionalStore) Get(context.Context, string) ([]byte, error) {
+	return nil, storage.ErrNotFound
+}
+
+func (nonTransactionalStore) Put(context.Context, string, []byte) error { return nil }
+
+func (nonTransactionalStore) Delete(context.Context, string) error { return nil }
+
+func (nonTransactionalStore) List(context.Context, string) ([]string, error) { return nil, nil }
+
+func (nonTransactionalStore) Ping(context.Context) error { return nil }
+
+func (nonTransactionalStore) WithTx(context.Context, func(storage.Tx) error) error {
+	return errors.New("transactions are not supported")
+}
+
+func (nonTransactionalStore) Close() error { return nil }
+
+func TestVerifyDurableBackendRejectsNonTransactionalStore(t *testing.T) {
+	err := verifyDurableBackend(context.Background(), nonTransactionalStore{}, "nontx", instance.DurabilityDurable)
+	if err == nil {
+		t.Fatal("durable mode accepted a non-transactional backend")
+	}
+	for _, want := range []string{"durable mode", "transactional", "nontx"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestVerifyDurableBackendSkipsNonDurableModes(t *testing.T) {
+	for _, mode := range []string{instance.DurabilityNone, instance.DurabilityHistory, ""} {
+		if err := verifyDurableBackend(context.Background(), nonTransactionalStore{}, "nontx", mode); err != nil {
+			t.Errorf("mode %q unexpectedly required transactions: %v", mode, err)
+		}
+	}
+}
+
+func TestEnvUnlessSetKeepsExplicitFlag(t *testing.T) {
+	t.Setenv("NEURON_EXECUTION_DURABILITY", instance.DurabilityNone)
+
+	if got := envUnlessSet(true, instance.DurabilityDurable, "NEURON_EXECUTION_DURABILITY"); got != instance.DurabilityDurable {
+		t.Errorf("explicit flag value = %q, want %q", got, instance.DurabilityDurable)
+	}
+	if got := envUnlessSet(false, "", "NEURON_EXECUTION_DURABILITY"); got != instance.DurabilityNone {
+		t.Errorf("environment value = %q, want %q", got, instance.DurabilityNone)
 	}
 }

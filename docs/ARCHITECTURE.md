@@ -942,15 +942,15 @@ On restart, N.O.R.E. restores instance metadata and execution records as **metad
 
 ### Durability modes
 
-The intended policy surface names three modes:
+The policy surface names three modes, configured at `runtime.execution.durability`. Durability is deployment-level configuration: the project configuration file rejects the key, and it is set through `--durability` or `NEURON_EXECUTION_DURABILITY`.
 
 | Mode | Semantics |
 | --- | --- |
-| `execution.durability: none` | No execution/event history is retained. Execution semantics do not depend on storage. |
-| `execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the behavior N.O.R.E. implements today. |
-| `execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with idempotent dispatch. Planned for Phase 4; not implemented. |
+| `runtime.execution.durability: none` | No execution/event history is retained. Live executions remain observable in memory, but nothing survives a restart. |
+| `runtime.execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the default and the behavior N.O.R.E. implements today. |
+| `runtime.execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with idempotent dispatch. Planned for Phase 4; not implemented. Startup refuses a non-transactional backend when this mode is selected. |
 
-The configuration key is not wired yet: today the `history` behavior is unconditional. Defining the modes here gives Phase 4 a contract to implement rather than an emergent behavior to reverse-engineer.
+`none` and `history` are wired through the CLI, daemon, and project launch paths. `durable` mode is validated and rejects non-transactional backends at startup, but resuming unfinished work is not implemented yet.
 
 ### Retention limitation
 
@@ -959,7 +959,7 @@ Registered assemblies are stored under `assemblies/{id}/{version}/{hash}/{env}/m
 Registration is not content-addressed immutable. Registering the same assembly version again replaces the version's previous artifact(s) and prunes the earlier hashes, so a given `name:version` addresses exactly one artifact, the newest one. A hash that is no longer retained resolves to `ErrNotFound`. Phase 4 removes this retention limitation for artifacts referenced by durable executions.
 
 > [!NOTE]
-> Execution history and events are an observability and persistence concern, not part of execution semantics. The current implementation always retains history; making retention configurable is a separate policy layer, and execution must not depend on it being enabled.
+> Execution history and events are an observability and persistence concern, not part of execution semantics. History is retained by default and can be disabled with `runtime.execution.durability: none`; execution must not depend on retention being enabled.
 
 ## Security & isolation
 

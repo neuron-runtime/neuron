@@ -17,6 +17,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Config is the effective Neuron configuration.
@@ -134,6 +136,22 @@ type RuntimePort struct {
 // IsAuto reports whether the port is OS-assigned.
 func (p RuntimePort) IsAuto() bool { return p.Mode == RuntimePortAuto }
 
+// Execution durability modes. They are deliberately distinct: retaining
+// history is not the same guarantee as resuming unfinished work.
+const (
+	// DurabilityNone keeps no execution or event history. Executions remain
+	// observable in memory while they run, but nothing survives a restart.
+	DurabilityNone = core.DurabilityNone
+
+	// DurabilityHistory retains execution and event history for inspection.
+	// Unfinished work is not resumed after a restart; it is reported as failed.
+	DurabilityHistory = core.DurabilityHistory
+
+	// DurabilityDurable persists transitions and dispatch intents so unfinished
+	// work can resume after a restart. It requires a transactional backend.
+	DurabilityDurable = core.DurabilityDurable
+)
+
 // ExecutionConfig controls how executions behave by default.
 type ExecutionConfig struct {
 	// Mode is "wait" or "detach".
@@ -144,8 +162,8 @@ type ExecutionConfig struct {
 	Timeout string `yaml:"timeout" mapstructure:"timeout"`
 
 	// Durability is the execution durability mode. Modes:
-	//   "none"     - no durability guarantees (executions failed on interrupt)
-	//   "history"  - observability only (history survives restart, but unfinished work is failed)
+	//   "none"     - no execution/event history is retained
+	//   "history"  - history is retained, but unfinished work is not resumed
 	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
 	Durability string `yaml:"durability" mapstructure:"durability"`
 }

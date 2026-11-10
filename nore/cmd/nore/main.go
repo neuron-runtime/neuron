@@ -28,6 +28,7 @@ import (
 	_ "github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
 	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/version"
 )
@@ -77,15 +78,14 @@ func main() {
 	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
 	flag.Parse()
 
-	if envDriver := os.Getenv("NEURON_STORAGE_DRIVER"); envDriver != "" {
-		storageDriver = envDriver
-	}
-	if envDSN := os.Getenv("NEURON_DATABASE_URL"); envDSN != "" {
-		storageDSN = envDSN
-	}
-	if envDurability := os.Getenv("NEURON_EXECUTION_DURABILITY"); envDurability != "" {
-		durability = envDurability
-	}
+	// Environment variables supply defaults, but an explicitly parsed flag is a
+	// stronger signal and must not be overwritten. Visit reports only flags the
+	// caller actually set, so the two layers keep their intended precedence.
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	storageDriver = envUnlessSet(explicit["storage-driver"], storageDriver, "NEURON_STORAGE_DRIVER")
+	storageDSN = envUnlessSet(explicit["storage-dsn"], storageDSN, "NEURON_DATABASE_URL")
+	durability = envUnlessSet(explicit["durability"], durability, "NEURON_EXECUTION_DURABILITY")
 
 	if showVer {
 		fmt.Println(version.String())
@@ -111,6 +111,13 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+
+	// Validate the durability mode once, at the process boundary, so both
+	// launch paths agree on the accepted values and the effective mode.
+	durability, err = core.NormalizeDurability(durability)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Project mode: run as a foreground project runtime with auto port allocation
@@ -153,24 +160,11 @@ func main() {
 		}
 	}
 
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN, Durability: durability})
+	store, err := openRuntimeStore(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN}, durability)
 	if err != nil {
-		log.Fatalf("init storage: %v", err)
+		log.Fatal(err)
 	}
 	defer store.Close()
-
-	// When durability is "durable", the storage backend must support transactions.
-	// Verify the backend can open a transaction; if it cannot, fail startup with
-	// an actionable error indicating which backend was selected and that a
-	// transactional backend (e.g., sqlite, postgres) is required.
-	if durability == "durable" {
-		txCtx, txCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer txCancel()
-		if err := store.WithTx(txCtx, func(_ storage.Tx) error { return nil }); err != nil {
-			log.Fatalf("durable mode requires a transactional storage backend; "+
-				"the selected driver %q does not support transactions: %v", storageDriver, err)
-		}
-	}
 
 	assemblies := assembly.NewRepository(store)
 
@@ -287,6 +281,60 @@ func shutdownRuntimes(srv *api.Server) {
 	if err := plugin.CloseSharedRuntimes(ctx); err != nil {
 		slog.Warn("close capability runtime backends", slog.String("error", err.Error()))
 	}
+}
+
+// envUnlessSet applies an environment override only when the caller did not set
+// the corresponding flag. It keeps command-line precedence explicit instead of
+// letting environment assignment order decide.
+func envUnlessSet(explicit bool, value, env string) string {
+	if explicit {
+		return value
+	}
+	if override := os.Getenv(env); override != "" {
+		return override
+	}
+	return value
+}
+
+// openRuntimeStore opens the configured backend and enforces the durability
+// contract before the runtime advertises itself as ready. Both daemon and
+// project launch paths use it so the check cannot diverge between them.
+func openRuntimeStore(ctx context.Context, cfg storage.Config, durability string) (storage.Store, error) {
+	store, err := storage.Open(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("init storage: %w", err)
+	}
+	if err := verifyDurableBackend(ctx, store, effectiveDriver(cfg.Driver), durability); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// verifyDurableBackend rejects a backend that cannot open a transaction when
+// durable mode was requested. Durable execution depends on atomic transition
+// writes, so discovering this at startup is preferable to failing mid-execution.
+func verifyDurableBackend(ctx context.Context, store storage.Store, driver, durability string) error {
+	if durability != core.DurabilityDurable {
+		return nil
+	}
+	txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := store.WithTx(txCtx, func(storage.Tx) error { return nil }); err != nil {
+		return fmt.Errorf(
+			"durable mode requires a transactional storage backend; the selected driver %q does not support transactions: %w",
+			driver, err,
+		)
+	}
+	return nil
+}
+
+func effectiveDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "" {
+		return storage.DefaultDriver
+	}
+	return driver
 }
 
 // resolveBuiltinPolicy decodes the built-in capability policy the runtime was
@@ -448,9 +496,9 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 
 	// Open storage before publishing the discovery record. A runtime that
 	// cannot initialize its durable state must not advertise itself as ready.
-	store, err := storage.Open(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN, Durability: durability})
+	store, err := openRuntimeStore(ctx, storage.Config{Driver: storageDriver, DataDir: storePath, Path: storePath, DSN: storageDSN}, durability)
 	if err != nil {
-		log.Fatalf("init storage: %v", err)
+		log.Fatal(err)
 	}
 	defer store.Close()
 

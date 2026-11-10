@@ -125,9 +125,10 @@ type Instance struct {
 
 	execPersister *executionPersister
 
-	// durability is the execution durability mode. In non-durable mode the
-	// event-driven execution persister persists snapshots; in durable mode
-	// the scheduler owns transition persistence.
+	// durability is the execution durability mode. In "none" mode execution
+	// and event history live only in memory; in "history" mode the event-driven
+	// execution persister persists snapshots; in "durable" mode the scheduler
+	// owns transition persistence.
 	durability string
 }
 
@@ -156,8 +157,19 @@ func New(
 			opt(&optsApplied)
 		}
 	}
-	if optsApplied.Durability == "" {
-		optsApplied.Durability = "history"
+	durability, err := NormalizeDurability(optsApplied.Durability)
+	if err != nil {
+		cancel()
+		bus.Close()
+		return nil, err
+	}
+	optsApplied.Durability = durability
+
+	// "none" retains no history. Swap in a process-local store so execution and
+	// event persistence still work for in-flight observability, while instance
+	// metadata continues to use the caller's store through the manager.
+	if durability == DurabilityNone {
+		persistentStore = storage.NewMemoryStore()
 	}
 
 	store := execution.NewExecutionStore(persistentStore)

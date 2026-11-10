@@ -86,6 +86,4 @@ type Config struct {
 	Path string
 	// DSN is the PostgreSQL connection string. It must not be logged verbatim.
 	DSN string
-	// Durability is the execution durability mode. See nore-config for valid values.
-	Durability string
 }

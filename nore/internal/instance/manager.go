@@ -59,9 +59,9 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 			opt(&optsApplied)
 		}
 	}
-	durability := optsApplied.Durability
-	if durability == "" {
-		durability = "history"
+	durability, err := NormalizeDurability(optsApplied.Durability)
+	if err != nil {
+		return nil, err
 	}
 	m := &Manager{
 		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
@@ -92,7 +92,7 @@ func (m *Manager) reconcile(ctx context.Context) error {
 	// Only durable mode may leave interrupted executions non-terminal for
 	// recovery. "none" and "history" keep the previous behavior: an execution
 	// with no runtime to advance it is failed during restore.
-	resumeDurable := m.durability == "durable"
+	resumeDurable := m.durability == DurabilityDurable
 	for _, rec := range records {
 		i, err := restoreInstance(
 			m.parent,
@@ -118,7 +118,7 @@ func (m *Manager) recoverExecutions(ctx context.Context) error {
 	// Recovery is meaningful only in durable mode. In "none" and "history"
 	// modes restoreInstance has already failed every unfinished execution, so
 	// there is nothing to resume and recovery is deliberately a no-op.
-	if m.durability != "durable" {
+	if m.durability != DurabilityDurable {
 		return nil
 	}
 	// Load all execution records from storage.
@@ -247,7 +247,7 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 		return nil, false, err
 	}
 	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store,
-		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy))
+		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy), WithDurability(m.durability))
 	if err != nil {
 		return nil, false, err
 	}

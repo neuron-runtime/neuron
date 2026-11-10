@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/neuron-runtime/neuron/shared/types/core"
 	"github.com/spf13/viper"
 )
 
@@ -107,6 +108,15 @@ func Load(opts Options) (Config, error) {
 		v.SetEnvPrefix("NEURON")
 		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 		v.AutomaticEnv()
+		// Durability is a deployment-level setting with a documented short
+		// environment name, so bind it explicitly instead of deriving
+		// NEURON_RUNTIME_EXECUTION_DURABILITY from its configuration path.
+		if err := v.BindEnv("runtime.execution.durability",
+			"NEURON_EXECUTION_DURABILITY",
+			"NEURON_RUNTIME_EXECUTION_DURABILITY",
+		); err != nil {
+			return Config{}, fmt.Errorf("bind durability environment: %w", err)
+		}
 	}
 
 	// Command-line overrides.
@@ -124,6 +134,12 @@ func Load(opts Options) (Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, fmt.Errorf("decode configuration: %w", err)
 	}
+
+	durability, err := core.NormalizeDurability(cfg.Runtime.Execution.Durability)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Runtime.Execution.Durability = durability
 
 	// The project root is the directory that owns the project configuration
 	// (neuron.config.*). When --config selects a file, the root is that file's
@@ -187,6 +203,7 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("runtime.port", cfg.Runtime.Port)
 	v.SetDefault("runtime.execution.mode", cfg.Runtime.Execution.Mode)
 	v.SetDefault("runtime.execution.timeout", cfg.Runtime.Execution.Timeout)
+	v.SetDefault("runtime.execution.durability", cfg.Runtime.Execution.Durability)
 	v.SetDefault("runtime.workers.min", cfg.Runtime.Workers.Min)
 	v.SetDefault("runtime.workers.max", cfg.Runtime.Workers.Max)
 	v.SetDefault("runtime.detachedDrainTimeout", cfg.Runtime.DetachedDrainTimeout)

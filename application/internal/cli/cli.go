@@ -51,6 +51,7 @@ func init() {
 	RootCmd.PersistentFlags().String("remote", "", "Remote Neuron runtime endpoint (e.g., https://api.neuron.example.com)")
 	RootCmd.PersistentFlags().String("nore-path", "", "Path to the Neuron runtime binary")
 	RootCmd.PersistentFlags().Bool("force", false, "Force replacement (clear existing state before the command acts)")
+	RootCmd.PersistentFlags().String("durability", "", "Execution durability mode: none, history, or durable (overrides runtime.execution.durability)")
 
 	// --port applies to the project runtime that bare `neuron` starts. It is a
 	// local flag so `neuron run --port` keeps its own endpoint-override
@@ -118,6 +119,9 @@ func loadConfig(cmd *cobra.Command) (config.Config, error) {
 	}
 	if path, _ := cmd.Flags().GetString("nore-path"); path != "" {
 		cli["daemon.norePath"] = path
+	}
+	if durability, _ := cmd.Flags().GetString("durability"); durability != "" {
+		cli["runtime.execution.durability"] = durability
 	}
 	// --port is defined only on the root command (bare `neuron`); subcommands
 	// such as `run` define their own --port with endpoint-override semantics.

@@ -22,7 +22,7 @@ func Defaults() Config {
 			Execution: ExecutionConfig{
 				Mode:       "wait",
 				Timeout:    "30m",
-				Durability: "history",
+				Durability: DurabilityHistory,
 			},
 			Workers: WorkerConfig{
 				Min: 1,

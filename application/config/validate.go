@@ -52,7 +52,7 @@ var (
 			reason: "engine plumbing (daemon endpoints, sockets, PID files) belongs to Neuron; run `neuron` in the project to manage the runtime",
 		},
 		{
-			path:   "execution.durability",
+			path:   "runtime.execution.durability",
 			reason: "durability is a deployment-level setting; set via --durability or NEURON_EXECUTION_DURABILITY",
 		},
 	}
