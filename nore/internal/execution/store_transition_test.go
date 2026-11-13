@@ -51,8 +51,8 @@ func TestSaveTransitionPersistsExecutionAndIntents(t *testing.T) {
 	}
 
 	intents := []*DispatchIntent{
-		dispatchIntentFor(exec.ID, "cap_a", "attempt_a"),
-		dispatchIntentFor(exec.ID, "cap_b", "attempt_b"),
+		NewDispatchIntent(exec.ID, "cap_a", "attempt_a"),
+		NewDispatchIntent(exec.ID, "cap_b", "attempt_b"),
 	}
 	if err := s.SaveTransition(ctx, exec, intents); err != nil {
 		t.Fatalf("save transition: %v", err)
@@ -122,7 +122,7 @@ func TestSaveTransitionRejectsStaleExecution(t *testing.T) {
 	if err := s.Save(ctx, exec); err != nil {
 		t.Fatalf("advance stored execution: %v", err)
 	}
-	intents := []*DispatchIntent{dispatchIntentFor(stale.ID, "cap_a", "attempt_a")}
+	intents := []*DispatchIntent{NewDispatchIntent(stale.ID, "cap_a", "attempt_a")}
 	err = s.SaveTransition(ctx, stale, intents)
 	if !errors.Is(err, storage.ErrConflict) {
 		t.Fatalf("SaveTransition error = %v, want ErrConflict", err)
@@ -152,7 +152,7 @@ func TestSaveTransitionRollsBackExecutionWhenIntentWriteFails(t *testing.T) {
 	ctx := context.Background()
 
 	exec := testExecution(t)
-	intent := dispatchIntentFor(exec.ID, "cap_a", "attempt_a")
+	intent := NewDispatchIntent(exec.ID, "cap_a", "attempt_a")
 	intentKey, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
 	if err != nil {
 		t.Fatalf("dispatch intent key: %v", err)
@@ -257,7 +257,7 @@ func exerciseSaveTransition(t *testing.T, store storage.Store) {
 	if err := s.Add(ctx, exec); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
-	intent := dispatchIntentFor(exec.ID, "cap_a", "attempt_a")
+	intent := NewDispatchIntent(exec.ID, "cap_a", "attempt_a")
 	if err := s.SaveTransition(ctx, exec, []*DispatchIntent{intent}); err != nil {
 		t.Fatalf("save transition: %v", err)
 	}

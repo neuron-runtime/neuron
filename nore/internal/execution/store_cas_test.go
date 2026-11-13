@@ -189,7 +189,7 @@ func TestSaveTransitionAcrossStoresRejectsStaleWriter(t *testing.T) {
 		t.Fatalf("advance stored execution: %v", err)
 	}
 
-	intent := dispatchIntentFor(stale.ID, "cap_a", "attempt_a")
+	intent := NewDispatchIntent(stale.ID, "cap_a", "attempt_a")
 	err = second.SaveTransition(ctx, stale, []*DispatchIntent{intent})
 	if !errors.Is(err, storage.ErrConflict) {
 		t.Fatalf("stale cross-store SaveTransition error = %v, want ErrConflict", err)

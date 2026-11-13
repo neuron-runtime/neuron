@@ -18,10 +18,25 @@ type Scheduler struct {
 	bus                 contracts.EventBus
 	executions          contracts.ExecutionRepository
 	scopes              *executionmodel.ScopeRegistry
+	committer           contracts.TransitionCommitter
 	executionStarted    event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
 	capabilityDetached  event.Subscription
+}
+
+// Option configures a Scheduler at construction time.
+type Option func(*Scheduler)
+
+// WithTransitionCommitter makes the scheduler commit every state transition,
+// together with the dispatch intents it produced, before publishing the events
+// that announce it. It is supplied only in durable mode; without it the
+// scheduler mutates in-memory state and leaves persistence to the instance's
+// event-driven persister, exactly as before.
+func WithTransitionCommitter(committer contracts.TransitionCommitter) Option {
+	return func(s *Scheduler) {
+		s.committer = committer
+	}
 }
 
 // New builds a scheduler that advances executions and owns their cancellable
@@ -29,12 +44,18 @@ type Scheduler struct {
 // the same responsibility: the scheduler binds a scope when an execution starts,
 // releases it when the execution reaches a terminal state, and is what a
 // cancellation request goes through.
-func New(bus contracts.EventBus, executions contracts.ExecutionRepository, scopes *executionmodel.ScopeRegistry) (*Scheduler, error) {
+func New(bus contracts.EventBus, executions contracts.ExecutionRepository, scopes *executionmodel.ScopeRegistry, opts ...Option) (*Scheduler, error) {
 	if bus == nil || executions == nil {
 		return nil, fmt.Errorf("event bus and execution repository are required")
 	}
 	if scopes == nil {
 		return nil, fmt.Errorf("execution scope registry is required")
+	}
+	s := &Scheduler{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
 	}
 	started, err := bus.Subscribe(event.ExecutionStarted, 64)
 	if err != nil {
@@ -58,7 +79,24 @@ func New(bus contracts.EventBus, executions contracts.ExecutionRepository, scope
 		_ = failed.Close()
 		return nil, err
 	}
-	return &Scheduler{bus: bus, executions: executions, scopes: scopes, executionStarted: started, capabilityCompleted: completed, capabilityFailed: failed, capabilityDetached: detached}, nil
+	s.bus = bus
+	s.executions = executions
+	s.scopes = scopes
+	s.executionStarted = started
+	s.capabilityCompleted = completed
+	s.capabilityFailed = failed
+	s.capabilityDetached = detached
+	return s, nil
+}
+
+// commit durably records a transition and its dispatch intents when the
+// scheduler owns transition persistence. It is a no-op otherwise, so the
+// non-durable paths are unchanged.
+func (s *Scheduler) commit(ctx context.Context, execution *executionmodel.Execution, intents []*executionmodel.DispatchIntent) error {
+	if s.committer == nil {
+		return nil
+	}
+	return s.committer.SaveTransition(ctx, execution, intents)
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
@@ -159,6 +197,13 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 		return err
 	}
 
+	// Record the parent's detached state durably before the task is announced.
+	// The task was already persisted, so a reader that sees the handoff recorded
+	// can always find the task that took the work over.
+	if err := s.commit(ctx, execution, nil); err != nil {
+		return err
+	}
+
 	if err := s.bus.Publish(ctx, event.New(event.ExecutionStarted, task.ID, task.CorrelationID, "", event.ExecutionStartedPayload{Params: input})); err != nil {
 		return err
 	}
@@ -193,6 +238,11 @@ func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, re
 		return false, nil
 	}
 	s.scopes.Release(executionID)
+	// Commit the cancellation before announcing it: a client that observes the
+	// terminal event must be able to find the cancellation in durable storage.
+	if err := s.commit(ctx, execution, nil); err != nil {
+		return true, fmt.Errorf("persist cancelled execution %s: %w", execution.ID, err)
+	}
 	_ = s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
 		Message: reasonMessage(reason),
 	}))
@@ -236,6 +286,18 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 	if err := execution.Start(payload.Params, len(entryIDs)); err != nil {
 		return err
 	}
+
+	// Mark every entry capability ready and build its dispatch intent before
+	// publishing anything. In durable mode the whole transition -- the running
+	// execution plus the ready work -- is committed in one transaction, so a
+	// crash can never leave a ready capability recorded without discoverable
+	// work, or discoverable work whose readiness was never recorded.
+	type readyCapability struct {
+		id    core.ID
+		input map[string]any
+	}
+	ready := make([]readyCapability, 0, len(entryIDs))
+	intents := make([]*executionmodel.DispatchIntent, 0, len(entryIDs))
 	for _, capabilityID := range entryIDs {
 		node := execution.Blueprint.Nodes[capabilityID]
 		input := data.CanonicalMap(payload.Params)
@@ -245,7 +307,16 @@ func (s *Scheduler) onExecutionStarted(ctx context.Context, received event.Event
 		if err := execution.MarkCapabilityReady(capabilityID, input); err != nil {
 			return err
 		}
-		if err := s.bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityReadyPayload{Params: input})); err != nil {
+		ready = append(ready, readyCapability{id: capabilityID, input: input})
+		if s.committer != nil {
+			intents = append(intents, executionmodel.NewDispatchIntent(execution.ID, capabilityID, execution.AttemptID))
+		}
+	}
+	if err := s.commit(ctx, execution, intents); err != nil {
+		return err
+	}
+	for _, target := range ready {
+		if err := s.bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, target.id, event.CapabilityReadyPayload{Params: target.input})); err != nil {
 			return err
 		}
 	}
@@ -304,15 +375,36 @@ func (s *Scheduler) onCapabilityCompleted(ctx context.Context, received event.Ev
 	if err != nil {
 		return err
 	}
+
+	// Mark the newly ready capabilities and build their intents, then commit
+	// the completed capability and the work it produced together. Publishing
+	// the ready events is deferred until after the commit so a consumer that
+	// reacts to them can rely on the durable record.
+	intents := make([]*executionmodel.DispatchIntent, 0, len(scheduled))
 	for _, target := range scheduled {
 		if err := execution.MarkCapabilityReady(target.id, target.input); err != nil {
 			return err
 		}
+		if s.committer != nil {
+			intents = append(intents, executionmodel.NewDispatchIntent(execution.ID, target.id, execution.AttemptID))
+		}
+	}
+	if remaining == 0 {
+		// The execution drained, so its terminal snapshot is the transition to
+		// commit. Committing the intermediate running snapshot first would
+		// create a durable state that a restart could observe with no work
+		// outstanding and nothing left to advance it.
+		return s.completeIfDrained(ctx, execution, remaining)
+	}
+	if err := s.commit(ctx, execution, intents); err != nil {
+		return err
+	}
+	for _, target := range scheduled {
 		if err := s.bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, target.id, event.CapabilityReadyPayload{Params: target.input})); err != nil {
 			return err
 		}
 	}
-	return s.completeIfDrained(ctx, execution, remaining)
+	return nil
 }
 
 // completeIfDrained finishes an execution whose own work is done. A remaining
@@ -330,6 +422,18 @@ func (s *Scheduler) completeIfDrained(ctx context.Context, execution *executionm
 	assemblyResult, err := execution.ResolveAssemblyResult()
 	if err != nil {
 		return fmt.Errorf("resolve assembly result: %w", err)
+	}
+
+	// Commit the completed snapshot before announcing it. If the commit fails
+	// the completion exists only in memory, so it is reclassified as failed: a
+	// success that was never recorded must not be reported as one.
+	if err := s.commit(ctx, execution, nil); err != nil {
+		if execution.MarkCommitFailed(err) {
+			_ = s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{
+				Message: fmt.Sprintf("record execution completion: %v", err),
+			}))
+		}
+		return nil
 	}
 
 	return s.bus.Publish(ctx, event.New(event.ExecutionCompleted, execution.ID, execution.CorrelationID, "", event.ExecutionCompletedPayload{
@@ -371,6 +475,15 @@ func (s *Scheduler) failExecution(ctx context.Context, executionID core.ID, err 
 		return
 	}
 	s.scopes.Release(execution.ID)
+	// Commit the failure before announcing it. A failure whose durable record
+	// could not be written is logged rather than dropped: the in-memory outcome
+	// is still the truthful one, and publishing it lets watchers stop waiting.
+	if commitErr := s.commit(ctx, execution, nil); commitErr != nil {
+		slog.Error("persist failed execution transition",
+			slog.String("execution_id", string(execution.ID)),
+			slog.String("error", commitErr.Error()),
+		)
+	}
 	_ = s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{Message: err.Error()}))
 }
 

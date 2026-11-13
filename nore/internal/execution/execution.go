@@ -424,6 +424,36 @@ func (e *Execution) MarkCancelled(reason error) bool {
 	return true
 }
 
+// MarkCommitFailed overrides an optimistically-completed execution when its
+// completion could not be durably committed.
+//
+// Durable mode marks an execution completed in memory, then commits that
+// snapshot before announcing it. If the commit fails, the completion exists only
+// in memory: a restart would recover the execution as unfinished. Reporting the
+// success anyway would tell a caller their work concluded when the durable record
+// says otherwise, so the execution is reclassified as failed and the commit
+// failure becomes its reason.
+//
+// It only overrides a completed execution. A failure or cancellation already
+// carries its own reason and must not be rewritten by a later bookkeeping error.
+// The done channel was already closed by the optimistic completion, so a caller
+// that observed success before the commit cannot be un-notified; durable mode
+// treats an uncommitted completion as a failure regardless, and that window is
+// the documented cost of committing after the in-memory transition.
+func (e *Execution) MarkCommitFailed(err error) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.status != StatusCompleted {
+		return false
+	}
+	e.status = StatusFailed
+	e.inFlight = 0
+	if err != nil {
+		e.executionError = err.Error()
+	}
+	return true
+}
+
 func (e *Execution) isTerminalLocked() bool {
 	return e.status == StatusCompleted || e.status == StatusFailed || e.status == StatusCancelled
 }

@@ -398,10 +398,12 @@ func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) (string, 
 	return storage.Key("dispatch_intents", string(executionID), string(capabilityID), string(attemptID))
 }
 
-// dispatchIntentFor builds the ready dispatch intent for one capability attempt.
+// NewDispatchIntent builds the ready dispatch intent for one capability attempt.
 // It keeps intent construction in one place so callers do not duplicate the
-// identity fields that the store indexes intents by.
-func dispatchIntentFor(executionID, capabilityID, attemptID shared.ID) *DispatchIntent {
+// identity fields that the store indexes intents by: the (execution, capability,
+// attempt) triple is the intent's stable identity, so replaying readiness maps
+// to the same intent rather than creating a second one.
+func NewDispatchIntent(executionID, capabilityID, attemptID shared.ID) *DispatchIntent {
 	return &DispatchIntent{
 		ExecutionID:  executionID,
 		CapabilityID: capabilityID,

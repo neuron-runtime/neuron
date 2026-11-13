@@ -137,6 +137,35 @@ func TestDurabilityHistoryPersistsHistory(t *testing.T) {
 	waitForPersistedEvents(t, store, exec.ID)
 }
 
+// TestDurabilityDurablePersistsThroughTransitions covers the "durable" contract:
+// the runtime commits each transition itself, so a completed execution reaches
+// the store without the event-driven persister, and no dispatch intent is left
+// behind once the work it announced has run.
+func TestDurabilityDurablePersistsThroughTransitions(t *testing.T) {
+	store := newTestStore(t)
+	assembly := blockingAssembly()
+	inst, err := New(context.Background(), "inst_durable", protocol.InstanceKey{
+		AssemblyID: "sys_blocking", Version: "1.0.0",
+	}, &assembly, 2, store, WithDurability(DurabilityDurable))
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	if err := inst.Start(); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop() })
+
+	if inst.execPersister != nil {
+		t.Fatal("durable mode must not run the snapshot persister; the scheduler owns commits")
+	}
+
+	exec := runToCompletion(t, inst)
+	waitForPersistedStatus(t, store, exec.ID, execution.StatusCompleted)
+	waitFor(t, 10*time.Second, func() bool {
+		return len(listPrefix(t, store, "dispatch_intents")) == 0
+	}, "dispatch intents were not cleared after their work ran")
+}
+
 func runToCompletion(t *testing.T, inst *Instance) *execution.Execution {
 	t.Helper()
 	exec, err := inst.Execute(context.Background(), shortParams())

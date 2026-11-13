@@ -193,7 +193,19 @@ func New(
 		return nil, fmt.Errorf("register resolved capability runtimes: %w", err)
 	}
 
-	sched, err := scheduler.New(bus, store, scopes)
+	// In durable mode the runtime owns transition persistence: the scheduler
+	// commits each transition with its dispatch intents and the engine claims
+	// those intents, so the event-driven persister must not also write snapshots.
+	// One writer per mode keeps the two from racing on the revision guard.
+	durable := durability == DurabilityDurable
+	var schedOpts []scheduler.Option
+	var engineOpts []engine.Option
+	if durable {
+		schedOpts = append(schedOpts, scheduler.WithTransitionCommitter(store))
+		engineOpts = append(engineOpts, engine.WithTransitionCommitter(store))
+	}
+
+	sched, err := scheduler.New(bus, store, scopes, schedOpts...)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -221,7 +233,7 @@ func New(
 		return nil, fmt.Errorf("compile assembly: %w", err)
 	}
 
-	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout)
+	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout, engineOpts...)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -235,11 +247,17 @@ func New(
 		return nil, fmt.Errorf("create Analytics engine: %w", err)
 	}
 
-	persister, err := newExecutionPersister(bus, store)
-	if err != nil {
-		cancel()
-		bus.Close()
-		return nil, fmt.Errorf("create execution persister: %w", err)
+	// The persister is the snapshot writer for "none" and "history". Durable
+	// mode has the scheduler commit transitions instead, so no persister is
+	// created and none runs.
+	var persister *executionPersister
+	if !durable {
+		persister, err = newExecutionPersister(bus, store)
+		if err != nil {
+			cancel()
+			bus.Close()
+			return nil, fmt.Errorf("create execution persister: %w", err)
+		}
 	}
 
 	i := &Instance{
@@ -285,7 +303,11 @@ func (i *Instance) Start() error {
 	i.status = StatusRunning
 	i.mu.Unlock()
 
-	i.wg.Add(5)
+	routines := 4
+	if i.execPersister != nil {
+		routines++
+	}
+	i.wg.Add(routines)
 
 	go func() {
 		defer i.wg.Done()
@@ -309,10 +331,12 @@ func (i *Instance) Start() error {
 		defer i.wg.Done()
 		i.persistEvents(i.ctx)
 	}()
-	go func() {
-		defer i.wg.Done()
-		_ = i.execPersister.Run(i.ctx)
-	}()
+	if i.execPersister != nil {
+		go func() {
+			defer i.wg.Done()
+			_ = i.execPersister.Run(i.ctx)
+		}()
+	}
 
 	return nil
 }
