@@ -42,7 +42,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if req.Force {
 		// Clear the assembly for (name, version) and remove any instances built
 		// from it so the replacement is authoritative.
-		if _, err := h.instances.RemoveByAssembly(r.Context(), key); err != nil {
+		if _, err := h.instances.RemoveByAssembly(r.Context(), key, req.Force); err != nil {
 			utils.ErrorJSON(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -52,7 +52,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, replaced, err := h.assemblies.Register(r.Context(), reg, nil)
+	created, replaced, err := h.assemblies.Register(r.Context(), reg)
 	if err != nil {
 		utils.ErrorJSON(w, http.StatusInternalServerError, err)
 		return
@@ -63,7 +63,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case replaced:
 		status = protocol.RegisterStatusReplaced
-		message = "assembly replaced"
+		message = "assembly replaced; the previous artifact is retained for unfinished executions"
 	case !created:
 		status = protocol.RegisterStatusAlreadyRegistered
 		message = "assembly already registered"

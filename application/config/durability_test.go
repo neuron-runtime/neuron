@@ -94,3 +94,23 @@ runtime:
 		t.Errorf("error %q does not explain that durability is deployment-level", err)
 	}
 }
+
+func TestRetentionPolicyLoadsFromConfiguration(t *testing.T) {
+	cfg, err := Load(Options{
+		GlobalPath: "/nonexistent/global.yaml",
+		ProjectDir: t.TempDir(),
+		CLI: map[string]any{
+			"runtime.execution.retention.maxAge":                 "168h",
+			"runtime.execution.retention.maxArtifactsPerVersion": 3,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.Execution.Retention.MaxAge != "168h" {
+		t.Errorf("retention maxAge = %q, want 168h", cfg.Runtime.Execution.Retention.MaxAge)
+	}
+	if cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion != 3 {
+		t.Errorf("retention maxArtifactsPerVersion = %d, want 3", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion)
+	}
+}

@@ -166,6 +166,25 @@ type ExecutionConfig struct {
 	//   "history"  - history is retained, but unfinished work is not resumed
 	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
 	Durability string `yaml:"durability" mapstructure:"durability"`
+
+	// Retention controls the explicit garbage collection of superseded
+	// assembly artifacts at runtime startup. The zero policy retains every
+	// artifact.
+	Retention RetentionConfig `yaml:"retention" mapstructure:"retention"`
+}
+
+// RetentionConfig bounds superseded assembly artifacts. Artifacts referenced by
+// unfinished executions and the current artifact of every registered version
+// are always retained, regardless of these limits.
+type RetentionConfig struct {
+	// MaxAge is the minimum age of a superseded artifact before it may be
+	// removed, as a duration string such as "168h". Empty disables age-based
+	// pruning.
+	MaxAge string `yaml:"maxAge,omitempty" mapstructure:"maxAge"`
+
+	// MaxArtifactsPerVersion bounds the artifacts retained for one
+	// assembly/version. Zero disables count-based pruning.
+	MaxArtifactsPerVersion int `yaml:"maxArtifactsPerVersion,omitempty" mapstructure:"maxArtifactsPerVersion"`
 }
 
 // WorkerConfig describes the capability runtime worker pool.

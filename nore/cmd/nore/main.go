@@ -11,12 +11,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api"
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/invoke"
@@ -40,23 +42,25 @@ const capabilityRuntimeShutdownTimeout = 10 * time.Second
 
 func main() {
 	var (
-		port                 string
-		socket               string
-		workers              int
-		dataDir              string
-		storageDriver        string
-		storagePath          string
-		storageDSN           string
-		durability           string
-		tokenArg             string
-		detachedDrainTimeout time.Duration
-		capabilityStore      string
-		showVer              bool
-		invokeMode           bool
-		projectMode          bool
-		projectRoot          string
-		host                 string
-		builtinPolicyArg     string
+		port                   string
+		socket                 string
+		workers                int
+		dataDir                string
+		storageDriver          string
+		storagePath            string
+		storageDSN             string
+		durability             string
+		tokenArg               string
+		detachedDrainTimeout   time.Duration
+		capabilityStore        string
+		showVer                bool
+		invokeMode             bool
+		projectMode            bool
+		projectRoot            string
+		host                   string
+		builtinPolicyArg       string
+		retentionMaxAge        string
+		retentionMaxPerVersion int
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
@@ -76,6 +80,8 @@ func main() {
 	flag.StringVar(&projectRoot, "project-root", "", "project root directory (required with --project)")
 	flag.StringVar(&host, "host", "127.0.0.1", "host interface to bind to in project mode (default: 127.0.0.1)")
 	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
+	flag.StringVar(&retentionMaxAge, "retention-max-age", "", "minimum age of a superseded assembly artifact before garbage collection, e.g. 168h (default: keep all)")
+	flag.IntVar(&retentionMaxPerVersion, "retention-max-artifacts-per-version", 0, "maximum assembly artifacts retained per version (default: keep all)")
 	flag.Parse()
 
 	// Environment variables supply defaults, but an explicitly parsed flag is a
@@ -86,6 +92,16 @@ func main() {
 	storageDriver = envUnlessSet(explicit["storage-driver"], storageDriver, "NEURON_STORAGE_DRIVER")
 	storageDSN = envUnlessSet(explicit["storage-dsn"], storageDSN, "NEURON_DATABASE_URL")
 	durability = envUnlessSet(explicit["durability"], durability, "NEURON_EXECUTION_DURABILITY")
+	retentionMaxAge = envUnlessSet(explicit["retention-max-age"], retentionMaxAge, "NEURON_RETENTION_MAX_AGE")
+	if !explicit["retention-max-artifacts-per-version"] {
+		if override := os.Getenv("NEURON_RETENTION_MAX_ARTIFACTS_PER_VERSION"); override != "" {
+			parsed, parseErr := strconv.Atoi(override)
+			if parseErr != nil {
+				log.Fatalf("parse NEURON_RETENTION_MAX_ARTIFACTS_PER_VERSION: %v", parseErr)
+			}
+			retentionMaxPerVersion = parsed
+		}
+	}
 
 	if showVer {
 		fmt.Println(version.String())
@@ -125,7 +141,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, durability, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge, retentionMaxPerVersion, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
 		return
 	}
 
@@ -167,6 +183,9 @@ func main() {
 	defer store.Close()
 
 	assemblies := assembly.NewRepository(store)
+	if err := pruneAssemblies(ctx, store, assemblies, retentionMaxAge, retentionMaxPerVersion); err != nil {
+		log.Fatalf("prune assembly artifacts: %v", err)
+	}
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {
@@ -294,6 +313,43 @@ func envUnlessSet(explicit bool, value, env string) string {
 		return override
 	}
 	return value
+}
+
+// pruneAssemblies applies the configured retention policy once at startup.
+// The policy is deliberately not applied during registration: replacing a
+// version must never delete an artifact that a durable execution can still
+// recover against.
+func pruneAssemblies(ctx context.Context, store storage.Store, repo *assembly.Repository, maxAge string, maxPerVersion int) error {
+	policy := assembly.RetentionPolicy{MaxArtifactsPerVersion: maxPerVersion}
+	if strings.TrimSpace(maxAge) != "" {
+		parsed, err := time.ParseDuration(maxAge)
+		if err != nil {
+			return fmt.Errorf("parse retention max age %q: %w", maxAge, err)
+		}
+		if parsed < 0 {
+			return fmt.Errorf("retention max age must not be negative")
+		}
+		policy.MaxAge = parsed
+	}
+	if maxPerVersion < 0 {
+		return fmt.Errorf("retention max artifacts per version must not be negative")
+	}
+	if !policy.Enabled() {
+		return nil
+	}
+
+	referenced, err := execution.NewExecutionStore(store).ReferencedArtifactHashes(ctx)
+	if err != nil {
+		return fmt.Errorf("list referenced execution artifacts: %w", err)
+	}
+	result, err := repo.Prune(ctx, policy, referenced)
+	if err != nil {
+		return err
+	}
+	if result.Removed > 0 {
+		slog.Info("pruned superseded assembly artifacts", slog.Int("removed", result.Removed))
+	}
+	return nil
 }
 
 // openRuntimeStore opens the configured backend and enforces the durability
@@ -447,7 +503,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, durability string, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge string, retentionMaxPerVersion int, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
@@ -519,6 +575,9 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 	plugin.SetStoreRoot(capabilityStore)
 
 	assemblies := assembly.NewRepository(store)
+	if err := pruneAssemblies(ctx, store, assemblies, retentionMaxAge, retentionMaxPerVersion); err != nil {
+		log.Fatalf("prune assembly artifacts: %v", err)
+	}
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
 	if err != nil {

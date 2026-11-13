@@ -917,9 +917,10 @@ The contract has explicit failure semantics. Missing records are `storage.ErrNot
 
 Transactions are required when one logical operation writes more than one key:
 
-- **Assembly registration** writes the artifact, prunes artifacts replaced for the same version, and updates the version index atomically. A failed registration leaves no partial artifact or index entry.
+- **Assembly registration** writes the artifact and updates the version index atomically. Superseded artifacts are retained, so registration never deletes work a durable execution still references. A failed registration leaves no partial artifact or index entry.
 - **Execution save** reads the persisted revision, compares it with the writer's revision, and writes the next snapshot in one transaction. This is the compare-and-swap guard that rejects a stale writer.
-- **Execution transition plus dispatch intent** (Phase 4) and **timer claim** (Phase 5) will use the same boundary. They are not implemented yet.
+- **Execution transition plus dispatch intent** persists the next execution snapshot and the ready dispatch intents atomically. A stale writer is rejected and a failed intent write rolls back the transition.
+- **Timer claim** (Phase 5) will use the same boundary. It is not implemented yet.
 
 Single-key reads and writes use the plain `Store`; they do not need a transaction.
 
@@ -931,14 +932,11 @@ Three guarantees are separate and must not be conflated:
 | --- | --- | --- |
 | **Observability** | A run's transitions and output can be inspected through events and the API | Implemented |
 | **Persistence** | Registered assemblies, instance metadata, execution history, and events survive a restart and remain queryable | Implemented |
-| **Durable execution** | Unfinished work resumes after a restart and reaches a terminal state exactly once | Not implemented |
+| **Durable execution** | Unfinished work resumes after a restart from its last committed transition, with at-least-once dispatch | Implemented |
 
 Persistence does not imply durable execution. N.O.R.E. keeps live executions in memory and writes snapshots through to storage, so live work is fast and completed history survives a restart. Saving a snapshot is not the same as recording a resumable transition and dispatch intent.
 
-On restart, N.O.R.E. restores instance metadata and execution records as **metadata-only** records. A restored instance has no event bus, scheduler, capability runtime engine, or worker processes, so it cannot be started or resumed. Executions that were unfinished when the process stopped are marked failed with the reason no runtime could resume them. This is the current non-durable mode, not an execution guarantee N.O.R.E. claims to provide.
-
-> [!WARNING]
-> Creating a new instance is how work is re-run today. Do not treat a restored instance or a persisted `running` execution as live work that will continue.
+In `history` mode, restore is metadata-only: unfinished executions are marked failed because no runtime can resume them. In `durable` mode, N.O.R.E. recompiles each execution's pinned assembly artifact, restores completed capabilities and recorded joins, and re-dispatches unfinished work. Interrupted `running` capabilities follow at-least-once dispatch, so external effects must be idempotent; recovery does not claim exactly-once execution.
 
 ### Durability modes
 
@@ -947,16 +945,25 @@ The policy surface names three modes, configured at `runtime.execution.durabilit
 | Mode | Semantics |
 | --- | --- |
 | `runtime.execution.durability: none` | No execution/event history is retained. Live executions remain observable in memory, but nothing survives a restart. |
-| `runtime.execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the default and the behavior N.O.R.E. implements today. |
-| `runtime.execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with idempotent dispatch. Planned for Phase 4; not implemented. Startup refuses a non-transactional backend when this mode is selected. |
+| `runtime.execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the default. |
+| `runtime.execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with at-least-once dispatch. Startup refuses a non-transactional backend when this mode is selected. |
 
-`none` and `history` are wired through the CLI, daemon, and project launch paths. `durable` mode is validated and rejects non-transactional backends at startup, but resuming unfinished work is not implemented yet.
+All three modes are wired through the CLI, daemon, and project launch paths. Recovery restores pending and running root executions, recorded joins, and detached tasks against the execution's immutable artifact. Retry timers and suspended waits are Phase 5 work and are not yet resumed.
 
-### Retention limitation
+### Artifact retention
 
 Registered assemblies are stored under `assemblies/{id}/{version}/{hash}/{env}/manifest`. A key that carries a hash resolves exactly that artifact; an unknown or mismatched artifact is an error, never a fallback to the latest content.
 
-Registration is not content-addressed immutable. Registering the same assembly version again replaces the version's previous artifact(s) and prunes the earlier hashes, so a given `name:version` addresses exactly one artifact, the newest one. A hash that is no longer retained resolves to `ErrNotFound`. Phase 4 removes this retention limitation for artifacts referenced by durable executions.
+Artifacts are immutable once written. Registering the same assembly version again moves the version index to the new artifact but retains the earlier hashes, so a durable execution pinned to an older hash remains recoverable. The CLI reports a same-version replacement and warns that the previous artifact is retained; a version bump is still the clearest way to express a graph change.
+
+Removal is never a side effect of registration. It happens only through explicit deletion or startup garbage collection. Retention is configured under `runtime.execution.retention`:
+
+| Key | Meaning |
+| --- | --- |
+| `maxAge` | Minimum age of a superseded artifact before it may be removed, e.g. `168h`. Empty keeps artifacts indefinitely. |
+| `maxArtifactsPerVersion` | Maximum artifacts retained for one assembly/version. Zero keeps all. |
+
+The current artifact of every registered version and every hash referenced by a non-terminal execution are always retained, regardless of policy. Destructive instance removal and clearing are refused while unfinished executions exist unless `--force` is supplied; forced removal deletes their execution history.
 
 > [!NOTE]
 > Execution history and events are an observability and persistence concern, not part of execution semantics. History is retained by default and can be disabled with `runtime.execution.durability: none`; execution must not depend on retention being enabled.

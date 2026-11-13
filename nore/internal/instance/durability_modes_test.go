@@ -64,7 +64,7 @@ func TestManagerPassesDurabilityToLiveInstance(t *testing.T) {
 				}},
 			},
 		},
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatalf("register assembly: %v", err)
 	}
 

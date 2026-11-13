@@ -340,16 +340,25 @@ func (c *Client) GetInstanceById(ctx context.Context, instanceID string) (protoc
 }
 
 // RemoveInstance stops and deletes the instance identified by target, which
-// may be an instance ID (inst_*) or a colon-encoded assembly key.
-func (c *Client) RemoveInstance(ctx context.Context, target string) error {
+// may be an instance ID (inst_*) or a colon-encoded assembly key. Without
+// force, the runtime refuses to remove an instance with unfinished executions.
+func (c *Client) RemoveInstance(ctx context.Context, target string, force bool) error {
 	if target == "" {
 		return fmt.Errorf("instance target is required")
 	}
 	endpoint := protocol.InstanceByID(target)
+	if force {
+		endpoint += "?force=true"
+	}
 	return c.conn.Do(ctx, http.MethodDelete, endpoint, nil, nil)
 }
 
-// ClearInstances stops and deletes every tracked instance.
-func (c *Client) ClearInstances(ctx context.Context) error {
-	return c.conn.Do(ctx, http.MethodDelete, protocol.InstancesPath, nil, nil)
+// ClearInstances stops and deletes every tracked instance. Without force, the
+// runtime refuses to clear while any instance has unfinished executions.
+func (c *Client) ClearInstances(ctx context.Context, force bool) error {
+	endpoint := protocol.InstancesPath
+	if force {
+		endpoint += "?force=true"
+	}
+	return c.conn.Do(ctx, http.MethodDelete, endpoint, nil, nil)
 }

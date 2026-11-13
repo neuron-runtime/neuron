@@ -20,6 +20,10 @@ func newRemoveCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			force, err := cmd.Flags().GetBool("force")
+			if err != nil {
+				return err
+			}
 
 			target, err := utils.NormalizeInstanceTarget(args[0])
 			if err != nil {
@@ -32,7 +36,7 @@ func newRemoveCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			if err := c.RemoveInstance(ctx, target); err != nil {
+			if err := c.RemoveInstance(ctx, target, force); err != nil {
 				return fmt.Errorf("remove instance %s: %w", target, err)
 			}
 
@@ -40,6 +44,7 @@ func newRemoveCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Bool("force", false, "remove the instance even when it has unfinished executions")
 	return cmd
 }
 

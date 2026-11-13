@@ -54,7 +54,7 @@ func registerAssembly(t *testing.T, h *Handler, key protocol.InstanceKey) {
 	_, _, err := h.assemblies.Register(context.Background(), assembly.RegisteredAssembly{
 		Key:      key,
 		Assembly: shared.Assembly{Metadata: shared.Metadata{Name: key.AssemblyID}},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("register assembly %s: %v", key.String(), err)
 	}
@@ -159,7 +159,7 @@ func TestExecuteRecreatesStaleRestoredInstance(t *testing.T) {
 				}},
 			},
 		},
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatalf("register assembly: %v", err)
 	}
 

@@ -347,6 +347,24 @@ func (s *ExecutionStore) List(ctx context.Context) ([]*Execution, error) {
 	return result, nil
 }
 
+// ReferencedArtifactHashes returns the assembly artifact hashes pinned by
+// executions that have not reached a terminal state. Retention must treat these
+// as live references: deleting one would make the execution unrecoverable.
+func (s *ExecutionStore) ReferencedArtifactHashes(ctx context.Context) (map[string]bool, error) {
+	executions, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make(map[string]bool)
+	for _, execution := range executions {
+		if execution.IsTerminal() || execution.Hash == "" {
+			continue
+		}
+		hashes[execution.Hash] = true
+	}
+	return hashes, nil
+}
+
 // ListByInstance returns every execution belonging to instanceID from both
 // memory and durable storage. Storage and decode failures are returned.
 func (s *ExecutionStore) ListByInstance(ctx context.Context, instanceID shared.ID) ([]*Execution, error) {

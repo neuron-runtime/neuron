@@ -570,16 +570,23 @@ Exit criteria:
       references. Replace unconditional same-version pruning
       (`nore/internal/assembly/repository.go:62-66`, `:248-265`) with reference-aware retention
       or an explicit GC that refuses to delete a referenced artifact.
-- [ ] **R4-3** Define artifact retention policy and make it configurable (for example retain by
+- [x] **R4-3** Define artifact retention policy and make it configurable (for example retain by
       count, age, or while referenced). Removal must be a GC operation, never an implicit
-      consequence of re-registration.
-- [ ] **R4-4** Ensure builds do not silently invalidate durable executions. The CLI reuses
+      consequence of re-registration. Implemented `assembly.RetentionPolicy`/`Repository.Prune`
+      with startup GC configured by `runtime.execution.retention.maxAge` and
+      `runtime.execution.retention.maxArtifactsPerVersion`; current and referenced artifacts are
+      always retained.
+- [x] **R4-4** Ensure builds do not silently invalidate durable executions. The CLI reuses
       `config.Version` across builds (`application/internal/cli/build/build.go:214-222`), so a
       same-version graph change is the dangerous case. Either retain per-hash artifacts (R4-2)
-      or require a version bump when the graph changes; document the rule.
-- [ ] **R4-5** Define `--force`/`Delete` behavior for live durable executions. It must not
+      or require a version bump when the graph changes; document the rule. Registration now
+      retains every hash, and a same-version replacement is reported with a warning that the
+      previous artifact is retained.
+- [x] **R4-5** Define `--force`/`Delete` behavior for live durable executions. It must not
       silently delete execution history that a running durable execution depends on; require an
-      explicit destructive flag and report what will be affected.
+      explicit destructive flag and report what will be affected. Instance remove/clear and
+      force re-registration now require `--force` when unfinished executions exist; the API
+      returns `409 Conflict` and reports the affected instance.
 
 ### 4.2 Recoverable execution state
 

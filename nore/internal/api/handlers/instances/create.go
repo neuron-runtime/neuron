@@ -110,6 +110,6 @@ func (h *Handler) ensureRegistered(r *http.Request, req protocol.CreateInstanceR
 		Assembly:     *req.Assembly,
 		RegisteredAt: now,
 		UpdatedAt:    now,
-	}, nil)
+	})
 	return key, err
 }

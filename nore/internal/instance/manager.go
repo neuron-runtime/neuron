@@ -45,6 +45,10 @@ type Manager struct {
 	durability string
 }
 
+// ErrActiveExecutions reports a destructive operation refused because an
+// instance still owns executions that have not reached a terminal state.
+var ErrActiveExecutions = errors.New("instance has unfinished executions")
+
 func NewManager(parent context.Context, workers int, detachedDrainTimeout time.Duration, store storage.Store, assemblies *assembly.Repository, opts ...Option) (*Manager, error) {
 	if parent == nil {
 		parent = context.Background()
@@ -473,15 +477,16 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 
 // Remove stops and removes the instance addressed by target (an instance ID
 // or a colon-encoded assembly key). The instance's executions and events are
-// deleted along with its durable metadata.
-func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err error) {
+// deleted along with its durable metadata. Unless force is set, removal is
+// refused while the instance owns unfinished executions.
+func (m *Manager) Remove(ctx context.Context, target string, force bool) (removed bool, err error) {
 	if strings.HasPrefix(strings.TrimSpace(target), "inst_") {
 		var inst *Instance
 		inst, ok := m.GetByID(target)
 		if !ok {
 			return false, nil
 		}
-		return true, m.removeInstance(ctx, inst)
+		return true, m.removeInstance(ctx, inst, force)
 	}
 
 	key, err := protocol.ParseKey(target)
@@ -495,14 +500,19 @@ func (m *Manager) Remove(ctx context.Context, target string) (removed bool, err 
 	if !ok {
 		return false, nil
 	}
-	return true, m.removeInstance(ctx, inst)
+	return true, m.removeInstance(ctx, inst, force)
 }
 
 // removeInstance deletes an instance's runtime, executions, events and
 // metadata. It is safe for both live and metadata-only (restored) instances.
 // All deletions are performed atomically in a single storage transaction when
 // possible; in-memory state is only removed after successful commit.
-func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
+func (m *Manager) removeInstance(ctx context.Context, inst *Instance, force bool) error {
+	if !force {
+		if err := refuseActiveExecutions(ctx, inst); err != nil {
+			return err
+		}
+	}
 	if err := inst.Stop(); err != nil {
 		return err
 	}
@@ -565,8 +575,9 @@ func (m *Manager) removeInstance(ctx context.Context, inst *Instance) error {
 
 // RemoveByAssembly stops and removes every instance whose key addresses the
 // given assembly, optionally scoped to the key's version. Returns the number of
-// instances removed.
-func (m *Manager) RemoveByAssembly(ctx context.Context, key protocol.InstanceKey) (int, error) {
+// instances removed. Unless force is set, removal is refused when any matching
+// instance still owns unfinished executions.
+func (m *Manager) RemoveByAssembly(ctx context.Context, key protocol.InstanceKey, force bool) (int, error) {
 	m.mu.RLock()
 	var matches []*Instance
 	for _, inst := range m.instancesByID {
@@ -580,16 +591,44 @@ func (m *Manager) RemoveByAssembly(ctx context.Context, key protocol.InstanceKey
 	}
 	m.mu.RUnlock()
 
+	if !force {
+		for _, inst := range matches {
+			if err := refuseActiveExecutions(ctx, inst); err != nil {
+				return 0, err
+			}
+		}
+	}
 	for _, inst := range matches {
-		if err := m.removeInstance(ctx, inst); err != nil {
+		if err := m.removeInstance(ctx, inst, force); err != nil {
 			return 0, err
 		}
 	}
 	return len(matches), nil
 }
 
-// Clear stops and removes every tracked instance.
-func (m *Manager) Clear(ctx context.Context) error {
+// refuseActiveExecutions protects execution history that a live or recoverable
+// execution still depends on. Stopping the instance would otherwise sweep those
+// executions to failed before their records are deleted.
+func refuseActiveExecutions(ctx context.Context, inst *Instance) error {
+	executions, err := inst.ListExecutions(ctx)
+	if err != nil {
+		return fmt.Errorf("list executions for instance %s: %w", inst.ID, err)
+	}
+	active := 0
+	for _, exec := range executions {
+		if !exec.IsTerminal() {
+			active++
+		}
+	}
+	if active > 0 {
+		return fmt.Errorf("%w: instance %s has %d unfinished execution(s); use --force to remove it and their history", ErrActiveExecutions, inst.ID, active)
+	}
+	return nil
+}
+
+// Clear stops and removes every tracked instance. Unless force is set, clearing
+// is refused when any instance still owns unfinished executions.
+func (m *Manager) Clear(ctx context.Context, force bool) error {
 	m.mu.RLock()
 	instances := make([]*Instance, 0, len(m.instancesByID))
 	for _, inst := range m.instancesByID {
@@ -597,9 +636,17 @@ func (m *Manager) Clear(ctx context.Context) error {
 	}
 	m.mu.RUnlock()
 
+	if !force {
+		for _, inst := range instances {
+			if err := refuseActiveExecutions(ctx, inst); err != nil {
+				return err
+			}
+		}
+	}
+
 	var failures []error
 	for _, inst := range instances {
-		if err := m.removeInstance(ctx, inst); err != nil {
+		if err := m.removeInstance(ctx, inst, force); err != nil {
 			failures = append(failures, err)
 		}
 	}

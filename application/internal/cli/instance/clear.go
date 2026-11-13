@@ -14,6 +14,10 @@ func newClearCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			force, err := cmd.Flags().GetBool("force")
+			if err != nil {
+				return err
+			}
 
 			c, cleanup, err := setup(ctx)
 			if err != nil {
@@ -21,7 +25,7 @@ func newClearCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			if err := c.ClearInstances(ctx); err != nil {
+			if err := c.ClearInstances(ctx, force); err != nil {
 				return fmt.Errorf("clear instances: %w", err)
 			}
 
@@ -29,5 +33,6 @@ func newClearCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Bool("force", false, "clear instances even when they have unfinished executions")
 	return cmd
 }

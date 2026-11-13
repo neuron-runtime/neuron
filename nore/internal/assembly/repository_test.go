@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
@@ -38,7 +39,7 @@ func testRegistration(assemblyID, version, hash, env string) RegisteredAssembly 
 func register(t *testing.T, repo *Repository, assemblyID, version, hash, env string) {
 	t.Helper()
 
-	if _, _, err := repo.Register(context.Background(), testRegistration(assemblyID, version, hash, env), nil); err != nil {
+	if _, _, err := repo.Register(context.Background(), testRegistration(assemblyID, version, hash, env)); err != nil {
 		t.Fatalf("register %s:%s#%s:%s: %v", assemblyID, version, hash, env, err)
 	}
 }
@@ -74,20 +75,23 @@ func TestResolveByExactHash(t *testing.T) {
 	}
 }
 
-func TestSameVersionRebuildReplacesOldHash(t *testing.T) {
+func TestSameVersionRebuildRetainsOldHash(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newTestRepository(t)
 	register(t, repo, "app", "1.0.0", "old-hash", "dev")
 	register(t, repo, "app", "1.0.0", "new-hash", "dev")
 
-	_, err := repo.Resolve(ctx, protocol.InstanceKey{
+	old, err := repo.Resolve(ctx, protocol.InstanceKey{
 		AssemblyID: "app",
 		Version:    "1.0.0",
 		Hash:       "old-hash",
 		Env:        "dev",
 	})
-	if !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("old hash should be gone, got %v", err)
+	if err != nil {
+		t.Fatalf("old hash should remain resolvable: %v", err)
+	}
+	if old.Key.Hash != "old-hash" {
+		t.Fatalf("resolved unexpected old hash: %+v", old.Key)
 	}
 
 	got, err := repo.Resolve(ctx, protocol.InstanceKey{
@@ -109,6 +113,61 @@ func TestSameVersionRebuildReplacesOldHash(t *testing.T) {
 	}
 	if latest.Key.Hash != "new-hash" {
 		t.Fatalf("latest should point at new hash, got %+v", latest.Key)
+	}
+}
+
+func TestPruneRetainsCurrentAndReferencedArtifacts(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newTestRepository(t)
+	now := time.Now().UTC()
+	for i, hash := range []string{"hash-1", "hash-2", "hash-3"} {
+		reg := testRegistration("app", "1.0.0", hash, "dev")
+		reg.RegisteredAt = now.Add(time.Duration(i) * time.Minute)
+		if _, _, err := repo.Register(ctx, reg); err != nil {
+			t.Fatalf("register %s: %v", hash, err)
+		}
+	}
+
+	result, err := repo.Prune(ctx, RetentionPolicy{MaxArtifactsPerVersion: 1}, map[string]bool{"hash-2": true})
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if result.Removed != 1 {
+		t.Fatalf("prune removed %d artifacts, want 1", result.Removed)
+	}
+
+	for _, hash := range []string{"hash-2", "hash-3"} {
+		if _, err := repo.Resolve(ctx, protocol.InstanceKey{
+			AssemblyID: "app", Version: "1.0.0", Hash: hash, Env: "dev",
+		}); err != nil {
+			t.Fatalf("retained hash %s should resolve: %v", hash, err)
+		}
+	}
+	if _, err := repo.Resolve(ctx, protocol.InstanceKey{
+		AssemblyID: "app", Version: "1.0.0", Hash: "hash-1", Env: "dev",
+	}); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("unreferenced superseded hash should be pruned, got %v", err)
+	}
+}
+
+func TestPruneRetainsArtifactsYoungerThanMaxAge(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newTestRepository(t)
+	register(t, repo, "app", "1.0.0", "old-hash", "dev")
+	register(t, repo, "app", "1.0.0", "new-hash", "dev")
+
+	result, err := repo.Prune(ctx, RetentionPolicy{MaxAge: time.Hour}, nil)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if result.Removed != 0 {
+		t.Fatalf("prune removed %d young artifacts, want 0", result.Removed)
+	}
+
+	if _, err := repo.Resolve(ctx, protocol.InstanceKey{
+		AssemblyID: "app", Version: "1.0.0", Hash: "old-hash", Env: "dev",
+	}); err != nil {
+		t.Fatalf("young superseded artifact should remain: %v", err)
 	}
 }
 
@@ -325,7 +384,7 @@ func TestRegisterIsAtomicWhenIndexWriteFails(t *testing.T) {
 	}
 
 	failingRepo := NewRepository(&failingIndexStore{Store: store, failSuffix: indexFileName})
-	_, _, err = failingRepo.Register(ctx, testRegistration("app", "1.0.0", "hash-v1", "dev"), nil)
+	_, _, err = failingRepo.Register(ctx, testRegistration("app", "1.0.0", "hash-v1", "dev"))
 	if err == nil {
 		t.Fatal("registration should fail when the index write fails")
 	}

@@ -204,6 +204,8 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("runtime.execution.mode", cfg.Runtime.Execution.Mode)
 	v.SetDefault("runtime.execution.timeout", cfg.Runtime.Execution.Timeout)
 	v.SetDefault("runtime.execution.durability", cfg.Runtime.Execution.Durability)
+	v.SetDefault("runtime.execution.retention.maxAge", cfg.Runtime.Execution.Retention.MaxAge)
+	v.SetDefault("runtime.execution.retention.maxArtifactsPerVersion", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion)
 	v.SetDefault("runtime.workers.min", cfg.Runtime.Workers.Min)
 	v.SetDefault("runtime.workers.max", cfg.Runtime.Workers.Max)
 	v.SetDefault("runtime.detachedDrainTimeout", cfg.Runtime.DetachedDrainTimeout)

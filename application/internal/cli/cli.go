@@ -223,6 +223,12 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	if durability != "" {
 		noreArgs = append(noreArgs, "--durability", durability)
 	}
+	if cfg.Runtime.Execution.Retention.MaxAge != "" {
+		noreArgs = append(noreArgs, "--retention-max-age", cfg.Runtime.Execution.Retention.MaxAge)
+	}
+	if cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion > 0 {
+		noreArgs = append(noreArgs, "--retention-max-artifacts-per-version", fmt.Sprintf("%d", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion))
+	}
 	// The built-in capability policy travels with the runtime: it states what
 	// the built-in capability runtimes may reach, and the runtime enforces it.
 	policy, err := cfg.BuiltinPolicy()

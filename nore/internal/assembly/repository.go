@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,32 +29,26 @@ var (
 // storage.Store, plus a per-assembly version index (versions.json) that makes
 // (assemblyID, version) the source of truth.
 //
-// Registering the same version again REPLACES the previous artifact(s) for that
-// version: earlier hashes are pruned, so a given name:version always addresses
-// exactly one artifact, the newest one. Artifacts are therefore not
-// content-addressed immutable; that retention limitation remains until Phase 4.
+// Artifacts are immutable once written. Registering a new hash for an existing
+// version moves the version index to the new artifact but retains the old one,
+// so durable executions pinned to an earlier hash keep resolving after a
+// rebuild. Removal is never a side effect of registration; it is performed by
+// Delete or the explicit Prune retention operation.
 type Repository struct {
-	store            storage.Store
-	referencedHashes map[string]bool
+	store storage.Store
 }
 
 func NewRepository(store storage.Store) *Repository {
-	return &Repository{store: store, referencedHashes: make(map[string]bool)}
+	return &Repository{store: store}
 }
 
 // Register persists reg durably and makes (assemblyID, version) point at it.
-// Registering the same version clears the previously recorded artifact(s) for
-// that version, regardless of hash or environment, then writes the new one and
-// sets it as the latest version. The artifact write, pruning, and index update
-// happen in one transaction, so a failed registration leaves no partial state.
-// The request is idempotent when the exact same artifact is already current:
-// created=false, replaced=false.
-//
-// If referencedHashes is provided, only artifact hashes not in the set will be
-// pruned; referenced hashes (e.g. those persisted by durable executions) are
-// retained. If referencedHashes is nil or empty, the previous unconditional
-// pruning behaviour is preserved for backward compatibility.
-func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly, referencedHashes map[string]bool) (created bool, replaced bool, err error) {
+// The artifact write and index update happen in one transaction, so a failed
+// registration leaves no partial state. Previous artifacts for the same version
+// are retained so executions pinned to them remain recoverable. The request is
+// idempotent when the exact same artifact is already current: created=false,
+// replaced=false.
+func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly) (created bool, replaced bool, err error) {
 	if reg.Key.AssemblyID == "" {
 		return false, false, fmt.Errorf("register requires a assembly id")
 	}
@@ -81,21 +76,6 @@ func (r *Repository) Register(ctx context.Context, reg RegisteredAssembly, refer
 		old, existed := idx.Versions[reg.Key.Version]
 
 		if err := tx.Put(ctx, storageKey, data); err != nil {
-			return err
-		}
-
-		// Store referenced hashes for reference-aware deletion.
-		if referencedHashes != nil {
-			for h := range referencedHashes {
-				r.referencedHashes[h] = true
-			}
-		}
-
-		// Enforce a single artifact per version: clear every other artifact
-		// previously recorded under assemblies/{id}/{version}/*.
-		// Only hashes not in referencedHashes will be pruned; referenced hashes
-		// (e.g. those persisted by durable executions) are retained.
-		if err := r.pruneVersionArtifacts(ctx, tx, reg.Key, referencedHashes); err != nil {
 			return err
 		}
 
@@ -328,11 +308,6 @@ func (r *Repository) Exists(ctx context.Context, key protocol.InstanceKey) (bool
 // deletes and index update happen in one transaction.
 func (r *Repository) Delete(ctx context.Context, key protocol.InstanceKey) error {
 	return r.store.WithTx(ctx, func(tx storage.Tx) error {
-		// Refuse to delete an artifact that is referenced by a durable execution.
-		if r.referencedHashes[key.Hash] {
-			return fmt.Errorf("assembly: artifact %q is referenced by a durable execution; use --force to also remove it", key.Hash)
-		}
-
 		idx, err := r.loadIndex(ctx, tx, key.AssemblyID)
 		if err != nil {
 			return err
@@ -389,70 +364,124 @@ func (r *Repository) List(ctx context.Context) ([]RegisteredAssembly, error) {
 	return records, nil
 }
 
-// pruneVersionArtifacts deletes every artifact under assemblies/{id}/{version}/*
-// except the just-written one for new. Only hashes not in referencedHashes will
-// be pruned; referenced hashes are retained (e.g. executions that durable-
-// execution mode has persisted against that artifact).
-func (r *Repository) pruneVersionArtifacts(ctx context.Context, kv storage.KV, new protocol.InstanceKey, referencedHashes map[string]bool) error {
-	if referencedHashes == nil {
-		return r.pruneVersionArtifactsUnconditional(ctx, kv, new)
+// RetentionPolicy bounds how many superseded artifacts Prune retains. A zero
+// duration or count disables that dimension, so the zero policy retains every
+// artifact. Referenced artifacts are always retained regardless of policy.
+type RetentionPolicy struct {
+	// MaxAge is the minimum age of a superseded artifact before it may be
+	// removed. Zero disables age-based pruning.
+	MaxAge time.Duration
+
+	// MaxArtifactsPerVersion bounds the artifacts retained for one
+	// assembly/version, including the current artifact and referenced
+	// artifacts. Zero disables count-based pruning.
+	MaxArtifactsPerVersion int
+}
+
+// Enabled reports whether the policy can remove anything.
+func (p RetentionPolicy) Enabled() bool {
+	return p.MaxAge > 0 || p.MaxArtifactsPerVersion > 0
+}
+
+// PruneResult reports what an explicit retention pass removed.
+type PruneResult struct {
+	Removed int
+}
+
+// Prune applies policy to superseded artifacts. The current artifact for every
+// indexed version and every hash in referencedHashes are always retained, so a
+// running or recoverable durable execution never loses the artifact it is
+// pinned to. Prune is explicit: registration and resolution never call it.
+func (r *Repository) Prune(ctx context.Context, policy RetentionPolicy, referencedHashes map[string]bool) (PruneResult, error) {
+	if !policy.Enabled() {
+		return PruneResult{}, nil
 	}
-	prefix, err := storage.Prefix("assemblies", new.AssemblyID, new.Version)
-	if err != nil {
-		return err
-	}
-	newKey, err := r.key(new)
-	if err != nil {
-		return err
-	}
-	keys, err := kv.List(ctx, prefix)
-	if err != nil {
-		return err
-	}
-	for _, storageKey := range keys {
-		if !strings.HasSuffix(storageKey, "/manifest") || storageKey == newKey {
-			continue
-		}
-		reg, err := r.getByStorageKey(ctx, kv, storageKey)
+
+	now := time.Now().UTC()
+	var result PruneResult
+	err := r.store.WithTx(ctx, func(tx storage.Tx) error {
+		prefix, err := storage.Prefix("assemblies")
 		if err != nil {
 			return err
 		}
-		// If this artifact's hash is referenced by a durable execution, retain it.
-		if referencedHashes[reg.Key.Hash] {
-			continue
-		}
-		if err := kv.Delete(ctx, storageKey); err != nil {
+		keys, err := tx.List(ctx, prefix)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
-}
 
-// pruneVersionArtifactsUnconditional is the original unconditional pruning
-// behaviour: deletes every artifact under assemblies/{id}/{version}/* except the
-// just-written one.
-func (r *Repository) pruneVersionArtifactsUnconditional(ctx context.Context, kv storage.KV, new protocol.InstanceKey) error {
-	prefix, err := storage.Prefix("assemblies", new.AssemblyID, new.Version)
-	if err != nil {
-		return err
-	}
-	newKey, err := r.key(new)
-	if err != nil {
-		return err
-	}
-	keys, err := kv.List(ctx, prefix)
-	if err != nil {
-		return err
-	}
-	for _, storageKey := range keys {
-		if !strings.HasSuffix(storageKey, "/manifest") || storageKey == newKey {
-			continue
+		type artifact struct {
+			storageKey string
+			reg        RegisteredAssembly
 		}
-		if err := kv.Delete(ctx, storageKey); err != nil {
-			return err
+		var artifacts []artifact
+		assemblyIDs := make(map[string]bool)
+		for _, storageKey := range keys {
+			if !strings.HasSuffix(storageKey, "/manifest") {
+				continue
+			}
+			reg, err := r.getByStorageKey(ctx, tx, storageKey)
+			if err != nil {
+				return fmt.Errorf("load artifact %q: %w", storageKey, err)
+			}
+			artifacts = append(artifacts, artifact{storageKey: storageKey, reg: reg})
+			assemblyIDs[reg.Key.AssemblyID] = true
 		}
+
+		current := make(map[string]bool)
+		for assemblyID := range assemblyIDs {
+			idx, err := r.loadIndex(ctx, tx, assemblyID)
+			if err != nil {
+				return err
+			}
+			for version, entry := range idx.Versions {
+				storageKey, err := r.key(protocol.InstanceKey{
+					AssemblyID: assemblyID,
+					Version:    version,
+					Hash:       entry.Hash,
+					Env:        entry.Env,
+				})
+				if err != nil {
+					return err
+				}
+				current[storageKey] = true
+			}
+		}
+
+		groups := make(map[string][]artifact)
+		for _, a := range artifacts {
+			group := a.reg.Key.AssemblyID + "\x00" + a.reg.Key.Version
+			groups[group] = append(groups[group], a)
+		}
+
+		for _, group := range groups {
+			sort.SliceStable(group, func(i, j int) bool {
+				if group[i].reg.RegisteredAt.Equal(group[j].reg.RegisteredAt) {
+					return group[i].storageKey < group[j].storageKey
+				}
+				return group[i].reg.RegisteredAt.After(group[j].reg.RegisteredAt)
+			})
+
+			kept := 0
+			for _, a := range group {
+				referenced := referencedHashes[a.reg.Key.Hash]
+				tooYoung := policy.MaxAge > 0 && now.Sub(a.reg.RegisteredAt) < policy.MaxAge
+				overCount := policy.MaxArtifactsPerVersion > 0 && kept >= policy.MaxArtifactsPerVersion
+				if current[a.storageKey] || referenced || tooYoung || !overCount {
+					kept++
+					continue
+				}
+				if err := tx.Delete(ctx, a.storageKey); err != nil {
+					return err
+				}
+				result.Removed++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return PruneResult{}, err
 	}
-	return nil
+	return result, nil
 }
 
 // deleteVersionArtifacts removes every artifact under assemblies/{id}/{version}/*.

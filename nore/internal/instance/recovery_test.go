@@ -31,7 +31,7 @@ func registerRecoveryAssembly(t *testing.T, store storage.Store, key protocol.In
 	if _, _, err := assembly.NewRepository(store).Register(context.Background(), assembly.RegisteredAssembly{
 		Key:      key,
 		Assembly: recoveryAssembly(key, capabilityID),
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatalf("register recovery assembly: %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestRecoveryResumesDetachedTask(t *testing.T) {
 	if _, _, err := assembly.NewRepository(store).Register(context.Background(), assembly.RegisteredAssembly{
 		Key:      key,
 		Assembly: manifest,
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatalf("register detached recovery assembly: %v", err)
 	}
 	persistRecoveryMetadata(t, store, string(instanceID), key)
