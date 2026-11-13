@@ -44,6 +44,17 @@ func (f *faultStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (f *faultStore) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	current, err := f.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	if string(current) != string(old) {
+		return storage.ErrConflict
+	}
+	return f.Put(ctx, key, new)
+}
+
 func (f *faultStore) List(_ context.Context, prefix string) ([]string, error) {
 	if f.list != nil {
 		return f.list(prefix)

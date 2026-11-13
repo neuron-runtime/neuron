@@ -46,6 +46,17 @@ type KV interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, prefix string) ([]string, error)
+
+	// CompareAndSwap atomically replaces the value stored at key when its
+	// current value equals old. It returns ErrNotFound when key is missing and
+	// ErrConflict when the stored value differs from old; in both cases the
+	// stored value is left unchanged. On success new becomes the stored value.
+	//
+	// old and new are opaque bytes compared and stored byte-for-byte. The
+	// operation participates in the surrounding transaction when called on a
+	// Tx, so a conflict or a later callback error rolls back exactly like any
+	// other transactional write.
+	CompareAndSwap(ctx context.Context, key string, old, new []byte) error
 }
 
 // Tx is a KV bound to one transaction. Every operation on a Tx participates in

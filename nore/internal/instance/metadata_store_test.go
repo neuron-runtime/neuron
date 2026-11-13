@@ -25,6 +25,10 @@ func (f *metadataFaultStore) Get(_ context.Context, key string) ([]byte, error) 
 func (f *metadataFaultStore) Put(context.Context, string, []byte) error { return nil }
 func (f *metadataFaultStore) Delete(context.Context, string) error      { return nil }
 
+func (f *metadataFaultStore) CompareAndSwap(context.Context, string, []byte, []byte) error {
+	return storage.ErrNotFound
+}
+
 func (f *metadataFaultStore) List(_ context.Context, prefix string) ([]string, error) {
 	if f.list != nil {
 		return f.list(prefix)

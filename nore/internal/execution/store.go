@@ -110,7 +110,7 @@ func (s *ExecutionStore) Save(ctx context.Context, execution *Execution) error {
 
 	var nextRevision uint64
 	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
-		currentRevision, err := storedRevision(ctx, tx, key)
+		old, currentRevision, err := storedExecution(ctx, tx, key)
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,7 @@ func (s *ExecutionStore) Save(ctx context.Context, execution *Execution) error {
 		if err != nil {
 			return err
 		}
-		return tx.Put(ctx, key, data)
+		return tx.CompareAndSwap(ctx, key, old, data)
 	})
 	if err != nil {
 		return fmt.Errorf("persist execution %s: %w", execution.ID, err)
@@ -192,7 +192,7 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 	var nextRevision uint64
 	createdAt := time.Now().UTC()
 	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
-		currentRevision, err := storedRevision(ctx, tx, key)
+		old, currentRevision, err := storedExecution(ctx, tx, key)
 		if err != nil {
 			return err
 		}
@@ -206,7 +206,7 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 		if err != nil {
 			return err
 		}
-		if err := tx.Put(ctx, key, data); err != nil {
+		if err := tx.CompareAndSwap(ctx, key, old, data); err != nil {
 			return err
 		}
 
@@ -354,21 +354,26 @@ func executionIDFromKey(key string) (shared.ID, error) {
 	return shared.ID(key[len(prefix):]), nil
 }
 
-func storedRevision(ctx context.Context, tx storage.Tx, key string) (uint64, error) {
+// storedExecution reads the persisted execution bytes and revision inside the
+// caller's transaction. The bytes are the compare-and-swap precondition, so the
+// revision check and the write cannot be separated by another writer. A missing
+// record returns nil bytes and revision zero without an error; CompareAndSwap
+// reports the absence when the caller attempts to write.
+func storedExecution(ctx context.Context, tx storage.Tx, key string) ([]byte, uint64, error) {
 	data, err := tx.Get(ctx, key)
 	if errors.Is(err, storage.ErrNotFound) {
-		return 0, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read persisted execution revision: %w", err)
+		return nil, 0, fmt.Errorf("read persisted execution revision: %w", err)
 	}
 	var record struct {
 		Revision uint64 `json:"revision"`
 	}
 	if err := json.Unmarshal(data, &record); err != nil {
-		return 0, fmt.Errorf("decode persisted execution revision: %w", err)
+		return nil, 0, fmt.Errorf("decode persisted execution revision: %w", err)
 	}
-	return record.Revision, nil
+	return data, record.Revision, nil
 }
 
 func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
@@ -461,10 +466,11 @@ func (s *ExecutionStore) EnqueueDispatchIntent(ctx context.Context, intent *Disp
 
 // ClaimDispatchIntent attempts to take ownership of a dispatch intent. A claim
 // succeeds only while the intent is ready and is either unowned or has an
-// expired lease. The read, eligibility check, and write happen in one
-// transaction so concurrent callers cannot both observe the intent as
-// claimable. It returns (nil, false, nil) when the intent is missing, unready,
-// or held under a live lease.
+// expired lease. The read and eligibility check happen in one transaction, and
+// the write is a compare-and-swap against the value that was read, so
+// concurrent callers cannot both observe the intent as claimable and both win.
+// It returns (nil, false, nil) when the intent is missing, unready, held under a
+// live lease, or lost the compare-and-swap to another owner.
 func (s *ExecutionStore) ClaimDispatchIntent(ctx context.Context, intent *DispatchIntent, owner string, lease time.Duration) (*DispatchIntent, bool, error) {
 	if intent == nil {
 		return nil, false, fmt.Errorf("dispatch intent is required")
@@ -509,7 +515,14 @@ func (s *ExecutionStore) claimDispatchIntent(ctx context.Context, key, owner str
 		if err != nil {
 			return fmt.Errorf("marshal dispatch intent %s: %w", key, err)
 		}
-		if err := tx.Put(ctx, key, encoded); err != nil {
+		// The eligibility check above used the value read in this transaction.
+		// CompareAndSwap makes the claim atomic: if another owner wrote after
+		// that read, the conditional update loses and this caller reports no
+		// claim instead of overwriting the winner.
+		if err := tx.CompareAndSwap(ctx, key, data, encoded); err != nil {
+			if errors.Is(err, storage.ErrConflict) || errors.Is(err, storage.ErrNotFound) {
+				return nil
+			}
 			return fmt.Errorf("write dispatch intent %s: %w", key, err)
 		}
 		claimed = &intent

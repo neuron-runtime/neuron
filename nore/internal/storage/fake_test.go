@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -54,6 +55,22 @@ func (s *fakeStore) Delete(ctx context.Context, key string) error {
 		return storage.ErrClosed
 	}
 	delete(s.kv, key)
+	return nil
+}
+
+// CompareAndSwap implements storage.Store.
+func (s *fakeStore) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	if s.closed {
+		return storage.ErrClosed
+	}
+	current, ok := s.kv[key]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if !bytes.Equal(current, old) {
+		return storage.ErrConflict
+	}
+	s.kv[key] = append([]byte(nil), new...)
 	return nil
 }
 
@@ -118,6 +135,18 @@ func (s *fakeTx) Put(ctx context.Context, key string, data []byte) error {
 
 func (s *fakeTx) Delete(ctx context.Context, key string) error {
 	delete(s.kv, key)
+	return nil
+}
+
+func (s *fakeTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	current, ok := s.kv[key]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if !bytes.Equal(current, old) {
+		return storage.ErrConflict
+	}
+	s.kv[key] = append([]byte(nil), new...)
 	return nil
 }
 

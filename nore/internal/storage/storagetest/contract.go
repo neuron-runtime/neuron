@@ -111,6 +111,110 @@ func Run(t *testing.T, open func(t *testing.T) storage.Store) {
 		}
 	})
 
+	t.Run("compare and swap", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "cas", "value")
+
+		if err := store.CompareAndSwap(ctx, key, []byte("old"), []byte("new")); !errors.Is(err, storage.ErrNotFound) {
+			t.Fatalf("compare and swap missing key = %v, want ErrNotFound", err)
+		}
+		if err := store.Put(ctx, key, []byte("old")); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		if err := store.CompareAndSwap(ctx, key, []byte("stale"), []byte("new")); !errors.Is(err, storage.ErrConflict) {
+			t.Fatalf("compare and swap stale value = %v, want ErrConflict", err)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "old" {
+			t.Fatalf("value after conflict = %q, %v; want old", got, err)
+		}
+		if err := store.CompareAndSwap(ctx, key, []byte("old"), []byte("new")); err != nil {
+			t.Fatalf("compare and swap current value: %v", err)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "new" {
+			t.Fatalf("value after swap = %q, %v; want new", got, err)
+		}
+		if err := store.CompareAndSwap(ctx, key, []byte("new"), []byte("new")); err != nil {
+			t.Fatalf("compare and swap identical value: %v", err)
+		}
+	})
+
+	t.Run("compare and swap transaction commits", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "cas", "commit")
+
+		if err := store.Put(ctx, key, []byte("before")); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		err := store.WithTx(ctx, func(tx storage.Tx) error {
+			return tx.CompareAndSwap(ctx, key, []byte("before"), []byte("after"))
+		})
+		if err != nil {
+			t.Fatalf("compare and swap transaction: %v", err)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "after" {
+			t.Fatalf("committed value = %q, %v; want after", got, err)
+		}
+	})
+
+	t.Run("compare and swap transaction rolls back", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "cas", "rollback")
+		abort := errors.New("abort compare and swap")
+
+		if err := store.Put(ctx, key, []byte("before")); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		err := store.WithTx(ctx, func(tx storage.Tx) error {
+			if err := tx.CompareAndSwap(ctx, key, []byte("before"), []byte("after")); err != nil {
+				return err
+			}
+			return abort
+		})
+		if !errors.Is(err, abort) {
+			t.Fatalf("transaction error = %v, want %v", err, abort)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "before" {
+			t.Fatalf("rolled-back value = %q, %v; want before", got, err)
+		}
+	})
+
+	t.Run("compare and swap cancellation", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		key := mustKey(t, "cas", "cancelled")
+
+		if err := store.Put(ctx, key, []byte("before")); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		if err := store.CompareAndSwap(cancelled, key, []byte("before"), []byte("after")); err == nil {
+			t.Fatal("compare and swap with cancelled context succeeded")
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "before" {
+			t.Fatalf("value after cancelled compare and swap = %q, %v; want before", got, err)
+		}
+
+		txCtx, txCancel := context.WithCancel(ctx)
+		err := store.WithTx(txCtx, func(tx storage.Tx) error {
+			if err := tx.CompareAndSwap(ctx, key, []byte("before"), []byte("after")); err != nil {
+				return err
+			}
+			txCancel()
+			return nil
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled compare and swap transaction = %v, want context.Canceled", err)
+		}
+		if got, err := store.Get(ctx, key); err != nil || string(got) != "before" {
+			t.Fatalf("value after cancelled transaction = %q, %v; want before", got, err)
+		}
+	})
+
 	t.Run("transaction callback panic rolls back", func(t *testing.T) {
 		store := open(t)
 		ctx := context.Background()

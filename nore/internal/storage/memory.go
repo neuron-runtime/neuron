@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -82,6 +83,31 @@ func (s *MemoryStore) Delete(ctx context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, key)
+	return nil
+}
+
+func (s *MemoryStore) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return err
+	}
+	defer s.gate.EndRead()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.data[key]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, key)
+	}
+	if !bytes.Equal(current, old) {
+		return fmt.Errorf("%w: %s", ErrConflict, key)
+	}
+	s.data[key] = append([]byte(nil), new...)
 	return nil
 }
 
@@ -205,6 +231,21 @@ func (t memoryTx) Delete(ctx context.Context, key string) error {
 		return err
 	}
 	delete(t.store.data, key)
+	return nil
+}
+
+func (t memoryTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current, ok := t.store.data[key]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, key)
+	}
+	if !bytes.Equal(current, old) {
+		return fmt.Errorf("%w: %s", ErrConflict, key)
+	}
+	t.store.data[key] = append([]byte(nil), new...)
 	return nil
 }
 

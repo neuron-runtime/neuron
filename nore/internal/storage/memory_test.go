@@ -104,6 +104,54 @@ func TestMemoryStoreTransactionRollsBack(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreCompareAndSwap(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	defer store.Close()
+
+	if err := store.CompareAndSwap(ctx, "k", []byte("old"), []byte("new")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("compare and swap missing key = %v, want ErrNotFound", err)
+	}
+	if err := store.Put(ctx, "k", []byte("old")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := store.CompareAndSwap(ctx, "k", []byte("stale"), []byte("new")); !errors.Is(err, ErrConflict) {
+		t.Fatalf("compare and swap stale value = %v, want ErrConflict", err)
+	}
+	if got, err := store.Get(ctx, "k"); err != nil || string(got) != "old" {
+		t.Fatalf("value after conflict = %q, %v; want old", got, err)
+	}
+	if err := store.CompareAndSwap(ctx, "k", []byte("old"), []byte("new")); err != nil {
+		t.Fatalf("compare and swap current value: %v", err)
+	}
+	if got, err := store.Get(ctx, "k"); err != nil || string(got) != "new" {
+		t.Fatalf("value after swap = %q, %v; want new", got, err)
+	}
+}
+
+func TestMemoryStoreCompareAndSwapTransactionRollsBack(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	defer store.Close()
+
+	if err := store.Put(ctx, "k", []byte("before")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	rollback := errors.New("rollback")
+	err := store.WithTx(ctx, func(tx Tx) error {
+		if err := tx.CompareAndSwap(ctx, "k", []byte("before"), []byte("after")); err != nil {
+			return err
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("with tx error = %v, want rollback", err)
+	}
+	if got, err := store.Get(ctx, "k"); err != nil || string(got) != "before" {
+		t.Fatalf("value after rollback = %q, %v; want before", got, err)
+	}
+}
+
 func TestMemoryStoreRejectsNestedAndPlainOperationsInsideTx(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

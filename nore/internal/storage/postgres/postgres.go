@@ -130,6 +130,17 @@ func escapeLike(s string) string {
 	return s
 }
 
+func (s *Store) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return err
+	}
+	defer s.gate.EndRead()
+	return compareAndSwap(ctx, s.db, key, old, new)
+}
+
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
@@ -242,6 +253,10 @@ func (t *txOps) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (t *txOps) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	return compareAndSwap(ctx, t.tx, key, old, new)
+}
+
 func (t *txOps) List(ctx context.Context, prefix string) ([]string, error) {
 	pattern := escapeLike(prefix) + "%"
 	rows, err := t.tx.QueryContext(ctx, "SELECT key FROM kv_store WHERE key LIKE $1 ESCAPE '\\' ORDER BY key", pattern)
@@ -261,6 +276,43 @@ func (t *txOps) List(ctx context.Context, prefix string) ([]string, error) {
 		return nil, fmt.Errorf("postgres tx list: %w", err)
 	}
 	return keys, nil
+}
+
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func compareAndSwap(ctx context.Context, q querier, key string, old, new []byte) error {
+	result, err := q.ExecContext(ctx,
+		"UPDATE kv_store SET value = $1, updated_at = NOW() WHERE key = $2 AND value = $3",
+		new, key, old,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres compare and swap %q: %w", key, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres compare and swap %q rows affected: %w", key, err)
+	}
+	if affected == 1 {
+		return nil
+	}
+	if affected > 1 {
+		return fmt.Errorf("postgres compare and swap %q: updated %d rows", key, affected)
+	}
+
+	// No row matched. Reload to distinguish a missing key from a value that
+	// changed since the caller read it.
+	var value []byte
+	err = q.QueryRowContext(ctx, "SELECT value FROM kv_store WHERE key = $1", key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", storage.ErrNotFound, key)
+	}
+	if err != nil {
+		return fmt.Errorf("postgres compare and swap %q: %w", key, err)
+	}
+	return fmt.Errorf("%w: %s", storage.ErrConflict, key)
 }
 
 func (s *Store) Close() error {

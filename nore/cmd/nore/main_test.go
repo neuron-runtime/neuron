@@ -211,6 +211,10 @@ func (nonTransactionalStore) Put(context.Context, string, []byte) error { return
 
 func (nonTransactionalStore) Delete(context.Context, string) error { return nil }
 
+func (nonTransactionalStore) CompareAndSwap(context.Context, string, []byte, []byte) error {
+	return storage.ErrNotFound
+}
+
 func (nonTransactionalStore) List(context.Context, string) ([]string, error) { return nil, nil }
 
 func (nonTransactionalStore) Ping(context.Context) error { return nil }

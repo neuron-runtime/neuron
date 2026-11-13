@@ -52,7 +52,12 @@ func New(ctx context.Context, cfg storage.Config) (*Store, error) {
 
 	dbPath := filepath.Join(dataDir, "nore.db")
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
+	// _txlock=immediate makes every WithTx acquire the write lock at BEGIN
+	// instead of upgrading from a read snapshot mid-transaction. A deferred
+	// transaction that reads and then writes can otherwise fail with
+	// SQLITE_BUSY_SNAPSHOT when another process commits first; an immediate
+	// transaction waits on busy_timeout instead.
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -111,6 +116,17 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	}
 	defer s.gate.EndRead()
 	return del(ctx, s.db, key)
+}
+
+func (s *Store) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return err
+	}
+	defer s.gate.EndRead()
+	return compareAndSwap(ctx, s.db, key, old, new)
 }
 
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
@@ -212,6 +228,10 @@ func (t txOps) Delete(ctx context.Context, key string) error {
 	return del(ctx, t.tx, key)
 }
 
+func (t txOps) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	return compareAndSwap(ctx, t.tx, key, old, new)
+}
+
 func (t txOps) List(ctx context.Context, prefix string) ([]string, error) {
 	return list(ctx, t.tx, prefix)
 }
@@ -252,6 +272,33 @@ func del(ctx context.Context, q querier, key string) error {
 		return fmt.Errorf("sqlite delete %q: %w", key, err)
 	}
 	return nil
+}
+
+func compareAndSwap(ctx context.Context, q querier, key string, old, new []byte) error {
+	result, err := q.ExecContext(ctx,
+		`UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ?`,
+		new, key, old,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite compare and swap %q: %w", key, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite compare and swap %q rows affected: %w", key, err)
+	}
+	if affected == 1 {
+		return nil
+	}
+	if affected > 1 {
+		return fmt.Errorf("sqlite compare and swap %q: updated %d rows", key, affected)
+	}
+
+	// No row matched. Reload to distinguish a missing key from a value that
+	// changed since the caller read it.
+	if _, err := get(ctx, q, key); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %s", storage.ErrConflict, key)
 }
 
 func list(ctx context.Context, q querier, prefix string) ([]string, error) {
