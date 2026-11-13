@@ -241,6 +241,49 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 	return nil
 }
 
+// Adopt records an execution as live without writing it back to durable
+// storage. Recovery uses it after loading a snapshot and attaching its
+// recompiled blueprint: the scheduler and engine must share one Execution value,
+// and a fresh Get would otherwise load a second copy from storage.
+//
+// Adopt deliberately does not change the revision. The snapshot it is given is
+// the durable state the caller just read, so the next transition compares
+// against that revision exactly as it would after a normal load.
+func (s *ExecutionStore) Adopt(ctx context.Context, execution *Execution) error {
+	if execution == nil {
+		return fmt.Errorf("execution is required")
+	}
+	if err := s.mem.Save(ctx, execution); err != nil {
+		return fmt.Errorf("adopt execution %s: %w", execution.ID, err)
+	}
+	return nil
+}
+
+// ClearDispatchIntents removes every dispatch intent belonging to execution.
+//
+// Recovery calls it before re-deriving intents from the recovered state. A
+// crashed process can leave an intent claimed under a lease that has not yet
+// expired, or an intent for a capability that has since completed; neither is
+// valid work, and the lease would otherwise delay or duplicate dispatch.
+func (s *ExecutionStore) ClearDispatchIntents(ctx context.Context, executionID shared.ID) error {
+	prefix, err := storage.Prefix("dispatch_intents", string(executionID))
+	if err != nil {
+		return fmt.Errorf("prefix dispatch intents for execution %s: %w", executionID, err)
+	}
+	return s.store.WithTx(ctx, func(tx storage.Tx) error {
+		keys, err := tx.List(ctx, prefix)
+		if err != nil {
+			return fmt.Errorf("list dispatch intents for execution %s: %w", executionID, err)
+		}
+		for _, key := range keys {
+			if err := tx.Delete(ctx, key); err != nil {
+				return fmt.Errorf("delete dispatch intent %s: %w", key, err)
+			}
+		}
+		return nil
+	})
+}
+
 // Delete removes the durable record before the in-memory record. A failed
 // durable delete leaves memory intact so the execution remains readable.
 func (s *ExecutionStore) Delete(ctx context.Context, executionID shared.ID) error {

@@ -424,6 +424,10 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	if err != nil {
 		return nil, err
 	}
+	// The start event is not durable, so record the input on the pending
+	// execution before it is persisted. Recovery starts a pending execution from
+	// this snapshot rather than losing the input that only existed in the event.
+	exec.SeedInitialParams(input)
 	if err := i.store.Add(ctx, exec); err != nil {
 		return nil, err
 	}
@@ -442,6 +446,52 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	}
 
 	return exec, nil
+}
+
+// RecoverExecution attaches a durable execution to this live instance and asks
+// the scheduler to resume it.
+//
+// The execution arrives without a blueprint because snapshots deliberately do
+// not copy the graph. The caller supplies the blueprint recompiled from the
+// immutable artifact the execution started with; a detached task receives the
+// sub-blueprint for the capability it took over.
+//
+// pendingInput is used only for a pending detached task, whose input lived in a
+// start event that never reached the scheduler. A pending root execution already
+// carries its input on the snapshot.
+func (i *Instance) RecoverExecution(ctx context.Context, exec *execution.Execution, blueprint *types.ExecutionBlueprint, pendingInput map[string]any) error {
+	if exec == nil {
+		return fmt.Errorf("execution is required")
+	}
+	if blueprint == nil {
+		return fmt.Errorf("execution %s has no recovery blueprint", exec.ID)
+	}
+	if i.scheduler == nil || i.engine == nil {
+		return fmt.Errorf("instance %s has no runtime; it cannot recover executions", i.ID)
+	}
+	if exec.IsTerminal() {
+		return nil
+	}
+
+	if exec.Status() == execution.StatusPending && len(pendingInput) > 0 {
+		exec.SeedInitialParams(pendingInput)
+	}
+	exec.AttachBlueprint(blueprint)
+
+	store, ok := i.store.(*execution.ExecutionStore)
+	if !ok {
+		return fmt.Errorf("instance %s does not use a durable execution store", i.ID)
+	}
+	if err := store.Adopt(ctx, exec); err != nil {
+		return err
+	}
+
+	if exec.ParentExecutionID != "" {
+		i.scopes.BindDetached(exec.ID)
+	} else {
+		i.scopes.Bind(exec.ID)
+	}
+	return i.scheduler.RecoverExecution(ctx, exec)
 }
 
 // ErrExecutionNotFound reports that no execution carries the requested ID on

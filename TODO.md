@@ -593,7 +593,7 @@ Exit criteria:
       - wait state (signal/timer correlation, deadline) for Phase 5
       - dispatch state that prevents duplicate dispatch
       - execution deadline distinct from per-capability timeouts
-- [ ] **R4-7** Decide how the blueprint is recovered. Preferred: persist the immutable assembly
+- [x] **R4-7** Decide how the blueprint is recovered. Preferred: persist the immutable assembly
       reference and recompile from the retained artifact. Do not copy the whole graph into every
       execution unless measurement shows recompilation is a problem.
 - [x] **R4-8** Define status semantics precisely. `waiting` is an execution that is suspended,
@@ -619,7 +619,7 @@ Exit criteria:
 
 ### 4.4 Recovery protocol
 
-- [x] **R4-14** Implement recovery for unfinished durable executions:
+- [ ] **R4-14** Implement recovery for unfinished durable executions:
       1. load the execution record
       2. resolve the immutable assembly artifact
       3. restore capability, join, attempt, and wait state
@@ -627,7 +627,7 @@ Exit criteria:
       5. restore retry timers and suspended waits
       6. handle invocations whose outcome is unknown after interruption
       7. continue until completion, failure, cancellation, or another durable wait
-- [ ] **R4-15** Keep non-durable behavior unchanged: when durability is off, interrupted
+- [x] **R4-15** Keep non-durable behavior unchanged: when durability is off, interrupted
       executions are still failed rather than resumed
       (`nore/internal/instance/drain.go:35-45`). The mode decides which sweep applies.
 - [x] **R4-16** Define interrupted-invocation handling. A capability that was `running` at the
@@ -665,30 +665,31 @@ Exit criteria:
       - between two fan-in branches
       - during a retry backoff
       - during an external wait (covered in Phase 5)
-- [ ] **R4-25** Test that completed capabilities are not rerun and that a join preserved one
+- [x] **R4-25** Test that completed capabilities are not rerun and that a join preserved one
       branch's result while the other was unfinished.
 - [ ] **R4-26** Test an execution that suspends, then a rebuild changes the same version's graph;
       verify the execution resumes against its original artifact (or fails explicitly if the
       artifact was deliberately deleted under an allowed policy). This is the core of R4-1/R4-2.
 - [ ] **R4-27** Test duplicate dispatch/claim: two workers, one should win.
-- [ ] **R4-28** Test that non-durable mode still fails interrupted executions and never reports
+- [x] **R4-28** Test that non-durable mode still fails interrupted executions and never reports
       them as running.
-- [ ] **R4-29** Run `scripts/script.sh` and record the result in this phase.
+- [x] **R4-29** Run `scripts/script.sh` and record the result in this phase. Passed on 2026-11-13 after implementing durable recovery.
 
 ### Findings during Phase 4 implementation
 
 Append new findings here as checklist items.
 
-- [ ] **F4-1** Durability modes were not actually distinct in the runtime. Defect: `none` still persisted execution and event history, and `history`/`durable` selected no storage behavior beyond reconcile. Evidence: `Instance.New` always built `execution.NewExecutionStore(persistentStore)` and `event.NewStore(persistentStore)`. Intended fix: normalize the three modes, swap a process-local store in for `none`, and prove `none` vs `history` persistence with tests.
-- [ ] **F4-2** `Manager.GetOrCreate` never passed the manager's durability mode to the live instance. Defect: an instance always fell back to the default mode, so manager and instance could disagree. Evidence: `GetOrCreate` called `New` without `WithDurability`, while `Instance.durability` was otherwise unread. Intended fix: pass `WithDurability(m.durability)` and test the live instance mode.
-- [ ] **F4-3** The documented durability environment variable did not reach `config.Load`. Defect: Viper would derive `NEURON_RUNTIME_EXECUTION_DURABILITY` from the config path, while the documented name is `NEURON_EXECUTION_DURABILITY`. Evidence: `registerDefaults` registered `runtime.execution.mode` but not durability, and no explicit environment binding existed. Intended fix: register the default and bind the short and long environment names explicitly.
-- [ ] **F4-4** The project configuration denied durability at the wrong path. Defect: `deniedInProjectFile` checked `execution.durability`, so `runtime.execution.durability` was not rejected as deployment-level configuration. Evidence: `application/config/validate.go`. Intended fix: deny `runtime.execution.durability`.
-- [ ] **F4-5** Unknown durability values silently degraded to `history`. Defect: a typo such as `durabel` loaded without error and changed the guarantee. Evidence: `Instance.New` only replaced the empty string. Intended fix: validate and normalize in configuration, instance construction, manager construction, and the runtime process boundary, with an error naming `none`, `history`, and `durable`.
-- [ ] **F4-6** The `nore` process overwrote explicitly parsed flags with environment variables. Defect: `--storage-driver`, `--storage-dsn`, and `--durability` could be silently replaced by `NEURON_*` values. Evidence: unconditional environment assignments in `nore/cmd/nore/main.go`. Intended fix: use `flag.Visit` to distinguish explicit flags and apply environment only when the flag was not set.
-- [ ] **F4-7** Durable-mode backend verification ran only in daemon mode. Defect: project mode opened storage without proving it supports transactions, so `durable` could start on an unsuitable backend. Evidence: the `WithTx` probe lived only in the daemon branch of `nore/cmd/nore/main.go`. Intended fix: share `openRuntimeStore`/`verifyDurableBackend` between both launch paths.
-- [ ] **F4-8** Durability was not forwarded through every launch path. Defect: `daemon.ConfigFromEffective` omitted `--durability`, and the CLI exposed no `--durability` flag even though the validation error told operators to use one. Evidence: `application/daemon/config.go` and `application/internal/cli/cli.go`. Intended fix: add one persistent CLI flag, map it to `runtime.execution.durability`, and forward it from `ConfigFromEffective`.
-- [ ] **F4-9** `storage.Config.Durability` was dead and referenced a nonexistent package. Defect: the field was only assigned, never read, and its comment pointed at `nore-config`. Evidence: `nore/internal/storage/provider.go` and the two `storage.Open` call sites. Intended fix: remove the field; durability belongs to the instance/runtime layer, not the storage backend contract.
-- [ ] **F4-10** A stray tracked file named `nore/internal/storage/postgres/postgres.go | head -80` existed in the tree. Defect: accidental shell output was committed as a source file. Evidence: `git status` showed it as a tracked path containing a pipe and a shell command. Intended fix: delete it and verify the postgres package still builds.
+- [x] **F4-1** Durability modes were not actually distinct in the runtime. Defect: `none` still persisted execution and event history, and `history`/`durable` selected no storage behavior beyond reconcile. Evidence: `Instance.New` always built `execution.NewExecutionStore(persistentStore)` and `event.NewStore(persistentStore)`. Intended fix: normalize the three modes, swap a process-local store in for `none`, and prove `none` vs `history` persistence with tests.
+- [x] **F4-2** `Manager.GetOrCreate` never passed the manager's durability mode to the live instance. Defect: an instance always fell back to the default mode, so manager and instance could disagree. Evidence: `GetOrCreate` called `New` without `WithDurability`, while `Instance.durability` was otherwise unread. Intended fix: pass `WithDurability(m.durability)` and test the live instance mode.
+- [x] **F4-3** The documented durability environment variable did not reach `config.Load`. Defect: Viper would derive `NEURON_RUNTIME_EXECUTION_DURABILITY` from the config path, while the documented name is `NEURON_EXECUTION_DURABILITY`. Evidence: `registerDefaults` registered `runtime.execution.mode` but not durability, and no explicit environment binding existed. Intended fix: register the default and bind the short and long environment names explicitly.
+- [x] **F4-4** The project configuration denied durability at the wrong path. Defect: `deniedInProjectFile` checked `execution.durability`, so `runtime.execution.durability` was not rejected as deployment-level configuration. Evidence: `application/config/validate.go`. Intended fix: deny `runtime.execution.durability`.
+- [x] **F4-5** Unknown durability values silently degraded to `history`. Defect: a typo such as `durabel` loaded without error and changed the guarantee. Evidence: `Instance.New` only replaced the empty string. Intended fix: validate and normalize in configuration, instance construction, manager construction, and the runtime process boundary, with an error naming `none`, `history`, and `durable`.
+- [x] **F4-6** The `nore` process overwrote explicitly parsed flags with environment variables. Defect: `--storage-driver`, `--storage-dsn`, and `--durability` could be silently replaced by `NEURON_*` values. Evidence: unconditional environment assignments in `nore/cmd/nore/main.go`. Intended fix: use `flag.Visit` to distinguish explicit flags and apply environment only when the flag was not set.
+- [x] **F4-7** Durable-mode backend verification ran only in daemon mode. Defect: project mode opened storage without proving it supports transactions, so `durable` could start on an unsuitable backend. Evidence: the `WithTx` probe lived only in the daemon branch of `nore/cmd/nore/main.go`. Intended fix: share `openRuntimeStore`/`verifyDurableBackend` between both launch paths.
+- [x] **F4-8** Durability was not forwarded through every launch path. Defect: `daemon.ConfigFromEffective` omitted `--durability`, and the CLI exposed no `--durability` flag even though the validation error told operators to use one. Evidence: `application/daemon/config.go` and `application/internal/cli/cli.go`. Intended fix: add one persistent CLI flag, map it to `runtime.execution.durability`, and forward it from `ConfigFromEffective`.
+- [x] **F4-9** `storage.Config.Durability` was dead and referenced a nonexistent package. Defect: the field was only assigned, never read, and its comment pointed at `nore-config`. Evidence: `nore/internal/storage/provider.go` and the two `storage.Open` call sites. Intended fix: remove the field; durability belongs to the instance/runtime layer, not the storage backend contract.
+- [x] **F4-10** A stray tracked file named `nore/internal/storage/postgres/postgres.go | head -80` existed in the tree. Defect: accidental shell output was committed as a source file. Evidence: `git status` showed it as a tracked path containing a pipe and a shell command. Intended fix: delete it and verify the postgres package still builds.
+- [ ] **F4-11** Recovery now restores running executions, pending executions, recorded joins, and detached tasks against the pinned immutable artifact, and fails executions whose artifact is gone. It does not yet restore retry timers or suspended waits: a `retry_wait` with a future `next_attempt_at` is left in place without a durable timer, and a `waiting` capability is left suspended. Those belong to Phase 5 (R5-1, R5-10), so R4-14 step 5 remains open.
 
 ---
 

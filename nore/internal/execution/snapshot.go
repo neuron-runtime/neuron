@@ -32,6 +32,8 @@ type ExecutionSnapshot struct {
 	Version           string                               `json:"version,omitempty"`
 	Hash              string                               `json:"hash,omitempty"`
 	Env               string                               `json:"env,omitempty"`
+	// DetachedCapabilityID names the parent capability a detached task runs.
+	DetachedCapabilityID core.ID `json:"detached_capability_id,omitempty"`
 	// LogicalOperationID and AttemptID are stable identities used for
 	// idempotency. They are persisted so a restored execution does not
 	// fabricate new identities for work that may already have run.
@@ -64,28 +66,29 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 	}
 
 	return &ExecutionSnapshot{
-		SchemaVersion:      "2",
-		ID:                 e.ID,
-		CorrelationID:      e.CorrelationID,
-		InstanceID:         e.InstanceID,
-		ParentExecutionID:  e.ParentExecutionID,
-		Revision:           revision,
-		Status:             e.status,
-		InitialParams:      data.CanonicalMap(e.initialParams),
-		Params:             cloneParamsMap(e.params),
-		Results:            cloneParamsMap(e.results),
-		States:             states,
-		JoinState:          joinState,
-		InFlight:           e.inFlight,
-		StartedAt:          e.startedAt,
-		CompletedAt:        e.completedAt,
-		Error:              e.executionError,
-		AssemblyID:         e.AssemblyID,
-		Version:            e.Version,
-		Hash:               e.Hash,
-		Env:                e.Env,
-		LogicalOperationID: e.LogicalOperationID,
-		AttemptID:          e.AttemptID,
+		SchemaVersion:        "2",
+		ID:                   e.ID,
+		CorrelationID:        e.CorrelationID,
+		InstanceID:           e.InstanceID,
+		ParentExecutionID:    e.ParentExecutionID,
+		DetachedCapabilityID: e.DetachedCapabilityID,
+		Revision:             revision,
+		Status:               e.status,
+		InitialParams:        data.CanonicalMap(e.initialParams),
+		Params:               cloneParamsMap(e.params),
+		Results:              cloneParamsMap(e.results),
+		States:               states,
+		JoinState:            joinState,
+		InFlight:             e.inFlight,
+		StartedAt:            e.startedAt,
+		CompletedAt:          e.completedAt,
+		Error:                e.executionError,
+		AssemblyID:           e.AssemblyID,
+		Version:              e.Version,
+		Hash:                 e.Hash,
+		Env:                  e.Env,
+		LogicalOperationID:   e.LogicalOperationID,
+		AttemptID:            e.AttemptID,
 	}
 }
 
@@ -95,6 +98,7 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 
 	e.status = snapshot.Status
 	e.revision = snapshot.Revision
+	e.DetachedCapabilityID = snapshot.DetachedCapabilityID
 	e.initialParams = data.CanonicalMap(snapshot.InitialParams)
 	e.params = cloneParamsMap(snapshot.Params)
 	e.results = cloneParamsMap(snapshot.Results)
@@ -164,21 +168,22 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 
 	// Build the execution from snapshot fields.
 	e := &Execution{
-		ID:                snap.ID,
-		CorrelationID:     snap.CorrelationID,
-		InstanceID:        snap.InstanceID,
-		ParentExecutionID: snap.ParentExecutionID,
-		revision:          snap.Revision,
-		status:            snap.Status,
-		initialParams:     snap.InitialParams,
-		params:            snap.Params,
-		results:           snap.Results,
-		states:            snap.States,
-		inFlight:          snap.InFlight,
-		startedAt:         snap.StartedAt,
-		completedAt:       snap.CompletedAt,
-		executionError:    snap.Error,
-		done:              make(chan struct{}),
+		ID:                   snap.ID,
+		CorrelationID:        snap.CorrelationID,
+		InstanceID:           snap.InstanceID,
+		ParentExecutionID:    snap.ParentExecutionID,
+		DetachedCapabilityID: snap.DetachedCapabilityID,
+		revision:             snap.Revision,
+		status:               snap.Status,
+		initialParams:        snap.InitialParams,
+		params:               snap.Params,
+		results:              snap.Results,
+		states:               snap.States,
+		inFlight:             snap.InFlight,
+		startedAt:            snap.StartedAt,
+		completedAt:          snap.CompletedAt,
+		executionError:       snap.Error,
+		done:                 make(chan struct{}),
 	}
 
 	// Restore assembly identity from snapshot.
@@ -203,6 +208,15 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 	if e.states == nil {
 		e.states = make(map[shared.ID]CapabilityExecutionState)
 	}
+	if e.initialParams == nil {
+		e.initialParams = make(map[string]any)
+	}
+	if e.params == nil {
+		e.params = make(map[shared.ID]map[string]any)
+	}
+	if e.results == nil {
+		e.results = make(map[shared.ID]map[string]any)
+	}
 
 	// Rebuild join state from snapshot if present.
 	if snap.JoinState != nil {
@@ -211,8 +225,12 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 			e.joinState[id] = joinStateFromSnapshot(js)
 		}
 	}
-	// Restored executions are never resumed, but a terminal snapshot must not
-	// block a Wait caller forever, so signal completion eagerly.
+	if e.joinState == nil {
+		e.joinState = make(map[shared.ID]*joinStateInfo)
+	}
+	// A terminal snapshot must not block a Wait caller forever, so signal
+	// completion eagerly. A non-terminal snapshot is resumed by recovery, which
+	// attaches its blueprint and re-dispatches unfinished work.
 	if e.IsTerminal() {
 		e.signalTerminal()
 	}

@@ -3,6 +3,7 @@ package execution
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,12 @@ type Execution struct {
 	// ParentExecutionID links a detached execution to the execution that handed
 	// its work off. It is empty for a root execution.
 	ParentExecutionID shared.ID
+
+	// DetachedCapabilityID names the capability in the parent blueprint whose
+	// sub-blueprint this detached task runs. It is empty for a root execution.
+	// Recovery uses it to recompile the task's scope from the immutable parent
+	// artifact without persisting a second copy of the graph.
+	DetachedCapabilityID shared.ID
 
 	Blueprint *types.ExecutionBlueprint
 	mu        sync.RWMutex
@@ -329,6 +336,126 @@ func isTerminalCapability(status CapabilityStatus) bool {
 	default:
 		return false
 	}
+}
+
+// SeedInitialParams records the input a pending execution was created with.
+//
+// Execute persists the execution before the scheduler starts it, so the start
+// payload is not durable yet. Recording the input on the pending record is what
+// lets recovery start that execution after a crash instead of losing the input
+// that only existed in an in-memory event.
+func (e *Execution) SeedInitialParams(params map[string]any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.status != StatusPending {
+		return
+	}
+	e.initialParams = data.CanonicalMap(params)
+}
+
+// RecoverableDispatch prepares a running execution for recovery and returns the
+// capabilities that must be dispatched again.
+//
+// A capability recorded as running has an unknown external outcome: the process
+// stopped while it may have been executing. Recovery follows the at-least-once
+// policy, so it is returned to ready and dispatched again under the same
+// attempt identity. A capability already recorded as ready is returned as-is.
+//
+// Pending entry capabilities and joins whose predecessor bindings are all
+// recorded are also made ready; both cover snapshots written before the current
+// atomic transition boundary. A future retry wait is left in place because
+// durable timers belong to Phase 5; a capability already waiting is likewise
+// left untouched.
+//
+// The returned IDs are sorted so replay is deterministic. The in-flight count is
+// rebuilt from the recovered states rather than trusted blindly, because it is
+// the scheduler's accounting for work that may no longer exist.
+func (e *Execution) RecoverableDispatch() []shared.ID {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.status != StatusRunning || e.Blueprint == nil {
+		return nil
+	}
+
+	dispatch := make([]shared.ID, 0, len(e.states))
+	active := 0
+	now := time.Now().UTC()
+	for capabilityID, state := range e.states {
+		switch state.Status {
+		case CapabilityRunning:
+			state.Status = CapabilityReady
+			e.states[capabilityID] = state
+			dispatch = append(dispatch, capabilityID)
+			active++
+		case CapabilityReady:
+			dispatch = append(dispatch, capabilityID)
+			active++
+		case CapabilityRetryWait:
+			if state.NextAttemptAt == nil || !state.NextAttemptAt.After(now) {
+				state.Status = CapabilityReady
+				e.states[capabilityID] = state
+				dispatch = append(dispatch, capabilityID)
+			}
+			active++
+		case CapabilityWaiting:
+			active++
+		case CapabilityPending:
+			if e.recoverPendingLocked(capabilityID, &state) {
+				dispatch = append(dispatch, capabilityID)
+				active++
+			}
+		}
+	}
+	sort.Slice(dispatch, func(i, j int) bool { return dispatch[i] < dispatch[j] })
+	e.inFlight = active
+	return dispatch
+}
+
+// recoverPendingLocked makes a pending capability ready when its recorded
+// state already satisfies it. The caller must hold e.mu.
+func (e *Execution) recoverPendingLocked(capabilityID shared.ID, state *CapabilityExecutionState) bool {
+	node, exists := e.Blueprint.Nodes[capabilityID]
+	if !exists {
+		return false
+	}
+	if len(node.Predecessors) == 0 {
+		for _, entryID := range e.Blueprint.EntryCapabilityIDs {
+			if entryID != capabilityID {
+				continue
+			}
+			state.Status = CapabilityReady
+			e.states[capabilityID] = *state
+			if _, recorded := e.params[capabilityID]; !recorded {
+				e.params[capabilityID] = data.CanonicalMap(e.initialParams)
+			}
+			return true
+		}
+		return false
+	}
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists || ji == nil {
+		return false
+	}
+	if !ji.Dispatched {
+		for _, predecessor := range node.Predecessors {
+			if !ji.CompletedBindings[predecessor.BindingID] {
+				return false
+			}
+		}
+		// The join became ready in the previous process but the crash happened
+		// before the target's state was written. Recording the dispatch here is
+		// what closes that window without dispatching the target twice.
+		ji.Dispatched = true
+	}
+	merged := make(map[string]any)
+	for _, predecessor := range node.Predecessors {
+		mergeInto(merged, ji.PredecessorInputs[predecessor.BindingID])
+	}
+	state.Status = CapabilityReady
+	e.states[capabilityID] = *state
+	e.params[capabilityID] = data.CanonicalMap(merged)
+	return true
 }
 
 func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, error) {

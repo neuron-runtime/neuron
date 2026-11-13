@@ -33,7 +33,11 @@ func NewDetachedTask(scope *types.ExecutionBlueprint, correlationID, instanceID,
 	if err != nil {
 		return nil, err
 	}
+	if len(scope.EntryCapabilityIDs) != 1 {
+		return nil, fmt.Errorf("detached task scope must have exactly one entry capability, got %d", len(scope.EntryCapabilityIDs))
+	}
 	task.ParentExecutionID = parentExecutionID
+	task.DetachedCapabilityID = scope.EntryCapabilityIDs[0]
 	return task, nil
 }
 

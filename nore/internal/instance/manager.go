@@ -2,7 +2,6 @@ package instance
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -121,51 +120,201 @@ func (m *Manager) recoverExecutions(ctx context.Context) error {
 	if m.durability != DurabilityDurable {
 		return nil
 	}
-	// Load all execution records from storage.
-	prefix, err := storage.Prefix("executions")
+
+	execStore := execution.NewExecutionStore(m.store)
+	all, err := execStore.List(ctx)
 	if err != nil {
-		return fmt.Errorf("prefix executions: %w", err)
+		return fmt.Errorf("list executions for recovery: %w", err)
 	}
-	keys, err := m.store.List(ctx, prefix)
-	if err != nil {
-		return fmt.Errorf("list executions: %w", err)
-	}
-	for _, k := range keys {
-		// Parse execution ID from the storage key prefix "executions/".
-		idStr := string(k)
-		if len(idStr) <= len(prefix) || idStr[:len(prefix)] != prefix {
+
+	byID := make(map[core.ID]*execution.Execution, len(all))
+	groups := make(map[core.ID][]*execution.Execution)
+	for _, exec := range all {
+		byID[exec.ID] = exec
+		if exec.IsTerminal() {
 			continue
 		}
-		// Retrieve the execution data.
-		data, err := m.store.Get(ctx, k)
+		// An execution without assembly identity and without a parent predates
+		// durable execution. Its mode never promised resumption, so it is left
+		// to the non-durable sweep rather than guessed at here.
+		if exec.AssemblyID == "" && exec.ParentExecutionID == "" {
+			continue
+		}
+		groups[exec.InstanceID] = append(groups[exec.InstanceID], exec)
+	}
+
+	for instanceID, executions := range groups {
+		rec, err := m.metadata.Get(ctx, string(instanceID))
+		if errors.Is(err, storage.ErrNotFound) {
+			// The execution carries the immutable artifact reference itself, so
+			// missing instance metadata is not a reason to abandon work that can
+			// still be resumed. Recovery recreates the metadata after the
+			// instance starts.
+			rec = metadata{ID: string(instanceID)}
+		} else if err != nil {
+			return fmt.Errorf("recover instance %s: load metadata: %w", instanceID, err)
+		}
+
+		key := recoveryKey(rec, executions)
+		if key.AssemblyID == "" || key.Version == "" {
+			// Legacy durable records without an immutable identity cannot be
+			// resumed safely. The non-durable sweep already owns their fate.
+			continue
+		}
+		reg, err := m.assemblies.Resolve(ctx, key)
 		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				if failErr := failUnrecoverable(ctx, execStore, executions, key, err); failErr != nil {
+					return failErr
+				}
+				continue
+			}
+			return fmt.Errorf("recover instance %s against %s: %w", instanceID, key.String(), err)
+		}
+		if err := m.recoverInstance(ctx, rec, reg, executions, byID, execStore); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recoveryKey prefers the instance's recorded artifact reference, falling back to
+// the identity carried by a durable execution. The hash and environment are
+// carried through so recovery resolves the exact artifact the execution started
+// with, never the newest artifact for the version.
+func recoveryKey(rec metadata, executions []*execution.Execution) protocol.InstanceKey {
+	key := protocol.InstanceKey{
+		AssemblyID: rec.AssemblyID,
+		Version:    rec.Version,
+		Hash:       rec.Hash,
+		Env:        rec.Env,
+	}
+	if key.AssemblyID != "" && key.Version != "" {
+		return key
+	}
+	for _, exec := range executions {
+		if exec.AssemblyID == "" {
 			continue
 		}
-		var exec execution.Execution
-		if err := json.Unmarshal(data, &exec); err != nil {
-			continue
-		}
-		// Check if this is a durable execution (has assembly identity).
-		if exec.AssemblyID == "" || exec.Version == "" {
-			// Non-durable execution: behavior unchanged (fail on interrupt).
-			continue
-		}
-		// Resolve the immutable assembly artifact.
-		reg, err := m.assemblies.Resolve(ctx, protocol.InstanceKey{
+		return protocol.InstanceKey{
 			AssemblyID: exec.AssemblyID,
 			Version:    exec.Version,
 			Hash:       exec.Hash,
 			Env:        exec.Env,
-		})
-		if err != nil {
-			// Artifact no longer available; per R4-3, this is a GC decision.
-			// The execution cannot resume; it will be treated as non-resumable.
+		}
+	}
+	return key
+}
+
+// failUnrecoverable records an explicit failure for executions whose immutable
+// artifact is gone. Leaving them running would report work that no process can
+// advance; silently dropping them would hide the loss. The failure names the
+// artifact so an operator can decide whether retention or the execution is at
+// fault.
+func failUnrecoverable(ctx context.Context, store *execution.ExecutionStore, executions []*execution.Execution, key protocol.InstanceKey, cause error) error {
+	var failures []error
+	for _, exec := range executions {
+		reason := fmt.Errorf("recover execution %s: immutable assembly artifact %s is unavailable: %w", exec.ID, key.String(), cause)
+		if !exec.MarkFailed(reason) {
 			continue
 		}
-		// TODO: restore capability, join, attempt, wait state from snapshot.
-		// TODO: re-queue ready-but-undispatched work via dispatch intents.
-		// TODO: restore retry timers and suspended waits (Phase 5).
-		_ = reg
+		if err := store.Save(ctx, exec); err != nil {
+			failures = append(failures, fmt.Errorf("persist unrecoverable execution %s: %w", exec.ID, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// recoverInstance rebuilds the runtime for an instance that has unfinished
+// durable work, attaches every execution to it, and starts it. The metadata-only
+// instance restored earlier remains in the maps if any step fails, so a failed
+// recovery does not pretend the runtime is live.
+func (m *Manager) recoverInstance(
+	ctx context.Context,
+	rec metadata,
+	reg assembly.RegisteredAssembly,
+	executions []*execution.Execution,
+	byID map[core.ID]*execution.Execution,
+	execStore *execution.ExecutionStore,
+) error {
+	execOpt, err := withCapabilityRuntimes(reg)
+	if err != nil {
+		return fmt.Errorf("recover instance %s: %w", rec.ID, err)
+	}
+	inst, err := New(
+		m.parent,
+		rec.ID,
+		reg.Key,
+		&reg.Assembly,
+		m.workers,
+		m.store,
+		execOpt,
+		WithDetachedDrainTimeout(m.detachedDrainTimeout),
+		WithBuiltinPolicy(m.builtinPolicy),
+		WithDurability(m.durability),
+	)
+	if err != nil {
+		return fmt.Errorf("create recovery instance %s: %w", rec.ID, err)
+	}
+	inst.createdAt = rec.CreatedAt
+
+	// Roots first: a detached task's pending input comes from its parent's
+	// recorded params, so the parent must be attached before the task.
+	for _, exec := range executions {
+		if exec.ParentExecutionID != "" {
+			continue
+		}
+		if err := inst.RecoverExecution(ctx, exec, inst.Blueprint, nil); err != nil {
+			_ = inst.Stop()
+			return fmt.Errorf("recover execution %s on instance %s: %w", exec.ID, rec.ID, err)
+		}
+	}
+	for _, exec := range executions {
+		if exec.ParentExecutionID == "" {
+			continue
+		}
+		if exec.DetachedCapabilityID == "" {
+			_ = inst.Stop()
+			return fmt.Errorf("recover detached task %s on instance %s: task has no origin capability", exec.ID, rec.ID)
+		}
+		scope, ok := inst.Blueprint.Detached[exec.DetachedCapabilityID]
+		if !ok {
+			_ = inst.Stop()
+			return fmt.Errorf("recover detached task %s on instance %s: capability %s has no detached scope", exec.ID, rec.ID, exec.DetachedCapabilityID)
+		}
+		var pendingInput map[string]any
+		if exec.Status() == execution.StatusPending {
+			parent := byID[exec.ParentExecutionID]
+			if parent == nil {
+				parent, err = execStore.Get(ctx, exec.ParentExecutionID)
+				if err != nil {
+					_ = inst.Stop()
+					return fmt.Errorf("recover detached task %s: load parent %s: %w", exec.ID, exec.ParentExecutionID, err)
+				}
+			}
+			pendingInput = parent.Params(exec.DetachedCapabilityID)
+		}
+		if err := inst.RecoverExecution(ctx, exec, scope, pendingInput); err != nil {
+			_ = inst.Stop()
+			return fmt.Errorf("recover detached task %s on instance %s: %w", exec.ID, rec.ID, err)
+		}
+	}
+
+	if err := inst.Start(); err != nil {
+		_ = inst.Stop()
+		return fmt.Errorf("start recovered instance %s: %w", rec.ID, err)
+	}
+
+	m.mu.Lock()
+	if previous, ok := m.instancesByID[rec.ID]; ok {
+		delete(m.instancesByKey, previous.Key)
+	}
+	m.instancesByID[rec.ID] = inst
+	m.instancesByKey[inst.Key] = inst
+	m.mu.Unlock()
+
+	if err := m.metadata.Save(ctx, recordFor(inst, inst.Status())); err != nil {
+		return fmt.Errorf("persist recovered instance metadata for %s: %w", inst.ID, err)
 	}
 	return nil
 }

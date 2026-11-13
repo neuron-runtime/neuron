@@ -99,6 +99,80 @@ func (s *Scheduler) commit(ctx context.Context, execution *executionmodel.Execut
 	return s.committer.SaveTransition(ctx, execution, intents)
 }
 
+// dispatchIntentResetter is the recovery-only half of the transition
+// committer: it removes intents a crashed process left behind before recovery
+// derives the current set from the recovered state.
+type dispatchIntentResetter interface {
+	ClearDispatchIntents(ctx context.Context, executionID core.ID) error
+}
+
+// RecoverExecution resumes one execution that was interrupted by a previous
+// process. The execution must already be attached to the live store with its
+// blueprint recompiled from the immutable artifact; this method decides what
+// work that state still requires.
+//
+// A pending execution never reached the scheduler, so its start is replayed as
+// an ExecutionStarted event carrying the input recorded on the snapshot. A
+// running execution is reconciled: interrupted capabilities are returned to
+// ready, stale intents are discarded, the recovered state and its new intents
+// are committed together, and only then is the ready work announced.
+//
+// Recovery runs before the scheduler and engine start, so publishing here only
+// fills their subscriptions; the work is processed as soon as they run.
+func (s *Scheduler) RecoverExecution(ctx context.Context, execution *executionmodel.Execution) error {
+	if execution == nil {
+		return fmt.Errorf("execution is required")
+	}
+	if execution.IsTerminal() {
+		return nil
+	}
+
+	if execution.Status() == executionmodel.StatusPending {
+		return s.bus.Publish(ctx, event.New(
+			event.ExecutionStarted,
+			execution.ID,
+			execution.CorrelationID,
+			"",
+			event.ExecutionStartedPayload{Params: execution.InitialParams()},
+		))
+	}
+	if execution.Status() != executionmodel.StatusRunning {
+		return nil
+	}
+
+	dispatch := execution.RecoverableDispatch()
+	if len(dispatch) == 0 && execution.InFlight() == 0 && execution.UnfinishedCapabilityCount() > 0 {
+		s.failExecution(ctx, execution.ID, fmt.Errorf("execution %s has unfinished capabilities but no recoverable work", execution.ID))
+		return nil
+	}
+	intents := make([]*executionmodel.DispatchIntent, 0, len(dispatch))
+	if s.committer != nil {
+		if resetter, ok := s.committer.(dispatchIntentResetter); ok {
+			if err := resetter.ClearDispatchIntents(ctx, execution.ID); err != nil {
+				return fmt.Errorf("clear dispatch intents for execution %s: %w", execution.ID, err)
+			}
+		}
+		for _, capabilityID := range dispatch {
+			intents = append(intents, executionmodel.NewDispatchIntent(execution.ID, capabilityID, execution.AttemptID))
+		}
+	}
+	if err := s.commit(ctx, execution, intents); err != nil {
+		return fmt.Errorf("commit recovered execution %s: %w", execution.ID, err)
+	}
+	for _, capabilityID := range dispatch {
+		if err := s.bus.Publish(ctx, event.New(
+			event.CapabilityReady,
+			execution.ID,
+			execution.CorrelationID,
+			capabilityID,
+			event.CapabilityReadyPayload{Params: execution.Params(capabilityID)},
+		)); err != nil {
+			return err
+		}
+	}
+	return s.completeIfDrained(ctx, execution, execution.InFlight())
+}
+
 func (s *Scheduler) Run(ctx context.Context) error {
 	defer s.closeSubscriptions()
 	defer s.scopes.ReleaseAll()

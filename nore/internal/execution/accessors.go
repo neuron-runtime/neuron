@@ -41,6 +41,24 @@ func (e *Execution) CapabilityState(capabilityID core.ID) CapabilityExecutionSta
 	return e.states[capabilityID]
 }
 
+// UnfinishedCapabilityCount reports how many capabilities have not reached a
+// terminal capability state. It is used by recovery to distinguish an execution
+// that drained normally from a corrupt snapshot that has no work left to
+// dispatch but still claims unfinished capabilities.
+func (e *Execution) UnfinishedCapabilityCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	count := 0
+	for _, state := range e.states {
+		switch state.Status {
+		case CapabilityCompleted, CapabilityFailed, CapabilityDetached, CapabilityCancelled:
+		default:
+			count++
+		}
+	}
+	return count
+}
+
 // InFlight reports how many capabilities of this execution are still scheduled
 // to run. A terminal execution must report zero: anything else means work was
 // abandoned without being accounted for.
