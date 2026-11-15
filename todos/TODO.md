@@ -515,11 +515,11 @@ Exit criteria:
       edge, then mark the target ready only when the join is satisfied.
 - [ ] **R3-20** Guarantee the join runs once. Two completions arriving concurrently must not
       dispatch the target twice. Use the execution's lock/state machine as the single authority.
-- [ ] **R3-21** Fix in-flight accounting for fan-in. `CompleteCurrentAndSchedule` currently
+- [x] **R3-21** Fix in-flight accounting for fan-in. CompleteCurrentAndSchedule now skips decrement when join is blocked
       decrements one and adds the number of directly scheduled targets
       (`nore/internal/execution/execution.go:259-270`); a blocked join must not be counted as
       scheduled, and satisfying a join must increment exactly once.
-- [ ] **R3-22** Define failure behavior. Required predecessors use fail-fast: a permanently
+- [x] **R3-22** Define failure behavior. Required predecessors use fail-fast: a permanently failed required branch prevents the join
       failed required branch prevents the join. Retryable failures remain retryable. Document
       the rule next to the existing "one failure fails the execution" behavior.
 - [ ] **R3-23** Handle cancellation with a pending join: buffered inputs are discarded and the
