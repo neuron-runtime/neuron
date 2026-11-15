@@ -206,6 +206,11 @@ type instanceAdapter struct {
 
 // Execute runs one execution through the runtime-backed instance.
 func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+	// Store attempt_id and logical_operation_id in the context so the
+	// worker can populate them on the gRPC ExecuteRequest.
+	ctx = context.WithValue(ctx, "neuron:attempt_id", execution.AttemptID)
+	ctx = context.WithValue(ctx, "neuron:logical_operation_id", execution.LogicalOperationID)
+
 	req := &capabilityrt.Request{Params: execution.Params}
 	resp, err := a.instance.Execute(ctx, req)
 	if err != nil {

@@ -641,6 +641,41 @@ The capability runtime returns the result map. Errors from the capability runtim
 > [!NOTE]
 > Execution history and events are an observability and persistence concern, not part of the execution semantics: an execution does not depend on persistence being enabled.
 
+## At-least-once dispatch guarantee
+
+N.O.R.E. provides an **at-least-once** dispatch guarantee for capable work. When an execution plan advances to a capability, the engine records a **dispatch intent** — a unit of ready work persisted to the store so that a process restart or crash does not lose track of which capabilities remain to be executed. The dispatch intent is the core mechanism that makes at-least-once possible.
+
+### Dispatch intent claiming mechanism (CAS + leases)
+
+Each dispatch intent carries an `owner` field and a `lease_expires_at` timestamp. The claiming workflow uses a **compare-and-swap (CAS)** pattern within a storage transaction:
+
+1. **Read** the dispatch intent from the store.
+2. **Check claimability**: the intent is claimable if it has no owner, or if its lease has expired (`LeaseExpiresAt` is before now). An intent held by a live owner is ineligible for re-claim.
+3. **Write** a new owner and lease expiry (`now + leaseDuration`) atomically via **compare-and-swap**. The CAS ensures that if two callers read the same intent concurrently, only one wins the claim — the other observes a conflict and retries or declines.
+4. **Release**: when an owner finishes with an intent, `ReleaseDispatchIntent` clears the owner, making the intent claimable again. A release that mismatches the current owner is a no-op, preventing a stale worker from reclaiming work already re-claimed by another owner.
+
+This CAS+lease pattern guarantees that at any moment, at most one owner claims a given dispatch intent, but if that owner crashes or its lease expires, the intent becomes claimable again — ensuring no ready work is permanently lost.
+
+### Idempotent handler design
+
+Because the runtime guarantees **at-least-once** dispatch — not exactly-once — an external capability runtime must design its handlers to be **idempotent**. If a capability is re-dispatched after a crash or network partition, the same params may be delivered again; the runtime does not deduplicate externally visible effects. The capability runtime author is responsible for ensuring that repeated execution with the same inputs produces the same result or safely merges duplicates.
+
+### Distinction from exactly-once external side effects
+
+The at-least-once guarantee covers dispatch lifecycle — recording, claiming, and re-dispatching ready work. It does **not** guarantee exactly-once execution of external side effects (e.g., writing to a database, sending a network request). Those are the responsibility of the capability runtime implementation. The runtime may record events and persist execution state, but durable execution resumption does not claim exactly-once semantics for the capability's business logic.
+
+```mermaid
+flowchart TB
+    A[Execution plan advances to capability] --> B[Engine records dispatch intent]
+    B --> C[Dispatch intent persisted with owner + lease]
+    C --> D[Worker claims intent via CAS+lease]
+    D -->|lease expires or owner crashes| E[intent becomes claimable again]
+    E --> F[Another worker claims the same intent]
+    F --> G[Capability executed again (idempotent handler required)]
+```
+
+---
+
 ## Execution lifecycle
 
 ```mermaid

@@ -213,6 +213,116 @@ func TestCompleteDispatchIntent(t *testing.T) {
 	}
 }
 
+func TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery(t *testing.T) {
+	store := openTestStore(t)
+	s := NewExecutionStore(store)
+	ctx := context.Background()
+	intent := newDispatchIntent()
+
+	if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
+		t.Fatalf("enqueue dispatch intent: %v", err)
+	}
+
+	// Use a short lease so the test completes in reasonable time.
+	lease := 5 * time.Millisecond
+
+	type claimResult struct {
+		owner  string
+		intent *DispatchIntent
+		won    bool
+		err    error
+	}
+	results := make(chan claimResult, 2)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, owner := range []string{"owner-a", "owner-b"} {
+		owner := owner
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			claimed, won, err := s.ClaimDispatchIntent(ctx, intent, owner, lease)
+			results <- claimResult{owner: owner, intent: claimed, won: won, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	// Collect results: exactly one winner, exactly one loser.
+	var winnerResult, loserResult claimResult
+	foundWinner := false
+	foundLoser := false
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent claim: %v", result.err)
+		}
+		if result.won {
+			if foundWinner {
+				t.Fatal("more than one concurrent claim won")
+			}
+			winnerResult = result
+			foundWinner = true
+		} else {
+			if foundLoser {
+				t.Fatal("more than one concurrent claim lost")
+			}
+			loserResult = result
+			foundLoser = true
+		}
+	}
+	if !foundWinner {
+		t.Fatal("no concurrent claim won")
+	}
+	if !foundLoser {
+		t.Fatal("no concurrent claim lost")
+	}
+
+	// Verify winner: should have a claimed intent with the winning owner.
+	if winnerResult.intent == nil {
+		t.Fatal("winner intent should not be nil when won is true")
+	}
+	if winnerResult.intent.Owner != winnerResult.owner {
+		t.Fatalf("winner intent owner = %q, want %q", winnerResult.intent.Owner, winnerResult.owner)
+	}
+
+	// Verify loser: should have gotten (nil, false, nil) — the claim fails
+	// because the intent is held under a live lease by the winner.
+	if loserResult.intent != nil {
+		t.Fatalf("loser should have nil intent, got %v", loserResult.intent)
+	}
+	if loserResult.won {
+		t.Fatal("loser won should be false")
+	}
+	if loserResult.err != nil {
+		t.Fatalf("loser error = %v, want nil", loserResult.err)
+	}
+
+	// Verify the stored intent reflects the winner's ownership.
+	stored, err := readDispatchIntent(t, store, intent)
+	if err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	if stored.Owner != winnerResult.owner {
+		t.Fatalf("stored owner = %q, want %q", stored.Owner, winnerResult.owner)
+	}
+
+	// Wait for the winner's lease to expire, then verify the loser can claim.
+	// The lease was 5ms; 20ms gives plenty of margin.
+	time.Sleep(20 * time.Millisecond)
+
+	claimed, won, err := s.ClaimDispatchIntent(ctx, intent, loserResult.owner, lease)
+	if err != nil {
+		t.Fatalf("claim after expiry: %v", err)
+	}
+	if !won || claimed == nil {
+		t.Fatalf("claim after expiry = %v, %v; want a claimed intent", claimed, won)
+	}
+	if claimed.Owner != loserResult.owner {
+		t.Fatalf("claimed owner = %q, want %q", claimed.Owner, loserResult.owner)
+	}
+}
+
 func TestClaimReadyDispatchIntents(t *testing.T) {
 	store := openTestStore(t)
 	s := NewExecutionStore(store)

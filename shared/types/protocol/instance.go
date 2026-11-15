@@ -140,6 +140,15 @@ type ExecuteRequest struct {
 	// the execution accepted (HTTP 202); anything else (wait) blocks until the
 	// execution terminates and returns its final result.
 	Mode string `json:"mode,omitempty"`
+	// AttemptID is the per-invocation attempt identifier. It enables
+	// idempotency handling by the server. Existing clients that do not set
+	// this field will have it default to the zero value.
+	AttemptID core.ID `json:"attempt_id,omitempty"`
+	// LogicalOperationID is a stable identifier for the logical operation
+	// being performed. It enables idempotency and diagnostics across
+	// execution restarts. Existing clients that do not set this field will
+	// have it default to the zero value.
+	LogicalOperationID core.ID `json:"logical_operation_id,omitempty"`
 }
 
 // RunRequest is the body of the synchronous POST /v1/run facade. It carries only

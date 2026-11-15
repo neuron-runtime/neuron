@@ -206,6 +206,15 @@ type ExecuteRequest struct {
 	TimeoutMs int64 `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
 	// correlation_id links this execution to a parent execution or request chain.
 	CorrelationId string `protobuf:"bytes,4,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	// attempt_id is the per-invocation attempt identifier. It enables
+	// idempotency handling in the capability runtime. Existing runtimes
+	// receive an empty string; this field is optional.
+	AttemptID string `protobuf:"bytes,5,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	// logical_operation_id is a stable identifier for the logical operation
+	// being performed. It enables idempotency and diagnostics across
+	// execution restarts. Existing runtimes receive an empty string; this
+	// field is optional.
+	LogicalOperationID string `protobuf:"bytes,6,opt,name=logical_operation_id,json=logicalOperationId,proto3" json:"logical_operation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -264,6 +273,20 @@ func (x *ExecuteRequest) GetTimeoutMs() int64 {
 func (x *ExecuteRequest) GetCorrelationId() string {
 	if x != nil {
 		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *ExecuteRequest) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptID
+	}
+	return ""
+}
+
+func (x *ExecuteRequest) GetLogicalOperationId() string {
+	if x != nil {
+		return x.LogicalOperationID
 	}
 	return ""
 }

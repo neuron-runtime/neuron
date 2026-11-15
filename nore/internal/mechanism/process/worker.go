@@ -589,14 +589,33 @@ func (w *worker) initialize(ctx context.Context, protocol string) error {
 	return nil
 }
 
+// attemptKey and logicalOperationKey are context keys used to pass the
+// per-invocation attempt identifier and logical operation identifier from
+// the execution engine to the worker process.
+var attemptKey = "neuron:attempt_id"
+var logicalOperationKey = "neuron:logical_operation_id"
+
 // execute sends an execution request to the capability runtime process via gRPC.
 func (w *worker) execute(ctx context.Context, req *capabilityrt.Request) (*capabilityrt.Response, error) {
 	if !w.healthy.Load() {
 		return nil, fmt.Errorf("worker is unhealthy")
 	}
 
+	// Extract attempt_id and logical_operation_id from the execution context
+	// so the capability runtime can participate in idempotency logic.
+	attemptID, ok := ctx.Value(attemptKey).(string)
+	if !ok {
+		attemptID = ""
+	}
+	logicalOpID, ok := ctx.Value(logicalOperationKey).(string)
+	if !ok {
+		logicalOpID = ""
+	}
+
 	execReq := &v1.ExecuteRequest{
-		Params: make(map[string]*v1.Value, len(req.Params)),
+		Params:                  make(map[string]*v1.Value, len(req.Params)),
+		AttemptID:               attemptID,
+		LogicalOperationID:    logicalOpID,
 	}
 	for k, v := range req.Params {
 		execReq.Params[k] = makeProtoValue(v)

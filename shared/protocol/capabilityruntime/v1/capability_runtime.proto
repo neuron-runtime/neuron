@@ -85,6 +85,17 @@ message ExecuteRequest {
 
   // correlation_id links this execution to a parent execution or request chain.
   string correlation_id = 4;
+
+  // attempt_id is the per-invocation attempt identifier. It enables
+  // idempotency handling in the capability runtime. Existing runtimes
+  // receive an empty string; this field is optional.
+  string attempt_id = 5;
+
+  // logical_operation_id is a stable identifier for the logical operation
+  // being performed. It enables idempotency and diagnostics across
+  // execution restarts. Existing runtimes receive an empty string; this
+  // field is optional.
+  string logical_operation_id = 6;
 }
 
 // ExecuteResponse carries the result of one execution.

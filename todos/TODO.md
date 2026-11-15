@@ -647,10 +647,10 @@ Exit criteria:
 
 - [x] **R4-18** Define stable execution ID, logical operation ID, and per-invocation attempt ID.
       Expose an idempotency key to the capability runtime so a downstream service can deduplicate.
-- [ ] **R4-19** Extend the capability runtime protocol only if needed to carry the attempt/
+- [x] **R4-19** Extend the capability runtime protocol only if needed to carry the attempt/
       idempotency identity. Any protocol change is versioned and documented for every SDK
       (Go, .NET, TypeScript). Do not require a specific implementation language.
-- [ ] **R4-20** Document at-least-once dispatch as the runtime guarantee. Exactly-once external
+- [x] **R4-20** Document at-least-once dispatch as the runtime guarantee. Exactly-once external
       side effects remain a capability/service responsibility.
 
 ### 4.6 Execution durability mode
@@ -666,7 +666,7 @@ Exit criteria:
 
 ### 4.7 Validation
 
-- [ ] **R4-24** Add process-level tests that terminate the runtime at multiple points (`SIGKILL`,
+- [x] **R4-24** Add process-level tests that terminate the runtime at multiple points (`SIGKILL`,
       not graceful shutdown) and verify recovery:
       - after a capability completes but before its downstream is dispatched
       - between two fan-in branches
@@ -674,10 +674,10 @@ Exit criteria:
       - during an external wait (covered in Phase 5)
 - [x] **R4-25** Test that completed capabilities are not rerun and that a join preserved one
       branch's result while the other was unfinished.
-- [ ] **R4-26** Test an execution that suspends, then a rebuild changes the same version's graph;
+- [x] **R4-26** Test an execution that suspends, then a rebuild changes the same version's graph;
       verify the execution resumes against its original artifact (or fails explicitly if the
       artifact was deliberately deleted under an allowed policy). This is the core of R4-1/R4-2.
-- [ ] **R4-27** Test duplicate dispatch/claim: two workers, one should win.
+- [x] **R4-27** Test duplicate dispatch/claim: two workers, one should win.
 - [x] **R4-28** Test that non-durable mode still fails interrupted executions and never reports
       them as running.
 - [x] **R4-29** Run `scripts/script.sh` and record the result in this phase. Passed on 2026-11-13 after implementing durable recovery.
