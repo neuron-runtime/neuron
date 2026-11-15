@@ -1,0 +1,7 @@
+version: 1
+project: neuron
+updated: 2026-11-15
+
+# Authoritative execution ledger. Schema and state rules: .agents/README.md
+# The product backlog lives in todos/; this file tracks active work only.
+tasks: []

@@ -1,0 +1,159 @@
+version: 1
+project: neuron
+default_owner: coordinator
+mutating_owners:
+  implementation: coder
+  defect_repair: bugfixer
+read_only_agents:
+  - architect
+  - reviewer
+  - security
+
+# Sign-off triggers are path-based. A task touching any matching path must
+# obtain the listed sign-off before moving to done.
+signoff_triggers:
+  architecture:
+    - application/compiler/**
+    - application/language/**
+    - application/loader/**
+    - application/project/**
+    - application/runtime/**
+    - application/capabilityruntime/**
+    - application/provider/**
+    - application/client/**
+    - application/daemon/**
+    - application/config/**
+    - application/connection/**
+    - application/process/**
+    - application/build/**
+    - application/cmd/**
+    - application/internal/**
+    - nore/internal/assembly/**
+    - nore/internal/contracts/**
+    - nore/internal/planner/**
+    - nore/internal/execution/**
+    - nore/internal/invoke/**
+    - nore/internal/instance/**
+    - nore/internal/event/**
+    - nore/internal/stream/**
+    - nore/internal/types/**
+    - nore/internal/builtins/**
+    - nore/internal/analytics/**
+    - packages/assembly-sdks/**
+    - packages/executor-sdks/**
+    - shared/protocol/**
+    - shared/types/**
+    - shared/version/**
+    - go.work
+    - pnpm-workspace.yaml
+  security:
+    - nore/internal/registry/**
+    - nore/internal/resolver/**
+    - nore/internal/plugin/**
+    - nore/internal/mechanism/**
+    - nore/internal/runtimeconfig/**
+    - nore/internal/storage/**
+    - nore/internal/data/**
+    - nore/internal/api/**
+    - nore/cmd/**
+    - application/internal/artifact/**
+    - application/internal/githubrepo/**
+    - application/internal/providerctl/**
+    - application/internal/runtimectl/**
+    - application/internal/sourceregistry/**
+    - application/internal/ref/**
+    - application/daemon/**
+    - application/provider/**
+    - application/process/**
+    - scripts/**
+    - .github/**
+    - go.work.sum
+    - pnpm-lock.yaml
+    - packages/executor-sdks/**
+    - shared/protocol/**
+  documentation:
+    - docs/**
+    - README.md
+    - AGENTS.md
+    - examples/**
+
+modules:
+  - id: coordination
+    paths:
+      - .agents/**
+    owner: coordinator
+    notes: Ledger, ownership, reports, decisions, handoff records.
+
+  - id: application-core
+    paths:
+      - application/**
+    owner: coder
+    notes: >-
+      Compiler, loader, language, project, runtime, capability runtime,
+      provider, client, daemon, config, connection, process, build, cmd, and
+      application-internal packages. Preserve source-language-independent
+      compiler behavior and runtime isolation boundaries.
+
+  - id: nore-engine
+    paths:
+      - nore/**
+    owner: coder
+    notes: >-
+      Execution engine: assembly, contracts, planner, execution, invoke,
+      instance, event, stream, types, builtins, registry, resolver, plugin,
+      mechanism, runtimeconfig, storage, data, analytics, api.
+
+  - id: assembly-sdks
+    paths:
+      - packages/assembly-sdks/**
+    owner: coder
+    notes: Public authoring SDKs. Treat APIs as contracts; require type tests.
+
+  - id: executor-sdks
+    paths:
+      - packages/executor-sdks/**
+    owner: coder
+    notes: Capability runtime SDKs. Protocol and security sensitive.
+
+  - id: shared
+    paths:
+      - shared/**
+    owner: coder
+    notes: Protocol, shared types, version. Contract-sensitive.
+
+  - id: examples
+    paths:
+      - examples/**
+    owner: coder
+    notes: Keep runnable; documenter verifies instructions.
+
+  - id: docs
+    paths:
+      - docs/**
+      - README.md
+    owner: documenter
+    notes: Must reflect verified code behavior.
+
+  - id: repository-contract
+    paths:
+      - AGENTS.md
+    owner: coordinator
+    notes: Project contract.
+
+  - id: backlog
+    paths:
+      - todos/**
+    owner: coordinator
+    notes: Product backlog. Ledger tracks active execution.
+
+  - id: tooling
+    paths:
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - go.work
+      - go.work.sum
+      - .github/**
+    owner: coder
+    notes: Build, release, install, and validation tooling. Security sign-off required.
