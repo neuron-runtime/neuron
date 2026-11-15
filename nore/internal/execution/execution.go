@@ -476,6 +476,34 @@ func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, er
 	return e.inFlight, nil
 }
 
+// PropagateFailureToJoins records which predecessor bindings of join targets
+// have permanently failed. This enforces the "one failure fails the execution"
+// semantics for fan-in: if a required predecessor permanently fails, the join
+// cannot be satisfied and the execution fails. The caller must already hold e.mu
+// or ensure external synchronization.
+func (e *Execution) PropagateFailureToJoins() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Blueprint == nil {
+		return
+	}
+	for capabilityID, node := range e.Blueprint.Nodes {
+		ji, isJoinTarget := e.joinState[capabilityID]
+		if !isJoinTarget || ji == nil {
+			continue
+		}
+		for _, predecessor := range node.Predecessors {
+			if ji.FailedBindings != nil && ji.FailedBindings[predecessor.BindingID] {
+				continue
+			}
+			if ji.FailedBindings == nil {
+				ji.FailedBindings = make(map[shared.ID]bool)
+			}
+			ji.FailedBindings[predecessor.BindingID] = true
+		}
+	}
+}
+
 func (e *Execution) MarkCompleted() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -707,6 +735,7 @@ func pathValue(payload any, path []string, source *shared.ValueRef) (any, error)
 type joinStateInfo struct {
 	CompletedBindings map[shared.ID]bool
 	PredecessorInputs map[shared.ID]map[string]any
+	FailedBindings    map[shared.ID]bool
 	Dispatched        bool
 }
 
@@ -714,6 +743,7 @@ func newJoinState() *joinStateInfo {
 	return &joinStateInfo{
 		CompletedBindings: make(map[shared.ID]bool),
 		PredecessorInputs: make(map[shared.ID]map[string]any),
+		FailedBindings:    make(map[shared.ID]bool),
 	}
 }
 
