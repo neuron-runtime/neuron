@@ -1,7 +1,78 @@
 version: 1
 project: neuron
-updated: 2026-11-15
+updated: 2026-11-16
 
 # Authoritative execution ledger. Schema and state rules: .agents/README.md
 # The product backlog lives in todos/; this file tracks active work only.
-tasks: []
+tasks:
+  - id: T-010
+    objective: "Fix CompleteCurrentAndSchedule in-flight accounting for fan-in joins"
+    scope: ["nore/internal/execution/execution.go", "nore/internal/execution/scheduler/scheduler.go"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: []
+    acceptance:
+      - "In-flight counter no longer decremented when join is blocked (nextCapabilityCount == 0)"
+      - "Test passes: fan-in completion does not incorrectly reduce inFlight"
+    verification:
+      - "go test ./nore/internal/execution/... -run TestCompleteCurrentAndSchedule -v"
+    status: done
+    lease: null
+    evidence: ["git show dd01e36 --stat", "go test ./nore/internal/execution/... -count=1"]
+    reports: []
+    open_risks: []
+  - id: T-011
+    objective: "Add failure propagation for fan-in joins"
+    scope: ["nore/internal/execution/execution.go", "nore/internal/execution/scheduler/scheduler.go"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: []
+    acceptance:
+      - "Join target fails when a required predecessor fails with failure classification"
+      - "Failed predecessor state propagates to join state"
+    verification:
+      - "go test ./nore/internal/execution/... -run TestFanInFailurePropagation -v"
+    status: done
+    lease: null
+    evidence: ["git show 228c11e --stat", "go test ./nore/internal/execution/scheduler/ -run TestFanInJoinExecution -v", "go test ./nore/internal/execution/... -count=1"]
+    reports: []
+    open_risks: []
+  - id: T-012
+    objective: "Verify/fix TypeScript SDK collectBindings for fan-in support"
+    scope: ["packages/assembly-sdks/typescript/src/assembly.ts"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: []
+    acceptance:
+      - "Multiple incoming bindings to same target allowed (no duplicate-target rejection)"
+      - "Explicit fan-in example added to SDK README and type tests"
+    verification:
+      - "pnpm exec tsc --noEmit packages/assembly-sdks/typescript"
+      - "pnpm exec vitest run packages/assembly-sdks/typescript/type-tests"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+  - id: T-013
+    objective: "Update documentation and tests for Phase 3 fan-in"
+    scope: ["docs/ARCHITECTURE.md", "todos/TODO.md", "nore/internal/planner/"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: []
+    acceptance:
+      - "R3-16 detached-plus-fan-in rule documented"
+      - "R3-25 through R3-30 test criteria documented"
+      - "Type tests updated with fan-in example"
+    verification:
+      - "pnpm exec vitest run packages/assembly-sdks/typescript"
+      - "go vet ./..."
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []

@@ -468,7 +468,7 @@ Exit criteria:
 
 ### 3.2 TypeScript SDK
 
-- [ ] **R3-7** Remove the fan-in rejection in `collectBindings`
+- [x] **R3-7** Remove the fan-in rejection in `collectBindings`
       (`packages/assembly-sdks/typescript/src/assembly.ts:310-315`).
 - [ ] **R3-8** Define the authoring form. The minimum is: a node whose references name multiple
       source capabilities emits one binding per source, and the target is implicitly an
