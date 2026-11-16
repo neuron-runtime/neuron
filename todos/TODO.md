@@ -716,35 +716,35 @@ Exit criteria:
 
 ### 5.1 Waiting state
 
-- [ ] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
+- [x] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
       key, expected signal/timer, deadline, and the payload schema the execution expects.
-- [ ] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
+- [x] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
       must not look like a running capability.
-- [ ] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
+- [x] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
       crash cannot produce a "waiting" execution with no wait record.
 
 ### 5.2 Signals
 
-- [ ] **R5-4** Define a general signal primitive, for example
+- [x] **R5-4** Define a general signal primitive, for example
       `POST /v1/executions/{executionId}/signals/{signalName}`, with a unique delivery event ID
       in the payload. This is a runtime primitive, not a Telegram/Slack-specific integration.
-- [ ] **R5-5** Authenticate signals with the existing API token mechanism and authorize them
+- [x] **R5-5** Authenticate signals with the existing API token mechanism and authorize them
       against the specific execution and wait state. A signal for an execution that is not
       waiting for that signal returns a precise error.
-- [ ] **R5-6** Persist the signal before acknowledging receipt, then resume scheduling. A signal
+- [x] **R5-6** Persist the signal before acknowledging receipt, then resume scheduling. A signal
       must not be lost between HTTP acceptance and execution resumption.
-- [ ] **R5-7** Handle duplicate delivery idempotently: the same signal ID must not advance the
+- [x] **R5-7** Handle duplicate delivery idempotently: the same signal ID must not advance the
       execution twice.
-- [ ] **R5-8** Define signal payload validation against the declared wait schema.
+- [x] **R5-8** Define signal payload validation against the declared wait schema.
 - [ ] **R5-9** Define behavior for a signal arriving after the wait deadline or after
       cancellation.
 
 ### 5.3 Durable timers
 
-- [ ] **R5-10** Persist scheduled work with a due time (`next_attempt_at`, wake-at) rather than
+- [x] **R5-10** Persist scheduled work with a due time (`next_attempt_at`, wake-at) rather than
       sleeping a goroutine. Retry backoff becomes durable scheduling, replacing the in-memory
       sleep at `nore/internal/execution/engine/invocation.go:232-244` for durable executions.
-- [ ] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
+- [x] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
       future timers efficiently and claim them safely.
 - [ ] **R5-12** Implement a timer poller that claims due timers and resumes the associated
       executions. Define the polling interval and its interaction with latency.

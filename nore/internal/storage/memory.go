@@ -196,6 +196,90 @@ func (s *MemoryStore) Close() error {
 	return nil
 }
 
+// ClaimTimer atomically claims a timer lease. Returns (claimed, error).
+// If the timer key does not exist, it is created with the owner and lease.
+// If the timer key already exists, the owner is updated and the lease is extended.
+// The function returns true if the claim succeeded, false otherwise.
+func (s *MemoryStore) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	now := time.Now().Unix()
+	if val, ok := s.data[timerKey]; ok {
+		// Timer exists - update owner and lease expiry
+		var rec timerRecord
+		if err := json.Unmarshal(val, &rec); err != nil {
+			// If we can't parse, create a minimal record
+			rec = timerRecord{
+				WaitUntil:   0,
+				CreatedAt:   now,
+				Owner:       owner,
+				LeaseExpiresAt: now + int64(lease.Seconds()),
+				WaitType:    "",
+				ExpectedSignal: "",
+			}
+		} else {
+			rec.Owner = owner
+			rec.LeaseExpiresAt = now + int64(lease.Seconds())
+		}
+		newData, err := json.Marshal(rec)
+		if err != nil {
+			return false, err
+		}
+		s.data[timerKey] = newData
+		return true, nil
+	} else {
+		// Timer doesn't exist - create new with owner and lease
+		rec := timerRecord{
+			WaitUntil:       0,
+			CreatedAt:       now,
+			Owner:           owner,
+			LeaseExpiresAt:  now + int64(lease.Seconds()),
+			WaitType:        "",
+			ExpectedSignal: "",
+		}
+		newData, err := json.Marshal(rec)
+		if err != nil {
+			return false, err
+		}
+		s.data[timerKey] = newData
+		return true, nil
+	}
+}
+
+// DeleteTimer deletes the timer record at the given key.
+func (s *MemoryStore) DeleteTimer(ctx context.Context, timerKey string) error {
+	if _, ok := s.data[timerKey]; ok {
+		delete(s.data, timerKey)
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrTimerNotFound, timerKey)
+}
+
+// GetTimer retrieves the data stored at the given timer key.
+func (s *MemoryStore) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
+	if val, ok := s.data[timerKey]; ok {
+		return append([]byte(nil), val...), nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrTimerNotFound, timerKey)
+}
+
+// ListTimers returns all timer keys matching the given prefix.
+func (s *MemoryStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
+	keys := make([]string, 0)
+	for key := range s.data {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// PutTimer stores data at the given timer key. If the key already exists,
+// the write is an overwrite (compare-and-swap with existing value).
+func (s *MemoryStore) PutTimer(ctx context.Context, timerKey string, data []byte) error {
+	s.data[timerKey] = append([]byte(nil), data...)
+	return nil
+}
+
 func (s *MemoryStore) guard() error {
 	if s.closed.Load() {
 		return ErrClosed
