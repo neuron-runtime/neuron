@@ -716,35 +716,35 @@ Exit criteria:
 
 ### 5.1 Waiting state
 
-- [x] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
+- [ ] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
       key, expected signal/timer, deadline, and the payload schema the execution expects.
-- [x] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
+- [ ] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
       must not look like a running capability.
-- [x] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
+- [ ] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
       crash cannot produce a "waiting" execution with no wait record.
 
 ### 5.2 Signals
 
-- [x] **R5-4** Define a general signal primitive, for example
+- [ ] **R5-4** Define a general signal primitive, for example
       `POST /v1/executions/{executionId}/signals/{signalName}`, with a unique delivery event ID
       in the payload. This is a runtime primitive, not a Telegram/Slack-specific integration.
-- [x] **R5-5** Authenticate signals with the existing API token mechanism and authorize them
+- [ ] **R5-5** Authenticate signals with the existing API token mechanism and authorize them
       against the specific execution and wait state. A signal for an execution that is not
       waiting for that signal returns a precise error.
-- [x] **R5-6** Persist the signal before acknowledging receipt, then resume scheduling. A signal
+- [ ] **R5-6** Persist the signal before acknowledging receipt, then resume scheduling. A signal
       must not be lost between HTTP acceptance and execution resumption.
-- [x] **R5-7** Handle duplicate delivery idempotently: the same signal ID must not advance the
+- [ ] **R5-7** Handle duplicate delivery idempotently: the same signal ID must not advance the
       execution twice.
-- [x] **R5-8** Define signal payload validation against the declared wait schema.
+- [ ] **R5-8** Define signal payload validation against the declared wait schema.
 - [ ] **R5-9** Define behavior for a signal arriving after the wait deadline or after
       cancellation.
 
 ### 5.3 Durable timers
 
-- [x] **R5-10** Persist scheduled work with a due time (`next_attempt_at`, wake-at) rather than
+- [ ] **R5-10** Persist scheduled work with a due time (`next_attempt_at`, wake-at) rather than
       sleeping a goroutine. Retry backoff becomes durable scheduling, replacing the in-memory
       sleep at `nore/internal/execution/engine/invocation.go:232-244` for durable executions.
-- [x] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
+- [ ] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
       future timers efficiently and claim them safely.
 - [ ] **R5-12** Implement a timer poller that claims due timers and resumes the associated
       executions. Define the polling interval and its interaction with latency.
@@ -791,6 +791,15 @@ Exit criteria:
 ### Findings during Phase 5 implementation
 
 Append new findings here as checklist items.
+
+- [ ] **F5-1: CapabilityWaiting is never entered and wait fields have no writers.** Defect: the durable execution state never transitions into `CapabilityWaiting`; `StatusWaiting`, `WaitUntil`, and `DispatchState` have no writers, so the modeled wait state is unreachable in practice. Evidence: `nore/internal/execution/execution.go`. Impact: waiting cannot be represented, persisted, or excluded from scheduling as required by R5-1..R5-3, blocking durable suspension semantics. Intended fix: make wait transitions explicit and persist wait metadata atomically when entering/leaving a wait.
+- [ ] **F5-2: Signal handler mutates memory only and lacks delivery/authorization guarantees.** Defect: `SignalExecution` only mutates in-memory state, with no request body, delivery ID, payload handling, idempotency, persistence, or dispatch/resume side effects, and it does not verify execution ownership. Evidence: `nore/internal/api/handlers/instances/instance_executions.go:257-328`. Impact: signals can be lost across restart, duplicated, unauthenticated to the execution/wait, or applied without durable effect, violating R5-4..R5-8. Intended fix: define an authenticated, execution-bound signal API with delivery IDs, validation, transactional persistence-before-ack, and idempotent resume.
+- [ ] **F5-3: Timer records exist but are unconsumed with no due-time scheduling path.** Defect: timer KV/claim primitives exist but there are no consumers, no due-time index, and no poller to claim and fire due timers. Evidence: timer storage/claim primitives without consumers (no due-time index or poller). Impact: persisted `next_attempt_at`/wake times cannot drive recovery or resumption, so R5-10..R5-13 cannot be satisfied. Intended fix: add an indexed due-time claim/query and a timer poller that claims, fires, and resumes executions durably.
+- [ ] **F5-4: Recovery mishandles nil `WaitUntil` and miscounts in-flight waiting work.** Defect: recovery resumes `CapabilityWaiting` when `WaitUntil == nil || elapsed` and counts waiting in `inFlight` on the elapsed path. Evidence: `nore/internal/execution/execution.go:443-499`. Impact: indefinite waits can be resumed prematurely, and waiting work can occupy in-flight/worker accounting, violating R5-1, R5-2, and recovery expectations. Intended fix: treat nil deadlines as still waiting, keep waits out of in-flight accounting, and only resume when a concrete wait condition is satisfied.
+- [ ] **F5-5: Retry backoff still blocks workers with in-memory sleeps.** Defect: retry handling still sleeps in the worker path instead of scheduling durable wake times for durable executions. Evidence: `nore/internal/execution/engine/invocation.go:132-139,232-244`. Impact: restarts lose pending retries, workers are occupied during backoff, and durable retry scheduling required by R5-10 is not achieved. Intended fix: persist retry wake times and let a durable timer/scheduler resume attempts without sleeping workers.
+- [ ] **F5-6: No execution maximum lifetime or wait-deadline policy.** Defect: there is no execution-level maximum lifetime and no wait-deadline policy to govern suspended executions. Evidence: absence of execution lifetime/wait-deadline policy in execution/runtime configuration and state handling (no enforced max lifetime or deadline policy). Impact: long-running or stuck waits have no bounded, policy-driven outcome, blocking R5-14..R5-16. Intended fix: introduce explicit execution lifetime and wait-deadline policies and apply expiry transitions transactionally with recorded reasons.
+- [ ] **F5-7: Capability runtime protocol lacks a suspension outcome.** Defect: the capability runtime protocol defines no suspend/wait outcome for a capability to request durable suspension. Evidence: `shared/protocol/capabilityruntime/v1/capability_runtime.proto` (no capability suspend outcome). Impact: capabilities cannot request waits through a general, language-independent protocol primitive, blocking R5-19/R5-20. Intended fix: version and extend the protocol with a suspension outcome carrying wait/correlation metadata and update all SDKs and conformance tests.
+- [ ] **F5-8: Pre-existing baseline failures block clean Phase 5 validation.** Defect: the baseline has unrelated build/format/acceptance failures that obscure Phase 5 verification. Evidence: four test packages do not compile because fakes lack `WithTimer`/`ClaimTimer` (`nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, `nore/cmd/nore/main_test.go`); acceptance `TestR4_24SigKill*` hangs due to non-idempotent stop; `gofmt -l` reports drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`. Impact: full validation cannot be treated as green, and regressions introduced by Phase 5 work are harder to isolate. Intended fix: repair the fake/store timer contract, make stop idempotent for the acceptance harness, and normalize formatting as separate, bounded fixes with recorded validation.
 
 ---
 
