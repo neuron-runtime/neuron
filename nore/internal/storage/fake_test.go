@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
 	"github.com/neuron-runtime/neuron/nore/internal/event"
@@ -72,6 +73,63 @@ func (s *fakeStore) CompareAndSwap(ctx context.Context, key string, old, new []b
 	}
 	s.kv[key] = append([]byte(nil), new...)
 	return nil
+}
+
+// PutTimer implements storage.Store.
+func (s *fakeStore) PutTimer(ctx context.Context, timerKey string, data []byte) error {
+	if s.closed {
+		return storage.ErrClosed
+	}
+	s.kv[timerKey] = append(s.kv[timerKey], data...)
+	return nil
+}
+
+// GetTimer implements storage.Store.
+func (s *fakeStore) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
+	if s.closed {
+		return nil, storage.ErrClosed
+	}
+	if val, ok := s.kv[timerKey]; ok {
+		return val, nil
+	}
+	return nil, storage.ErrTimerNotFound
+}
+
+// DeleteTimer implements storage.Store.
+func (s *fakeStore) DeleteTimer(ctx context.Context, timerKey string) error {
+	if s.closed {
+		return storage.ErrClosed
+	}
+	delete(s.kv, timerKey)
+	return nil
+}
+
+// ListTimers implements storage.Store.
+func (s *fakeStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
+	if s.closed {
+		return nil, storage.ErrClosed
+	}
+	var keys []string
+	for k := range s.kv {
+		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+// ClaimTimer implements storage.Store.
+func (s *fakeStore) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	if s.closed {
+		return false, storage.ErrClosed
+	}
+	if _, ok := s.kv[timerKey]; ok {
+		// Timer exists - update owner (lease is informational in fake)
+		return true, nil
+	}
+	// Timer doesn't exist - create new
+	s.kv[timerKey] = []byte("timer-claimed")
+	return true, nil
 }
 
 // List implements storage.Store.
@@ -158,6 +216,41 @@ func (s *fakeTx) List(ctx context.Context, prefix string) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+func (t *fakeTx) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
+	if val, ok := t.kv[timerKey]; ok {
+		return val, nil
+	}
+	return nil, storage.ErrTimerNotFound
+}
+
+func (t *fakeTx) PutTimer(ctx context.Context, timerKey string, data []byte) error {
+	t.kv[timerKey] = append(t.kv[timerKey], data...)
+	return nil
+}
+
+func (t *fakeTx) DeleteTimer(ctx context.Context, timerKey string) error {
+	delete(t.kv, timerKey)
+	return nil
+}
+
+func (t *fakeTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	for k := range t.kv {
+		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+func (t *fakeTx) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	if _, ok := t.kv[timerKey]; ok {
+		return true, nil
+	}
+	t.kv[timerKey] = []byte("timer-claimed")
+	return true, nil
 }
 
 // TestFakeStoreProvesNoLeak verifies that the neutral storage contract works

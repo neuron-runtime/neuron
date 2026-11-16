@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -37,6 +38,17 @@ var (
 
 	// ErrClosed reports an operation on a store that has been closed.
 	ErrClosed = errors.New("storage: closed")
+
+	// ErrTimerNotFound reports that a timer key was not found.
+	ErrTimerNotFound = errors.New("storage: timer not found")
+
+	// ErrTimerConflict reports that a compare-and-swap write lost to another writer
+	// on a timer. The caller must reload the record before retrying.
+	ErrTimerConflict = errors.New("storage: timer write conflict")
+
+	// ErrTimerAlreadyExists reports that an insert-only write found an existing
+	// timer record.
+	ErrTimerAlreadyExists = errors.New("storage: timer already exists")
 )
 
 // KV is the key/value surface shared by a Store and a transaction. Keys are
@@ -65,6 +77,27 @@ type Tx interface {
 	KV
 }
 
+// TimerTx is a transaction surface for timer operations. Every operation on a
+// TimerTx participates in the timer transaction opened by Store.WithTimer.
+type TimerTx interface {
+	KV
+
+	// GetTimer retrieves the data stored at the given timer key.
+	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
+	// PutTimer stores data at the given timer key. If the key already exists,
+	// the write is an overwrite (compare-and-swap with existing value).
+	PutTimer(ctx context.Context, timerKey string, data []byte) error
+	// DeleteTimer deletes the timer record at the given key.
+	DeleteTimer(ctx context.Context, timerKey string) error
+	// ListTimers returns all timer keys matching the given prefix.
+	ListTimers(ctx context.Context, prefix string) ([]string, error)
+	// ClaimTimer atomically claims a timer lease. Returns (claimed, error).
+	// If the timer key does not exist, it is created with the owner and lease.
+	// If the timer key already exists, the owner is updated and the lease is extended.
+	// The function returns true if the claim succeeded, false otherwise.
+	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
+}
+
 // Store is the only storage type runtime components receive. It exposes plain
 // reads and writes, health checking, explicit transactions, and lifecycle
 // closure. Backend construction is owned by Open; components must not construct
@@ -85,6 +118,32 @@ type Store interface {
 	// Close releases the backend. Close during an active transaction returns
 	// ErrTransactionActive.
 	Close() error
+
+	// Timer operations for Phase 5 (signals, timers, and long-running execution).
+
+	// WithTimer runs fn inside one timer transaction. Returning an error from fn
+	// rolls the transaction back. WithTimer is analogous to WithTx but operates
+	// on the timer surface and provides a TimerTx bound to the timer KV surface.
+	WithTimer(ctx context.Context, fn func(TimerTx) error) error
+
+	// PutTimer stores data at the given timer key. If the key already exists,
+	// the write is an overwrite (compare-and-swap with existing value).
+	PutTimer(ctx context.Context, timerKey string, data []byte) error
+
+	// GetTimer retrieves the data stored at the given timer key.
+	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
+
+	// DeleteTimer deletes the timer record at the given key.
+	DeleteTimer(ctx context.Context, timerKey string) error
+
+	// ListTimers returns all timer keys matching the given prefix.
+	ListTimers(ctx context.Context, prefix string) ([]string, error)
+
+	// ClaimTimer atomically claims a timer lease. Returns (claimed, error).
+	// If the timer key does not exist, it is created with the owner and lease.
+	// If the timer key already exists, the owner is updated and the lease is extended.
+	// The function returns true if the claim succeeded, false otherwise.
+	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 }
 
 // Config selects and configures a storage backend.

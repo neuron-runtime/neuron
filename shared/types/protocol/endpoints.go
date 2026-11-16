@@ -28,6 +28,7 @@ const (
 	ExecutionEventsPath       = "/v1/instances/{id}/executions/{execID}/events"
 	ExecutionEventsStreamPath = "/v1/instances/{id}/executions/{execID}/events/stream"
 	CancelExecutionPath       = "/v1/instances/{id}/executions/{execID}/cancel"
+	SignalExecutionPath       = "/v1/instances/{id}/executions/{execID}/signals/{signalName}"
 
 	// RunPath is the simple synchronous execution facade: one request in, one
 	// Assembly result out. The advanced per-instance execution resources above
@@ -94,6 +95,12 @@ func ExecutionEventsStream(instanceID, executionID string) string {
 // CancelExecution returns the path addressing the cancellation of one execution.
 func CancelExecution(instanceID, executionID string) string {
 	return fillRoute(CancelExecutionPath, instanceID, executionID)
+}
+
+// SignalExecution returns the path addressing the signaling of one execution's
+// waiting capability.
+func SignalExecution(instanceID, executionID, signalName string) string {
+	return fillRoute(SignalExecutionPath, instanceID, executionID, signalName)
 }
 
 // routePlaceholder matches a named wildcard in a route template. It is

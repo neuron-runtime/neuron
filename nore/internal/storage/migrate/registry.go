@@ -23,6 +23,19 @@ func KVStoreMigrations(drv Driver) []Migration {
 					return err
 				},
 			},
+			{
+				Version:     2,
+				Description: "create timer table",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS timer_store (
+						key TEXT PRIMARY KEY,
+						value BLOB NOT NULL,
+						created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+						updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+					)`)
+					return err
+				},
+			},
 		}
 	case DriverPostgres:
 		return []Migration{
@@ -40,6 +53,23 @@ func KVStoreMigrations(drv Driver) []Migration {
 						return err
 					}
 					_, err = tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_kv_store_key ON kv_store (key)`)
+					return err
+				},
+			},
+			{
+				Version:     2,
+				Description: "create timer table",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS timer_store (
+						key TEXT PRIMARY KEY,
+						value BYTEA NOT NULL,
+						created_at TIMESTAMP DEFAULT NOW(),
+						updated_at TIMESTAMP DEFAULT NOW()
+					)`)
+					if err != nil {
+						return err
+					}
+					_, err = tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_timer_store_key ON timer_store (key)`)
 					return err
 				},
 			},

@@ -3,11 +3,13 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MemoryStore is a process-local Store used for execution durability "none".
@@ -264,6 +266,180 @@ func (t memoryTx) List(ctx context.Context, prefix string) ([]string, error) {
 }
 
 func cloneMemoryData(src map[string][]byte) map[string][]byte {
+	dst := make(map[string][]byte, len(src))
+	for key, value := range src {
+		dst[key] = append([]byte(nil), value...)
+	}
+	return dst
+}
+
+// timerRecord represents a timer record stored as JSON bytes.
+// The JSON fields are: WaitUntil, CreatedAt, Owner, LeaseExpiresAt, WaitType, ExpectedSignal.
+type timerRecord struct {
+	WaitUntil       int64   `json:"waitUntil"`
+	CreatedAt       int64   `json:"createdAt"`
+	Owner           string  `json:"owner"`
+	LeaseExpiresAt  int64   `json:"leaseExpiresAt"`
+	WaitType        string  `json:"waitType"`
+	ExpectedSignal  string  `json:"expectedSignal"`
+}
+
+// WithTimer runs fn inside one timer transaction. Returning an error from fn
+// rolls the transaction back. WithTimer is analogous to WithTx but operates
+// on the timer surface.
+func (s *MemoryStore) WithTimer(ctx context.Context, fn func(TimerTx) error) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if fn == nil {
+		return fmt.Errorf("timer transaction callback is required")
+	}
+	if err := s.gate.Begin(); err != nil {
+		return err
+	}
+	defer s.gate.End()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	timerTx := memoryTimerTx{store: s}
+	if err := fn(timerTx); err != nil {
+		s.data = snapshotMemoryData(s.data)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		s.data = snapshotMemoryData(s.data)
+		return err
+	}
+	return nil
+}
+
+// memoryTimerTx operates on the store's map while WithTimer holds the data lock.
+type memoryTimerTx struct {
+	store *MemoryStore
+}
+
+func (t memoryTimerTx) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
+	if val, ok := t.store.data[timerKey]; ok {
+		return append([]byte(nil), val...), nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrTimerNotFound, timerKey)
+}
+
+func (t memoryTimerTx) PutTimer(ctx context.Context, timerKey string, data []byte) error {
+	if _, ok := t.store.data[timerKey]; ok {
+		t.store.data[timerKey] = append([]byte(nil), data...)
+	} else {
+		t.store.data[timerKey] = append([]byte(nil), data...)
+	}
+	return nil
+}
+
+func (t memoryTimerTx) DeleteTimer(ctx context.Context, timerKey string) error {
+	delete(t.store.data, timerKey)
+	return nil
+}
+
+func (t memoryTimerTx) List(ctx context.Context, prefix string) ([]string, error) {
+	keys := make([]string, 0)
+	for key := range t.store.data {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+func (t memoryTimerTx) Get(ctx context.Context, key string) ([]byte, error) {
+	if val, ok := t.store.data[key]; ok {
+		return append([]byte(nil), val...), nil
+	}
+	return nil, ErrNotFound
+}
+
+func (t memoryTimerTx) Put(ctx context.Context, key string, data []byte) error {
+	t.store.data[key] = append([]byte(nil), data...)
+	return nil
+}
+
+func (t memoryTimerTx) Delete(ctx context.Context, key string) error {
+	delete(t.store.data, key)
+	return nil
+}
+
+func (t memoryTimerTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	t.store.mu.Lock()
+	defer t.store.mu.Unlock()
+	val, ok := t.store.data[key]
+	if !ok {
+		return ErrNotFound
+	}
+	if !bytes.Equal(val, old) {
+		return ErrConflict
+	}
+	t.store.data[key] = append([]byte(nil), new...)
+	return nil
+}
+
+func (t memoryTimerTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
+	keys := make([]string, 0)
+	for key := range t.store.data {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+func (t memoryTimerTx) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	now := time.Now().Unix()
+	if val, ok := t.store.data[timerKey]; ok {
+		// Timer exists - update owner and lease expiry
+		var rec timerRecord
+		if err := json.Unmarshal(val, &rec); err != nil {
+			// If we can't parse, create a minimal record
+			rec = timerRecord{
+				WaitUntil:   0,
+				CreatedAt:   now,
+				Owner:       owner,
+				LeaseExpiresAt: now + int64(lease.Seconds()),
+				WaitType:    "",
+				ExpectedSignal: "",
+			}
+		} else {
+			rec.Owner = owner
+			rec.LeaseExpiresAt = now + int64(lease.Seconds())
+		}
+		newData, err := json.Marshal(rec)
+		if err != nil {
+			return false, err
+		}
+		t.store.data[timerKey] = newData
+		return true, nil
+	} else {
+		// Timer doesn't exist - create new with owner and lease
+		rec := timerRecord{
+			WaitUntil:       0,
+			CreatedAt:       now,
+			Owner:           owner,
+			LeaseExpiresAt:  now + int64(lease.Seconds()),
+			WaitType:        "",
+			ExpectedSignal: "",
+		}
+		newData, err := json.Marshal(rec)
+		if err != nil {
+			return false, err
+		}
+		t.store.data[timerKey] = newData
+		return true, nil
+	}
+}
+
+// snapshotMemoryData returns a shallow copy of the store's data map for
+// transaction rollback semantics.
+func snapshotMemoryData(src map[string][]byte) map[string][]byte {
 	dst := make(map[string][]byte, len(src))
 	for key, value := range src {
 		dst[key] = append([]byte(nil), value...)

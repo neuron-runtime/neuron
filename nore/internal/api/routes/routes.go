@@ -53,6 +53,7 @@ func BuildRoutes(
 	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionEventsPath), instHandler.GetExecutionEvents)
 	mux.HandleFunc(protocol.Method(http.MethodGet, protocol.ExecutionEventsStreamPath), instHandler.StreamExecutionEvents)
 	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.CancelExecutionPath), instHandler.CancelExecution)
+	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.SignalExecutionPath), instHandler.SignalExecution)
 
 	// Synchronous run facade.
 	mux.HandleFunc(protocol.Method(http.MethodPost, protocol.RunPath), instHandler.Run)

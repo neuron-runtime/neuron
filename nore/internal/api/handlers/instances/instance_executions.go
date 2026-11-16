@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
+	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -248,6 +249,79 @@ func (h *Handler) CancelExecution(w http.ResponseWriter, r *http.Request) {
 	}
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
 		Message: "execution cancelled",
+		Status:  http.StatusOK,
+		Data:    item,
+	})
+}
+
+// SignalExecution sends a signal to a waiting capability within an execution,
+// transitioning it from CapabilityWaiting to CapabilityReady.
+//
+// The request path identifies the instance, execution, and the name of the
+// signal to deliver. The execution's capability that has ExpectedSignal matching
+// the signalName will be transitioned. If no matching waiting capability is
+// found, a 404 is returned.
+func (h *Handler) SignalExecution(w http.ResponseWriter, r *http.Request) {
+	instID := utils.PathID(r.PathValue("id"))
+	execID := utils.PathID(r.PathValue("execID"))
+	signalName := r.PathValue("signalName")
+
+	i, ok := h.instances.GetByID(instID)
+	if !ok {
+		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", instID))
+		return
+	}
+
+	exec, err := i.GetExecution(r.Context(), core.ID(execID))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, instance.ErrExecutionNotFound) {
+			status = http.StatusNotFound
+		}
+		utils.ErrorJSON(w, status, err)
+		return
+	}
+
+	// Find the capability waiting for this signal by matching ExpectedSignal.
+	capabilityID := core.ID("")
+	found := false
+	for cid := range exec.Blueprint.Nodes {
+		state := exec.CapabilityState(cid)
+		if state.Status == execution.CapabilityWaiting && state.ExpectedSignal == signalName {
+			capabilityID = cid
+			found = true
+			break
+		}
+	}
+	if !found {
+		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("no capability waiting for signal %s on execution %s", signalName, execID))
+		return
+	}
+
+	if err := exec.Signal(capabilityID); err != nil {
+		utils.ErrorJSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	item := protocol.ExecutionItem{
+		ID:            exec.ID,
+		CorrelationID: exec.CorrelationID,
+		Status:        string(exec.Status()),
+	}
+	if started := exec.StartedAt(); !started.IsZero() {
+		ns := started.UnixNano()
+		item.StartedAt = &ns
+	}
+	if completed := exec.CompletedAt(); !completed.IsZero() {
+		ns := completed.UnixNano()
+		item.CompletedAt = &ns
+	}
+	if errMsg := exec.Error(); errMsg != "" {
+		item.Error = errMsg
+	}
+
+	utils.WriteJSON(w, http.StatusOK, protocol.Response{
+		Message: "execution signaled",
 		Status:  http.StatusOK,
 		Data:    item,
 	})
