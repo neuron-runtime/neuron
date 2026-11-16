@@ -625,6 +625,9 @@ func (w *worker) execute(ctx context.Context, req *capabilityrt.Request) (*capab
 	if err != nil {
 		return nil, fmt.Errorf("execute via gRPC: %w", err)
 	}
+	if resp.Suspend != nil {
+		return nil, fmt.Errorf("unsupported_suspend_outcome: capability runtime returned a suspend outcome but suspend/resume is not yet supported")
+	}
 
 	out := &capabilityrt.Response{
 		Result: make(map[string]any, len(resp.Result)),
