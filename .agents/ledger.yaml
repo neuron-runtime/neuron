@@ -4,6 +4,8 @@ updated: 2026-11-16
 
 # Authoritative execution ledger. Schema and state rules: .agents/README.md
 # The product backlog lives in todos/; this file tracks active work only.
+# Phase 5 plan: .agents/reports/phase5-implementation-plan.md
+# Phase 5 ADR: .agents/decisions/0001-phase5-signals-timers.md
 tasks:
   - id: T-010
     objective: "Fix CompleteCurrentAndSchedule in-flight accounting for fan-in joins"
@@ -56,7 +58,7 @@ tasks:
     lease: null
     evidence: []
     reports: []
-    open_risks: []
+    open_risks: ["Out of Phase 5 scope; retained as historical backlog entry."]
   - id: T-013
     objective: "Update documentation and tests for Phase 3 fan-in"
     scope: ["docs/ARCHITECTURE.md", "todos/TODO.md", "nore/internal/planner/"]
@@ -76,3 +78,370 @@ tasks:
     evidence: ["docs/ARCHITECTURE.md:972-974", "todos/TODO.md:532-538", "packages/assembly-sdks/typescript/src/type-tests.test-d.ts:110-128", "nore/internal/planner/compiler.go:154-160"]
     reports: ["T-013-docs.md"]
     open_risks: []
+
+  - id: T-019
+    objective: "Correct Phase 5 backlog checkboxes to reflect verified implementation state"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: []
+    acceptance:
+      - "R5-1..R5-8, R5-10, R5-11 re-opened because research proves they are not implemented end to end"
+      - "Phase 5 findings record the inert signal handler, unconsumed timer records, nil-WaitUntil recovery bug, and pre-existing test-build failures with evidence"
+      - "No item is marked complete without implementation evidence"
+    verification:
+      - "git diff -- todos/TODO.md"
+      - "grep -n 'R5-' todos/TODO.md (manual review that only verified items are checked)"
+    status: in_progress
+    lease: { owner: documenter, paths: ["todos/TODO.md"], task: T-019 }
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-020
+    objective: "Repair pre-existing test fakes and gofmt drift so the Go test packages compile"
+    scope:
+      - "nore/internal/storage/fake_test.go"
+      - "nore/internal/execution/store_failure_test.go"
+      - "nore/internal/instance/metadata_store_test.go"
+      - "nore/cmd/nore/main_test.go"
+      - "nore/internal/storage/memory.go"
+      - "nore/internal/storage/postgres/postgres.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [reviewer]
+    dependencies: []
+    acceptance:
+      - "fakeStore implements WithTimer; faultStore, metadataFaultStore, nonTransactionalStore implement all timer methods"
+      - "storage, execution, instance, and cmd/nore test packages compile"
+      - "gofmt -l reports nothing for memory.go and postgres.go"
+      - "No production behavior change"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/storage ./internal/execution ./internal/instance ./cmd/nore"
+      - "gofmt -l nore/internal/storage/memory.go nore/internal/storage/postgres/postgres.go"
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/storage/fake_test.go", "nore/internal/execution/store_failure_test.go", "nore/internal/instance/metadata_store_test.go", "nore/cmd/nore/main_test.go", "nore/internal/storage/memory.go", "nore/internal/storage/postgres/postgres.go"], task: T-020 }
+    evidence: []
+    reports: []
+    open_risks: ["Baseline: four test packages currently fail to build (missing ClaimTimer/WithTimer)."]
+
+  - id: T-021
+    objective: "Make the acceptance harness stop idempotent and repair the hanging/vacuous R4-24 tests"
+    scope: ["application/internal/acceptance/**"]
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [reviewer]
+    dependencies: []
+    acceptance:
+      - "runtimeSession.stop is safe to call more than once and terminates"
+      - "R4-24 SIGKILL tests assert real recovered state instead of placeholders"
+      - "The acceptance package no longer hangs under the package timeout"
+    verification:
+      - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance"
+      - "cd application && GOWORK=off go test -count=1 -timeout 5m -run 'R4-24' ./internal/acceptance"
+    status: in_progress
+    lease: { owner: bugfixer, paths: ["application/internal/acceptance/**"], task: T-021 }
+    evidence: []
+    reports: []
+    open_risks: ["Baseline: TestR4_24SigKill* timed out after 10m due to non-idempotent stop."]
+
+  - id: T-022
+    objective: "Implement the storage timer substrate: due-time index, bounded due query, lease-aware claim, and backend parity"
+    scope:
+      - "nore/internal/storage/provider.go"
+      - "nore/internal/storage/key.go"
+      - "nore/internal/storage/memory.go"
+      - "nore/internal/storage/sqlite/**"
+      - "nore/internal/storage/postgres/**"
+      - "nore/internal/storage/migrate/**"
+      - "nore/internal/storage/**/*_test.go"
+      - "nore/internal/storage/fake_test.go"
+      - "nore/internal/execution/store_failure_test.go"
+      - "nore/internal/instance/metadata_store_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-020]
+    acceptance:
+      - "TimerTx.KV addresses the main KV surface on SQLite and PostgreSQL"
+      - "due_at column and index added by versioned migration for SQLite and PostgreSQL"
+      - "PutTimer persists an explicit due time; DueTimers returns at most limit due, unleased timers ordered by due time then key"
+      - "ClaimTimer refuses a live lease and claims only due/unleased/expired-lease timers"
+      - "Memory, SQLite, and PostgreSQL pass the shared timer contract tests; Memory is race-safe"
+      - "No due-timer discovery performs a full-table scan"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/storage/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/..."
+      - "cd nore && NEURON_TEST_POSTGRES_DSN='<dsn>' GOWORK=off go test -count=1 ./internal/storage/postgres/... (or record DSN unavailable)"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Postgres DSN unavailable in baseline; parity cannot be claimed without it.", "WithTimer serializes writes; contention must be measured."]
+
+  - id: T-023
+    objective: "Add the additive capability-runtime suspend/resume contract and update Go/.NET SDKs with conformance"
+    scope:
+      - "shared/protocol/capabilityruntime/**"
+      - "packages/executor-sdks/golang/**"
+      - "packages/executor-sdks/dotnet/**"
+      - "nore/internal/mechanism/conformance_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: []
+    acceptance:
+      - "v1 protocol adds ExecuteResponse.suspend and ExecuteRequest.resume with frozen field numbers"
+      - "InitializeResponse.features can advertise 'suspend'; unnegotiated suspend is rejected explicitly"
+      - "Go and .NET SDKs expose suspend/resume without breaking existing result/error behavior"
+      - "Conformance covers old client, negotiated suspend, unnegotiated rejection, signal resume, timer resume, duplicate resume"
+      - "Generated files are produced by the repository generation command, not hand-edited"
+    verification:
+      - "cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./..."
+      - "dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore"
+      - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
+    status: in_progress
+    lease: { owner: coder, paths: ["shared/protocol/capabilityruntime/**", "packages/executor-sdks/golang/**", "packages/executor-sdks/dotnet/**", "nore/internal/mechanism/conformance_test.go"], task: T-023 }
+    evidence: []
+    reports: []
+    open_risks: ["No TypeScript executor SDK exists; document as out of scope.", "Proto generation command must be confirmed."]
+
+  - id: T-024
+    objective: "Implement durable wait state, scheduler-owned wait transitions, recovery, deadlines, and snapshot v3"
+    scope:
+      - "nore/internal/execution/execution.go"
+      - "nore/internal/execution/snapshot.go"
+      - "nore/internal/execution/accessors.go"
+      - "nore/internal/execution/wait.go"
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/dispatch_intent*.go"
+      - "nore/internal/execution/recovery*.go"
+      - "nore/internal/execution/scheduler/**"
+      - "nore/internal/execution/*_test.go"
+      - "nore/internal/instance/**"
+      - "nore/internal/contracts/**"
+      - "nore/internal/event/**"
+      - "nore/internal/mechanism/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-021, T-022, T-023]
+    acceptance:
+      - "A capability can enter CapabilityWaiting with reason, correlation key, expected signal/timer, WaitUntil, and payload schema"
+      - "Wait entry is committed transactionally with timer/state; no waiting execution has missing wait metadata"
+      - "WaitUntil == nil is never treated as due; elapsed timer/deadline waits resume; signal waits without deadline stay waiting"
+      - "Waiting capabilities are excluded from inFlight/worker accounting"
+      - "StatusWaiting is derived only when no runnable work remains"
+      - "Signal and timer resolution commit state, delete the timer, persist the delivery record when applicable, and create the dispatch intent before publishing"
+      - "Cancellation is terminal, deletes timers, discards buffered join inputs, and retains wait metadata for diagnostics"
+      - "Wait deadline policy fail/cancel/continue is applied transactionally with a recorded reason; execution max lifetime is separate from capability timeout"
+      - "Durable retry writes CapabilityRetryWait/NextAttemptAt and releases the worker; non-durable behavior is unchanged"
+      - "Snapshot schema v3 adds execution deadline; v1/v2/v3 decode correctly"
+      - "Recovery restores retry timers and suspended waits; completed capabilities are never rerun; join state is restored"
+      - "A dispatch reconciler republishes ready intents after commit/publish failure"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... -run 'Wait|Signal|Cancel|Recover|Retry|Timer|Dispatch'"
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recovery'"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed."]
+
+  - id: T-025
+    objective: "Wire engine suspend consumption, durable retry, cancellation/deadline enforcement, and dispatch reconciliation"
+    scope: ["nore/internal/execution/engine/**"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-024]
+    acceptance:
+      - "Capability suspend outcome maps to the scheduler wait transition instead of completion/failure"
+      - "Durable retry does not sleep in the engine invocation; it persists retry wait and returns the worker"
+      - "Non-durable retry keeps current behavior"
+      - "Cancellation and deadlines apply to suspended/retry work through the execution state machine"
+      - "Dispatch reconciler claims ready intents and republishes them with bounded leases"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/engine/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Retry|Suspend|Cancel|Deadline|Claim'"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-026
+    objective: "Map the process adapter to the suspend/resume protocol and prove conformance"
+    scope: ["nore/internal/mechanism/process/**"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-023, T-024]
+    acceptance:
+      - "Process transport carries suspend outcomes and resume inputs"
+      - "Feature negotiation and old-runtime behavior are enforced"
+      - "Conformance covers signal/timer resume and duplicate delivery"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/..."
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-027
+    objective: "Implement execution-scoped signal delivery, authorization, idempotency, payload validation, and suspended-execution query"
+    scope:
+      - "nore/internal/api/handlers/instances/**"
+      - "nore/internal/api/routes/**"
+      - "shared/types/protocol/**"
+      - "nore/internal/api/**/*_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [security, architect]
+    dependencies: [T-024]
+    acceptance:
+      - "POST /v1/executions/{id}/signals/{name} and the existing instance-scoped route both work; handlers never mutate execution state"
+      - "Body accepts deliveryId (required), payload, optional correlationKey"
+      - "Duplicate same deliveryId/payload is an idempotent 200; different payload is 409"
+      - "Ambiguous matching waits are 409; no matching wait is 404; terminal/late is 410; cross-instance is 404"
+      - "Payload is validated against the wait payload schema"
+      - "List/filter exposes wait reason, expected signal/timer, correlation key, and deadline"
+      - "Signal persistence precedes acknowledgement and resumes scheduling"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/api/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/api/... -run 'Signal|Execution|Authorization|Wait'"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Security sign-off required for cross-execution authorization and delivery retention."]
+
+  - id: T-028
+    objective: "Expose wait deadline policy, execution max lifetime, and timer poll configuration with validation"
+    scope:
+      - "shared/types/core/runtimeconfig.go"
+      - "nore/internal/runtimeconfig/**"
+      - "application/config/**"
+      - "application/cmd/**"
+      - "nore/cmd/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-024]
+    acceptance:
+      - "Wait deadline policy defaults to fail and allows cancel/continue"
+      - "Execution max lifetime defaults to 30 days, 0 disables, and is distinct from capability timeout"
+      - "Timer poll interval and batch size have bounded defaults (1s, 256)"
+      - "Invalid values fail configuration load with actionable messages"
+      - "Operational timer/deadline settings are denied in project configuration and allowed only at deployment level"
+      - "Defaults preserve non-durable behavior"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/runtimeconfig/..."
+      - "cd application && GOWORK=off go test -count=1 ./config/... ./cmd/..."
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-029
+    objective: "Add CLI commands to deliver signals, cancel waiting executions, and list suspended executions with wait details"
+    scope:
+      - "application/internal/cli/**"
+      - "application/client/**"
+      - "application/connection/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [reviewer, documenter]
+    dependencies: [T-027]
+    acceptance:
+      - "A user can deliver a signal with a delivery ID and payload"
+      - "A user can cancel a waiting execution"
+      - "A user can list suspended executions with wait reason, expected signal/timer, correlation key, and deadline"
+      - "Errors are actionable and stdout/stderr/exit-code invariants are preserved"
+    verification:
+      - "cd application && GOWORK=off go test -count=1 ./internal/cli/..."
+      - "cd application && GOWORK=off go test -count=1 ./..."
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-030
+    objective: "Add Phase 5 end-to-end and restart tests for signals, timers, deadlines, idempotency, authorization, and worker occupancy"
+    scope: ["application/internal/acceptance/**"]
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [reviewer, architect, security]
+    dependencies: [T-025, T-026, T-027, T-028]
+    acceptance:
+      - "R5-22: suspend for approval, restart runtime, deliver signal, resume with payload"
+      - "R5-23: durable timer fires after restart, including missed due time"
+      - "R5-24: duplicate signal delivery and duplicate timer fire each cause one state transition"
+      - "R5-25: unauthorized delivery and signal-to-wrong-execution are rejected"
+      - "R5-26: a waiting execution occupies no worker/pool slot"
+      - "R5-27: deadline policies fail/cancel/continue behave as configured"
+      - "R5-13: a timer whose due time passed while the process was down fires on recovery"
+    verification:
+      - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/..."
+      - "cd application && GOWORK=off go test -count=1 -timeout 15m -run 'Durable|R5|Signal|Timer|Deadline' ./internal/acceptance/..."
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Postgres parity cannot be exercised without a DSN; record the limitation."]
+
+  - id: T-031
+    objective: "Synchronize documentation and todo closure with verified Phase 5 behavior"
+    scope:
+      - "docs/**"
+      - "README.md"
+      - "application/README.md"
+      - "packages/executor-sdks/golang/README.md"
+      - "packages/executor-sdks/dotnet/README.md"
+      - "todos/TODO.md"
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-029, T-030]
+    acceptance:
+      - "Docs describe suspend/resume, signal idempotency, timer/deadline/lifetime policy, configuration, and SDK changes"
+      - "Docs state that no TypeScript executor SDK exists and the capability protocol change is additive/feature-gated"
+      - "Only verified Phase 5 items are checked; blocking Phase 3/4 items are checked only with evidence"
+      - "Pre-existing limitations (Postgres DSN, .NET if unavailable) are recorded"
+      - "Stale claims that suspended waits/timers are not resumed are removed or corrected"
+    verification:
+      - "git diff --check"
+      - "Manual cross-check of every changed documentation claim against code/tests"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+
+  - id: T-032
+    objective: "Run the final Phase 5 validation gate and verify the committed repository state"
+    scope: []
+    owner: coordinator
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-031]
+    acceptance:
+      - "scripts/script.sh result is recorded exactly (pass or exact limitation)"
+      - "All targeted Phase 5 suites and the durable restart acceptance tests pass"
+      - "Postgres parity and .NET checks are reported separately; unavailable checks are limitations, not passes"
+      - "Final git status is clean except coordinator-owned .agents files committed separately"
+      - "Every task commit hash is recorded in the ledger"
+    verification:
+      - "scripts/script.sh"
+      - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/..."
+      - "git status --short --branch && git log --oneline -20"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Gate is non-mutating; project changes are committed by their owners before the gate."]
