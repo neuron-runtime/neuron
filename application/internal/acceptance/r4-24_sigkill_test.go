@@ -1,88 +1,172 @@
 package acceptance
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
-// TestR4-24SigKillAfterCompletion verifies R4-24: after SIGKILL and restart,
-// a durable execution that has completed continues to be accessible and its
-// result is preserved. This tests the core durable execution recovery path
-// (R4-14) at the process level.
+// TestR4-24SigKillAfterCompletion verifies R4-24: after SIGKILL and restart, a
+// durable execution that already completed is still observable and is not run
+// again. The completedAt timestamp is the observable proof: a rerun would either
+// produce a new execution or move the completion time.
 func TestR4_24SigKillAfterCompletion(t *testing.T) {
-	// Build a project with durability enabled
+	t.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
+
 	p := writeProject(t)
-	_ = os.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
 	buildProject(t, p.root)
 
-	// Start the runtime in the background
 	session := startRuntime(t, p.root)
-	defer session.stop()
 
-	// Run an execution to completion
-	// The assembly has a single capability that returns a result.
-	// With durable mode, the execution state is persisted.
 	result := runNeuron(t, p.root, nil, "run", p.assembly, "--params", `{"name":"World"}`)
 	if result.code != 0 {
 		t.Fatalf("neuron run exit = %d\nstdout: %s\nstderr: %s", result.code, result.stdout, result.stderr)
 	}
-
-	// Verify the execution completed successfully
 	if got := decodeSingleJSON(t, result.stdout)["caller"]; got != "World" {
 		t.Errorf("caller = %v, want World", got)
 	}
 
-	// The runtime was stopped (SIGINT then SIGKILL) via defer session.stop()
-	// Now restart the runtime in the same project directory
-	// We use the existing harness infrastructure to restart
-	_ = os.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
-	buildProject(t, p.root) // re-build to pick up any changes
+	// Durable mode commits each transition itself, so the execution is recorded
+	// and completed before the synchronous run returns.
+	before := waitForExecutions(t, session.record, p.assembly, 10*time.Second, func(items []protocol.ExecutionItem) bool {
+		return len(items) == 1 && items[0].Status == "completed"
+	})
+	completed := before[0]
+	if completed.CompletedAt == nil {
+		t.Fatalf("completed execution %s has no completedAt", completed.ID)
+	}
 
-	// Start a new runtime session
-	session2 := startRuntime(t, p.root)
-	defer session2.stop()
+	// Crash the runtime rather than shutting it down gracefully, then restart it
+	// from the same project state.
+	session.kill()
+	restarted := startRuntime(t, p.root)
 
-	// Verify the execution is still accessible after restart
-	// (the runtime started successfully verifies persistence in durable mode)
-	foundExecution := true
-	if !foundExecution {
-		t.Fatal("no healthy runtime record found after restart to verify execution recovery")
+	after := waitForExecutions(t, restarted.record, p.assembly, 30*time.Second, func(items []protocol.ExecutionItem) bool {
+		return len(items) == 1 && items[0].ID == completed.ID && items[0].Status == "completed"
+	})
+	recovered := after[0]
+	if recovered.Status != "completed" {
+		t.Fatalf("recovered execution %s status = %s, want completed (error %q)", recovered.ID, recovered.Status, recovered.Error)
+	}
+	if recovered.Error != "" {
+		t.Fatalf("recovered execution %s has an error: %s", recovered.ID, recovered.Error)
+	}
+	if recovered.CompletedAt == nil || *recovered.CompletedAt != *completed.CompletedAt {
+		t.Fatalf("completed execution was rerun after restart: completedAt = %v, want %v", recovered.CompletedAt, *completed.CompletedAt)
 	}
 }
 
-// TestR4-24SigKillRecoveryVerifiesExecutionState checks that after SIGKILL and
-// restart, the execution record is preserved and the execution can resume.
-// This tests R4-14 recovery protocol step 1-3: load execution record, resolve
-// immutable assembly artifact, restore capability/join state.
+// TestR4-24SigKillRecoveryVerifiesExecutionState verifies R4-24 for work that was
+// still in flight: after the runtime is killed mid-execution and restarted,
+// durable recovery resumes that same execution to completion instead of
+// abandoning it or starting a fresh one.
 func TestR4_24SigKillRecoveryVerifiesExecutionState(t *testing.T) {
+	t.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
+
 	p := writeProject(t)
-	_ = os.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
+	if res := runNeuron(t, p.root, nil, "provider", "build"); res.code != 0 {
+		t.Fatalf("provider build exit = %d\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	installBlockingRuntime(t, p)
+	writeFile(t, filepath.Join(p.root, "capabilities", "blocking.yaml"), blockingCapability)
+	writeFile(t, filepath.Join(p.root, "assemblies", p.assembly, "assembly.yaml"), blockingAssembly)
 	buildProject(t, p.root)
 
 	session := startRuntime(t, p.root)
-	defer session.stop()
 
-	// Run an execution
-	result := runNeuron(t, p.root, nil, "run", p.assembly, "--params", `{"name":"RecoveryTest"}`)
-	if result.code != 0 {
-		t.Fatalf("neuron run exit = %d\nstdout: %s\nstderr: %s", result.code, result.stdout, result.stderr)
+	// The capability leaves a marker once it has started, then blocks long
+	// enough that the runtime can be killed while the execution is in flight.
+	marker := filepath.Join(t.TempDir(), "started")
+	params, err := json.Marshal(map[string]any{"sleep_ms": 5000, "marker": marker})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Verify result
-	if got := decodeSingleJSON(t, result.stdout)["caller"]; got != "RecoveryTest" {
-		t.Errorf("unexpected caller: %v", got)
+	cmd := exec.Command(harness.neuronBin, "--nore-path", harness.noreBin, "run", "--params", string(params))
+	cmd.Dir = p.root
+	cmd.Env = os.Environ()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	})
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("run exited before the execution started: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("execution did not start\nstdout: %s\nstderr: %s", stdout.String(), stderr.String())
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	// The session.stop() sends SIGINT then SIGKILL after 10 seconds.
-	// After the runtime dies, we restart it and verify the execution state.
-	_ = os.Setenv("NEURON_EXECUTION_DURABILITY", "durable")
-	buildProject(t, p.root)
+	// The capability is running, so the execution must be recorded as running and
+	// carried the identity that recovery will use after the process dies.
+	before := waitForExecutions(t, session.record, p.assembly, 10*time.Second, func(items []protocol.ExecutionItem) bool {
+		for _, item := range items {
+			if item.Status == "running" {
+				return true
+			}
+		}
+		return false
+	})
+	var inFlight protocol.ExecutionItem
+	for _, item := range before {
+		if item.Status == "running" {
+			inFlight = item
+			break
+		}
+	}
 
-	// Restart the runtime
-	session2 := startRuntime(t, p.root)
-	defer session2.stop()
+	// Kill the runtime (and the blocked capability runtime with it) mid-flight.
+	session.kill()
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
 
-	// Verify the runtime is healthy after restart
-	// (durable mode retains execution records across restarts;
-	// the runtime started successfully verifies persistence)
+	restarted := startRuntime(t, p.root)
+
+	// Recovery must resume the same execution and drive it to a terminal state.
+	after := waitForExecutions(t, restarted.record, p.assembly, 30*time.Second, func(items []protocol.ExecutionItem) bool {
+		for _, item := range items {
+			if item.ID == inFlight.ID && item.Status == "completed" {
+				return true
+			}
+		}
+		return false
+	})
+	if len(after) != 1 {
+		t.Fatalf("executions after recovery = %d, want the single interrupted execution %s (got %#v)", len(after), inFlight.ID, after)
+	}
+	recovered := after[0]
+	if recovered.ID != inFlight.ID {
+		t.Fatalf("recovered execution id = %s, want the interrupted execution %s", recovered.ID, inFlight.ID)
+	}
+	if recovered.Status != "completed" {
+		t.Fatalf("recovered execution %s status = %s, want completed (error %q)", recovered.ID, recovered.Status, recovered.Error)
+	}
+	if recovered.Error != "" {
+		t.Fatalf("recovered execution %s has an error: %s", recovered.ID, recovered.Error)
+	}
 }
