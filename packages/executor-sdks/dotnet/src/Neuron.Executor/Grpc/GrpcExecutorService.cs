@@ -1,6 +1,10 @@
 using Grpc.Core;
 using Neuron.Executor.Conversion;
 using Neuron.Executor.Protocol.V1;
+using ProtoResumeInput = Neuron.Executor.Protocol.V1.ResumeInput;
+using ProtoSuspendOutcome = Neuron.Executor.Protocol.V1.SuspendOutcome;
+using SdkResumeInput = Neuron.Executor.ResumeInput;
+using SdkSuspendOutcome = Neuron.Executor.SuspendOutcome;
 
 namespace Neuron.Executor.Grpc;
 
@@ -32,6 +36,7 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
 {
     private readonly ExecutorHandler _handler;
     private readonly ShutdownCoordinator _shutdown;
+    private volatile bool _suspendNegotiated;
 
     public GrpcExecutorService(ExecutorHandler handler, ShutdownCoordinator shutdown)
     {
@@ -65,6 +70,12 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
             response.Metadata[key] = value;
         }
 
+        // Remember the negotiated feature so Execute can reject a suspend the
+        // runtime did not opt into. Once advertised it stays advertised for the
+        // process lifetime, matching the Go SDK's feature set.
+        _suspendNegotiated |= result.Features.Contains(
+            ExecutorConstants.SuspendFeature, StringComparer.Ordinal);
+
         return response;
     }
 
@@ -76,6 +87,9 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
             ExecutionId = request.ExecutionId,
             TimeoutMs = request.TimeoutMs,
             CorrelationId = request.CorrelationId,
+            AttemptId = request.AttemptId,
+            LogicalOperationId = request.LogicalOperationId,
+            Resume = request.Resume is null ? null : FromProto(request.Resume),
         };
 
         ExecutionResult result = await _handler.Execute!(
@@ -86,6 +100,19 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
         {
             // Controlled failure: successful transport, non-empty error payload.
             return new ExecuteResponse { Error = result.Error };
+        }
+
+        if (result.Suspend is not null)
+        {
+            if (!_suspendNegotiated)
+            {
+                return new ExecuteResponse
+                {
+                    Error = "unsupported_suspend_outcome: capability runtime did not advertise the \"suspend\" feature during Initialize",
+                };
+            }
+
+            return new ExecuteResponse { Suspend = ToProto(result.Suspend) };
         }
 
         var response = new ExecuteResponse();
@@ -123,5 +150,28 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
 
         _shutdown.RequestShutdown();
         return new ShutdownResponse();
+    }
+
+    private static SdkResumeInput FromProto(ProtoResumeInput input)
+    {
+        return new SdkResumeInput
+        {
+            Cause = input.Cause,
+            SignalName = input.SignalName,
+            DeliveryId = input.DeliveryId,
+            Payload = ValueConverter.ToObjectDictionary(input.Payload),
+        };
+    }
+
+    private static ProtoSuspendOutcome ToProto(SdkSuspendOutcome outcome)
+    {
+        return new ProtoSuspendOutcome
+        {
+            CorrelationKey = outcome.CorrelationKey,
+            WaitType = outcome.WaitType,
+            ExpectedSignal = outcome.ExpectedSignal,
+            DeadlineUnixMs = outcome.DeadlineUnixMs,
+            PayloadSchema = outcome.PayloadSchema,
+        };
     }
 }

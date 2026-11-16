@@ -61,7 +61,12 @@ message InitializeResponse {
   string protocol_version = 1;
 
   // features declares what this capability runtime supports.
-  // Known values: "concurrent", "streaming", "cancellation".
+  // Known values: "concurrent", "streaming", "cancellation", "suspend".
+  //
+  // "suspend" opts this runtime into the additive suspend/resume extension.
+  // A runtime MUST advertise "suspend" here before it may return
+  // ExecuteResponse.suspend. A client that has not received this feature
+  // rejects a suspend outcome instead of treating it as an empty success.
   repeated string features = 2;
 
   // metadata carries capability runtime specific identity information.
@@ -96,6 +101,15 @@ message ExecuteRequest {
   // execution restarts. Existing runtimes receive an empty string; this
   // field is optional.
   string logical_operation_id = 6;
+
+  // resume carries the input that resumes a suspended execution. It is an
+  // additive v1 extension: runtimes that predate it ignore the unknown field.
+  //
+  // A resumed invocation is a fresh Execute with the same logical_operation_id
+  // as the suspended invocation and a new attempt_id. Suspend is not a
+  // stackful continuation, so the capability must reconstruct its state from
+  // params and this resume input.
+  ResumeInput resume = 7;
 }
 
 // ExecuteResponse carries the result of one execution.
@@ -111,6 +125,56 @@ message ExecuteResponse {
 
   // metadata carries execution-specific metadata (e.g. timing, trace IDs).
   map<string, string> metadata = 3;
+
+  // suspend, when set, asks the client to suspend this capability until a
+  // signal or timer fires. It is an additive v1 extension: a client that does
+  // not understand this field ignores the unknown field, so only a runtime
+  // that advertised the "suspend" feature may set it. A client that did not
+  // negotiate "suspend" rejects the outcome explicitly rather than treating
+  // the response as an empty success.
+  SuspendOutcome suspend = 4;
+}
+
+// SuspendOutcome describes why a capability suspended and what resumes it.
+//
+// Suspend is not a stackful continuation: the invocation ends, and a later
+// fresh Execute carries ResumeInput with the same logical operation ID.
+message SuspendOutcome {
+  // correlation_key identifies this wait. It is required when more than one
+  // concurrent wait on the same signal name can exist in one execution.
+  string correlation_key = 1;
+
+  // wait_type is "signal" or "timer".
+  string wait_type = 2;
+
+  // expected_signal names the signal that resumes a "signal" wait. It is
+  // empty for a "timer" wait.
+  string expected_signal = 3;
+
+  // deadline_unix_ms is the wait deadline in Unix milliseconds. A value of 0
+  // means the wait has no deadline. A "timer" wait requires a positive value.
+  int64 deadline_unix_ms = 4;
+
+  // payload_schema optionally names the schema the resume payload must match.
+  string payload_schema = 5;
+}
+
+// ResumeInput carries the reason a suspended capability is being resumed.
+message ResumeInput {
+  // cause is "signal", "timer", or "deadline".
+  string cause = 1;
+
+  // signal_name names the signal that resumed a "signal" wait.
+  string signal_name = 2;
+
+  // delivery_id is the client-supplied idempotency key for the delivery. The
+  // same delivery may be presented more than once; capabilities must dedupe
+  // on it.
+  string delivery_id = 3;
+
+  // payload carries the signal payload. It is empty for timer and deadline
+  // resumes.
+  map<string, Value> payload = 4;
 }
 
 // HealthRequest is sent periodically by the runtime backend.

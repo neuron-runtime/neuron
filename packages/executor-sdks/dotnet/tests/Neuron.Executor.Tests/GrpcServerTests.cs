@@ -1,8 +1,11 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Grpc.Net.Client;
 using Neuron.Executor.Conversion;
 using Neuron.Executor.Protocol.V1;
+using ProtoResumeInput = Neuron.Executor.Protocol.V1.ResumeInput;
+using SdkSuspendOutcome = Neuron.Executor.SuspendOutcome;
 
 namespace Neuron.Executor.Tests;
 
@@ -167,6 +170,331 @@ public class GrpcServerTests : IAsyncLifetime
 
         Assert.False(response.Ready);
         Assert.Contains("backend down", response.Message);
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_OldClient_NoFeature_Returns_Normal_Result()
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult()),
+            Execute = (input, context, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Result = new Dictionary<string, object?>
+                {
+                    ["echo"] = input["value"],
+                    ["resume"] = context.Resume is not null,
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        var init = await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+        Assert.DoesNotContain(ExecutorConstants.SuspendFeature, init.Features);
+
+        var request = new ExecuteRequest();
+        request.Params["value"] = ValueConverter.ToValue("old-client");
+        var response = await client.ExecuteAsync(request);
+
+        Assert.Null(response.Suspend);
+        Assert.Empty(response.Error);
+        Assert.Equal("old-client", response.Result["echo"].StringValue);
+        Assert.False(response.Result["resume"].BoolValue);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Negotiated_Returns_Suspend_Outcome()
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Suspend = new SdkSuspendOutcome
+                {
+                    CorrelationKey = "corr-1",
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                    DeadlineUnixMs = 4242,
+                    PayloadSchema = "approval/v1",
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        var init = await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+        Assert.Contains(ExecutorConstants.SuspendFeature, init.Features);
+
+        var response = await client.ExecuteAsync(new ExecuteRequest());
+
+        Assert.Empty(response.Error);
+        Assert.NotNull(response.Suspend);
+        Assert.Equal("corr-1", response.Suspend.CorrelationKey);
+        Assert.Equal(ExecutorConstants.WaitTypeSignal, response.Suspend.WaitType);
+        Assert.Equal("approval", response.Suspend.ExpectedSignal);
+        Assert.Equal(4242, response.Suspend.DeadlineUnixMs);
+        Assert.Equal("approval/v1", response.Suspend.PayloadSchema);
+        Assert.Empty(response.Result);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Unnegotiated_Is_Rejected()
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult()),
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Suspend = new SdkSuspendOutcome
+                {
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        var init = await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+        Assert.DoesNotContain(ExecutorConstants.SuspendFeature, init.Features);
+
+        var response = await client.ExecuteAsync(new ExecuteRequest());
+
+        Assert.Null(response.Suspend);
+        Assert.Contains("unsupported_suspend_outcome", response.Error);
+        Assert.Empty(response.Result);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Signal_Resume_Uses_Stable_Logical_Operation_And_New_Attempt()
+    {
+        int calls = 0;
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, context, _) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    return new ValueTask<ExecutionResult>(new ExecutionResult
+                    {
+                        Suspend = new SdkSuspendOutcome
+                        {
+                            CorrelationKey = "corr-1",
+                            WaitType = ExecutorConstants.WaitTypeSignal,
+                            ExpectedSignal = "approval",
+                        },
+                    });
+                }
+
+                if (context.Resume is null)
+                {
+                    return new ValueTask<ExecutionResult>(
+                        new ExecutionResult { Error = "missing resume input" });
+                }
+
+                return new ValueTask<ExecutionResult>(new ExecutionResult
+                {
+                    Result = new Dictionary<string, object?>
+                    {
+                        ["cause"] = context.Resume.Cause,
+                        ["signal"] = context.Resume.SignalName,
+                        ["delivery"] = context.Resume.DeliveryId,
+                        ["by"] = context.Resume.Payload.TryGetValue("by", out var by) ? by : null,
+                        ["logical"] = context.LogicalOperationId,
+                        ["attempt"] = context.AttemptId,
+                    },
+                });
+            },
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+
+        var suspended = await client.ExecuteAsync(new ExecuteRequest
+        {
+            LogicalOperationId = "logical-1",
+            AttemptId = "attempt-1",
+        });
+        Assert.NotNull(suspended.Suspend);
+        Assert.Empty(suspended.Error);
+
+        var resumed = await client.ExecuteAsync(new ExecuteRequest
+        {
+            LogicalOperationId = "logical-1",
+            AttemptId = "attempt-2",
+            Resume = new ProtoResumeInput
+            {
+                Cause = ExecutorConstants.ResumeCauseSignal,
+                SignalName = "approval",
+                DeliveryId = "delivery-1",
+                Payload = { ["by"] = ValueConverter.ToValue("ada") },
+            },
+        });
+
+        Assert.Empty(resumed.Error);
+        Assert.Equal(ExecutorConstants.ResumeCauseSignal, resumed.Result["cause"].StringValue);
+        Assert.Equal("approval", resumed.Result["signal"].StringValue);
+        Assert.Equal("delivery-1", resumed.Result["delivery"].StringValue);
+        Assert.Equal("ada", resumed.Result["by"].StringValue);
+        Assert.Equal("logical-1", resumed.Result["logical"].StringValue);
+        Assert.Equal("attempt-2", resumed.Result["attempt"].StringValue);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Timer_Resume_Carries_Deadline()
+    {
+        int calls = 0;
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, context, _) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    return new ValueTask<ExecutionResult>(new ExecutionResult
+                    {
+                        Suspend = new SdkSuspendOutcome
+                        {
+                            WaitType = ExecutorConstants.WaitTypeTimer,
+                            DeadlineUnixMs = 1720000000000,
+                        },
+                    });
+                }
+
+                if (context.Resume is null)
+                {
+                    return new ValueTask<ExecutionResult>(
+                        new ExecutionResult { Error = "missing resume input" });
+                }
+
+                return new ValueTask<ExecutionResult>(new ExecutionResult
+                {
+                    Result = new Dictionary<string, object?>
+                    {
+                        ["cause"] = context.Resume.Cause,
+                    },
+                });
+            },
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+
+        var suspended = await client.ExecuteAsync(new ExecuteRequest
+        {
+            LogicalOperationId = "timer-op",
+        });
+        Assert.NotNull(suspended.Suspend);
+        Assert.Equal(ExecutorConstants.WaitTypeTimer, suspended.Suspend.WaitType);
+        Assert.True(suspended.Suspend.DeadlineUnixMs > 0);
+
+        var resumed = await client.ExecuteAsync(new ExecuteRequest
+        {
+            LogicalOperationId = "timer-op",
+            Resume = new ProtoResumeInput { Cause = ExecutorConstants.ResumeCauseTimer },
+        });
+
+        Assert.Empty(resumed.Error);
+        Assert.Equal(ExecutorConstants.ResumeCauseTimer, resumed.Result["cause"].StringValue);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Duplicate_Resume_Delivery_Is_Delivered()
+    {
+        var seen = new ConcurrentDictionary<string, int>();
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, context, _) =>
+            {
+                if (context.Resume is null)
+                {
+                    return new ValueTask<ExecutionResult>(
+                        new ExecutionResult { Error = "missing resume input" });
+                }
+
+                var count = seen.AddOrUpdate(context.Resume.DeliveryId, 1, (_, current) => current + 1);
+                return new ValueTask<ExecutionResult>(new ExecutionResult
+                {
+                    Result = new Dictionary<string, object?>
+                    {
+                        ["delivery"] = context.Resume.DeliveryId,
+                        ["count"] = count,
+                        ["logical"] = context.LogicalOperationId,
+                    },
+                });
+            },
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest
+        {
+            ProtocolVersion = ExecutorConstants.ProtocolV1,
+        });
+
+        ExecuteRequest Duplicate(string attempt) => new()
+        {
+            LogicalOperationId = "dup-op",
+            AttemptId = attempt,
+            Resume = new ProtoResumeInput
+            {
+                Cause = ExecutorConstants.ResumeCauseSignal,
+                SignalName = "approval",
+                DeliveryId = "duplicate-1",
+                Payload = { ["by"] = ValueConverter.ToValue("ada") },
+            },
+        };
+
+        var first = await client.ExecuteAsync(Duplicate("attempt-1"));
+        var second = await client.ExecuteAsync(Duplicate("attempt-2"));
+
+        Assert.Empty(first.Error);
+        Assert.Empty(second.Error);
+        Assert.Equal("duplicate-1", first.Result["delivery"].StringValue);
+        Assert.Equal("duplicate-1", second.Result["delivery"].StringValue);
+        Assert.Equal("dup-op", first.Result["logical"].StringValue);
+        Assert.Equal("dup-op", second.Result["logical"].StringValue);
+        Assert.Equal(1d, first.Result["count"].NumberValue);
+        Assert.Equal(2d, second.Result["count"].NumberValue);
+
         await RequestShutdownAsync(client);
     }
 

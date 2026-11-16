@@ -132,7 +132,12 @@ type InitializeResponse struct {
 	// requested version.
 	ProtocolVersion string `protobuf:"bytes,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 	// features declares what this capability runtime supports.
-	// Known values: "concurrent", "streaming", "cancellation".
+	// Known values: "concurrent", "streaming", "cancellation", "suspend".
+	//
+	// "suspend" opts this runtime into the additive suspend/resume extension.
+	// A runtime MUST advertise "suspend" here before it may return
+	// ExecuteResponse.suspend. A client that has not received this feature
+	// rejects a suspend outcome instead of treating it as an empty success.
 	Features []string `protobuf:"bytes,2,rep,name=features,proto3" json:"features,omitempty"`
 	// metadata carries capability runtime specific identity information.
 	Metadata      map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -209,14 +214,22 @@ type ExecuteRequest struct {
 	// attempt_id is the per-invocation attempt identifier. It enables
 	// idempotency handling in the capability runtime. Existing runtimes
 	// receive an empty string; this field is optional.
-	AttemptID string `protobuf:"bytes,5,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	AttemptId string `protobuf:"bytes,5,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
 	// logical_operation_id is a stable identifier for the logical operation
 	// being performed. It enables idempotency and diagnostics across
 	// execution restarts. Existing runtimes receive an empty string; this
 	// field is optional.
-	LogicalOperationID string `protobuf:"bytes,6,opt,name=logical_operation_id,json=logicalOperationId,proto3" json:"logical_operation_id,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	LogicalOperationId string `protobuf:"bytes,6,opt,name=logical_operation_id,json=logicalOperationId,proto3" json:"logical_operation_id,omitempty"`
+	// resume carries the input that resumes a suspended execution. It is an
+	// additive v1 extension: runtimes that predate it ignore the unknown field.
+	//
+	// A resumed invocation is a fresh Execute with the same logical_operation_id
+	// as the suspended invocation and a new attempt_id. Suspend is not a
+	// stackful continuation, so the capability must reconstruct its state from
+	// params and this resume input.
+	Resume        *ResumeInput `protobuf:"bytes,7,opt,name=resume,proto3" json:"resume,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecuteRequest) Reset() {
@@ -279,16 +292,23 @@ func (x *ExecuteRequest) GetCorrelationId() string {
 
 func (x *ExecuteRequest) GetAttemptId() string {
 	if x != nil {
-		return x.AttemptID
+		return x.AttemptId
 	}
 	return ""
 }
 
 func (x *ExecuteRequest) GetLogicalOperationId() string {
 	if x != nil {
-		return x.LogicalOperationID
+		return x.LogicalOperationId
 	}
 	return ""
+}
+
+func (x *ExecuteRequest) GetResume() *ResumeInput {
+	if x != nil {
+		return x.Resume
+	}
+	return nil
 }
 
 // ExecuteResponse carries the result of one execution.
@@ -302,7 +322,14 @@ type ExecuteResponse struct {
 	// treats a non-empty error as an execution failure.
 	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 	// metadata carries execution-specific metadata (e.g. timing, trace IDs).
-	Metadata      map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metadata map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// suspend, when set, asks the client to suspend this capability until a
+	// signal or timer fires. It is an additive v1 extension: a client that does
+	// not understand this field ignores the unknown field, so only a runtime
+	// that advertised the "suspend" feature may set it. A client that did not
+	// negotiate "suspend" rejects the outcome explicitly rather than treating
+	// the response as an empty success.
+	Suspend       *SuspendOutcome `protobuf:"bytes,4,opt,name=suspend,proto3" json:"suspend,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -358,6 +385,177 @@ func (x *ExecuteResponse) GetMetadata() map[string]string {
 	return nil
 }
 
+func (x *ExecuteResponse) GetSuspend() *SuspendOutcome {
+	if x != nil {
+		return x.Suspend
+	}
+	return nil
+}
+
+// SuspendOutcome describes why a capability suspended and what resumes it.
+//
+// Suspend is not a stackful continuation: the invocation ends, and a later
+// fresh Execute carries ResumeInput with the same logical operation ID.
+type SuspendOutcome struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// correlation_key identifies this wait. It is required when more than one
+	// concurrent wait on the same signal name can exist in one execution.
+	CorrelationKey string `protobuf:"bytes,1,opt,name=correlation_key,json=correlationKey,proto3" json:"correlation_key,omitempty"`
+	// wait_type is "signal" or "timer".
+	WaitType string `protobuf:"bytes,2,opt,name=wait_type,json=waitType,proto3" json:"wait_type,omitempty"`
+	// expected_signal names the signal that resumes a "signal" wait. It is
+	// empty for a "timer" wait.
+	ExpectedSignal string `protobuf:"bytes,3,opt,name=expected_signal,json=expectedSignal,proto3" json:"expected_signal,omitempty"`
+	// deadline_unix_ms is the wait deadline in Unix milliseconds. A value of 0
+	// means the wait has no deadline. A "timer" wait requires a positive value.
+	DeadlineUnixMs int64 `protobuf:"varint,4,opt,name=deadline_unix_ms,json=deadlineUnixMs,proto3" json:"deadline_unix_ms,omitempty"`
+	// payload_schema optionally names the schema the resume payload must match.
+	PayloadSchema string `protobuf:"bytes,5,opt,name=payload_schema,json=payloadSchema,proto3" json:"payload_schema,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SuspendOutcome) Reset() {
+	*x = SuspendOutcome{}
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SuspendOutcome) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SuspendOutcome) ProtoMessage() {}
+
+func (x *SuspendOutcome) ProtoReflect() protoreflect.Message {
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SuspendOutcome.ProtoReflect.Descriptor instead.
+func (*SuspendOutcome) Descriptor() ([]byte, []int) {
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SuspendOutcome) GetCorrelationKey() string {
+	if x != nil {
+		return x.CorrelationKey
+	}
+	return ""
+}
+
+func (x *SuspendOutcome) GetWaitType() string {
+	if x != nil {
+		return x.WaitType
+	}
+	return ""
+}
+
+func (x *SuspendOutcome) GetExpectedSignal() string {
+	if x != nil {
+		return x.ExpectedSignal
+	}
+	return ""
+}
+
+func (x *SuspendOutcome) GetDeadlineUnixMs() int64 {
+	if x != nil {
+		return x.DeadlineUnixMs
+	}
+	return 0
+}
+
+func (x *SuspendOutcome) GetPayloadSchema() string {
+	if x != nil {
+		return x.PayloadSchema
+	}
+	return ""
+}
+
+// ResumeInput carries the reason a suspended capability is being resumed.
+type ResumeInput struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// cause is "signal", "timer", or "deadline".
+	Cause string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	// signal_name names the signal that resumed a "signal" wait.
+	SignalName string `protobuf:"bytes,2,opt,name=signal_name,json=signalName,proto3" json:"signal_name,omitempty"`
+	// delivery_id is the client-supplied idempotency key for the delivery. The
+	// same delivery may be presented more than once; capabilities must dedupe
+	// on it.
+	DeliveryId string `protobuf:"bytes,3,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	// payload carries the signal payload. It is empty for timer and deadline
+	// resumes.
+	Payload       map[string]*Value `protobuf:"bytes,4,rep,name=payload,proto3" json:"payload,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeInput) Reset() {
+	*x = ResumeInput{}
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeInput) ProtoMessage() {}
+
+func (x *ResumeInput) ProtoReflect() protoreflect.Message {
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeInput.ProtoReflect.Descriptor instead.
+func (*ResumeInput) Descriptor() ([]byte, []int) {
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ResumeInput) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+func (x *ResumeInput) GetSignalName() string {
+	if x != nil {
+		return x.SignalName
+	}
+	return ""
+}
+
+func (x *ResumeInput) GetDeliveryId() string {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return ""
+}
+
+func (x *ResumeInput) GetPayload() map[string]*Value {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
 // HealthRequest is sent periodically by the runtime backend.
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -367,7 +565,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[4]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -379,7 +577,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[4]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -392,7 +590,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{4}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{6}
 }
 
 // HealthResponse reports capability runtime health status.
@@ -413,7 +611,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[5]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +623,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[5]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +636,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{5}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HealthResponse) GetReady() bool {
@@ -481,7 +679,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[6]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -493,7 +691,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[6]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -506,7 +704,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{6}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ShutdownRequest) GetTimeoutMs() int64 {
@@ -525,7 +723,7 @@ type ShutdownResponse struct {
 
 func (x *ShutdownResponse) Reset() {
 	*x = ShutdownResponse{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[7]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +735,7 @@ func (x *ShutdownResponse) String() string {
 func (*ShutdownResponse) ProtoMessage() {}
 
 func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[7]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +748,7 @@ func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{7}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{9}
 }
 
 // Value is a dynamic value that can represent any JSON-compatible type.
@@ -572,7 +770,7 @@ type Value struct {
 
 func (x *Value) Reset() {
 	*x = Value{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[8]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +782,7 @@ func (x *Value) String() string {
 func (*Value) ProtoMessage() {}
 
 func (x *Value) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[8]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +795,7 @@ func (x *Value) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Value.ProtoReflect.Descriptor instead.
 func (*Value) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{8}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Value) GetKind() isValue_Kind {
@@ -711,7 +909,7 @@ type ListValue struct {
 
 func (x *ListValue) Reset() {
 	*x = ListValue{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[9]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +921,7 @@ func (x *ListValue) String() string {
 func (*ListValue) ProtoMessage() {}
 
 func (x *ListValue) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[9]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +934,7 @@ func (x *ListValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListValue.ProtoReflect.Descriptor instead.
 func (*ListValue) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{9}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListValue) GetValues() []*Value {
@@ -756,7 +954,7 @@ type Struct struct {
 
 func (x *Struct) Reset() {
 	*x = Struct{}
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[10]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +966,7 @@ func (x *Struct) String() string {
 func (*Struct) ProtoMessage() {}
 
 func (x *Struct) ProtoReflect() protoreflect.Message {
-	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[10]
+	mi := &file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +979,7 @@ func (x *Struct) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Struct.ProtoReflect.Descriptor instead.
 func (*Struct) Descriptor() ([]byte, []int) {
-	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{10}
+	return file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Struct) GetFields() map[string]*Value {
@@ -808,26 +1006,47 @@ const file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDesc
 	"\bmetadata\x18\x03 \x03(\v2>.neuron.capability_runtime.v1.InitializeResponse.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xab\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbf\x03\n" +
 	"\x0eExecuteRequest\x12!\n" +
 	"\fexecution_id\x18\x01 \x01(\tR\vexecutionId\x12P\n" +
 	"\x06params\x18\x02 \x03(\v28.neuron.capability_runtime.v1.ExecuteRequest.ParamsEntryR\x06params\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x03 \x01(\x03R\ttimeoutMs\x12%\n" +
-	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\x1a^\n" +
+	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x05 \x01(\tR\tattemptId\x120\n" +
+	"\x14logical_operation_id\x18\x06 \x01(\tR\x12logicalOperationId\x12A\n" +
+	"\x06resume\x18\a \x01(\v2).neuron.capability_runtime.v1.ResumeInputR\x06resume\x1a^\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
-	"\x05value\x18\x02 \x01(\v2#.neuron.capability_runtime.v1.ValueR\x05value:\x028\x01\"\xf0\x02\n" +
+	"\x05value\x18\x02 \x01(\v2#.neuron.capability_runtime.v1.ValueR\x05value:\x028\x01\"\xb8\x03\n" +
 	"\x0fExecuteResponse\x12Q\n" +
 	"\x06result\x18\x01 \x03(\v29.neuron.capability_runtime.v1.ExecuteResponse.ResultEntryR\x06result\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12W\n" +
-	"\bmetadata\x18\x03 \x03(\v2;.neuron.capability_runtime.v1.ExecuteResponse.MetadataEntryR\bmetadata\x1a^\n" +
+	"\bmetadata\x18\x03 \x03(\v2;.neuron.capability_runtime.v1.ExecuteResponse.MetadataEntryR\bmetadata\x12F\n" +
+	"\asuspend\x18\x04 \x01(\v2,.neuron.capability_runtime.v1.SuspendOutcomeR\asuspend\x1a^\n" +
 	"\vResultEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
 	"\x05value\x18\x02 \x01(\v2#.neuron.capability_runtime.v1.ValueR\x05value:\x028\x01\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x0f\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd0\x01\n" +
+	"\x0eSuspendOutcome\x12'\n" +
+	"\x0fcorrelation_key\x18\x01 \x01(\tR\x0ecorrelationKey\x12\x1b\n" +
+	"\twait_type\x18\x02 \x01(\tR\bwaitType\x12'\n" +
+	"\x0fexpected_signal\x18\x03 \x01(\tR\x0eexpectedSignal\x12(\n" +
+	"\x10deadline_unix_ms\x18\x04 \x01(\x03R\x0edeadlineUnixMs\x12%\n" +
+	"\x0epayload_schema\x18\x05 \x01(\tR\rpayloadSchema\"\x98\x02\n" +
+	"\vResumeInput\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\x12\x1f\n" +
+	"\vsignal_name\x18\x02 \x01(\tR\n" +
+	"signalName\x12\x1f\n" +
+	"\vdelivery_id\x18\x03 \x01(\tR\n" +
+	"deliveryId\x12P\n" +
+	"\apayload\x18\x04 \x03(\v26.neuron.capability_runtime.v1.ResumeInput.PayloadEntryR\apayload\x1a_\n" +
+	"\fPayloadEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
+	"\x05value\x18\x02 \x01(\v2#.neuron.capability_runtime.v1.ValueR\x05value:\x028\x01\"\x0f\n" +
 	"\rHealthRequest\"\x94\x01\n" +
 	"\x0eHealthResponse\x12\x14\n" +
 	"\x05ready\x18\x01 \x01(\bR\x05ready\x12\x18\n" +
@@ -864,7 +1083,7 @@ const file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDesc
 	"Initialize\x12/.neuron.capability_runtime.v1.InitializeRequest\x1a0.neuron.capability_runtime.v1.InitializeResponse\x12f\n" +
 	"\aExecute\x12,.neuron.capability_runtime.v1.ExecuteRequest\x1a-.neuron.capability_runtime.v1.ExecuteResponse\x12c\n" +
 	"\x06Health\x12+.neuron.capability_runtime.v1.HealthRequest\x1a,.neuron.capability_runtime.v1.HealthResponse\x12i\n" +
-	"\bShutdown\x12-.neuron.capability_runtime.v1.ShutdownRequest\x1a..neuron.capability_runtime.v1.ShutdownResponseB[ZYgithub.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1b\x06proto3"
+	"\bShutdown\x12-.neuron.capability_runtime.v1.ShutdownRequest\x1a..neuron.capability_runtime.v1.ShutdownResponseByZYgithub.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1;capabilityruntimev1\xaa\x02\x1bNeuron.Executor.Protocol.V1b\x06proto3"
 
 var (
 	file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescOnce sync.Once
@@ -879,54 +1098,61 @@ func file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDescG
 }
 
 var file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_goTypes = []any{
 	(NullValue)(0),             // 0: neuron.capability_runtime.v1.NullValue
 	(*InitializeRequest)(nil),  // 1: neuron.capability_runtime.v1.InitializeRequest
 	(*InitializeResponse)(nil), // 2: neuron.capability_runtime.v1.InitializeResponse
 	(*ExecuteRequest)(nil),     // 3: neuron.capability_runtime.v1.ExecuteRequest
 	(*ExecuteResponse)(nil),    // 4: neuron.capability_runtime.v1.ExecuteResponse
-	(*HealthRequest)(nil),      // 5: neuron.capability_runtime.v1.HealthRequest
-	(*HealthResponse)(nil),     // 6: neuron.capability_runtime.v1.HealthResponse
-	(*ShutdownRequest)(nil),    // 7: neuron.capability_runtime.v1.ShutdownRequest
-	(*ShutdownResponse)(nil),   // 8: neuron.capability_runtime.v1.ShutdownResponse
-	(*Value)(nil),              // 9: neuron.capability_runtime.v1.Value
-	(*ListValue)(nil),          // 10: neuron.capability_runtime.v1.ListValue
-	(*Struct)(nil),             // 11: neuron.capability_runtime.v1.Struct
-	nil,                        // 12: neuron.capability_runtime.v1.InitializeRequest.MetadataEntry
-	nil,                        // 13: neuron.capability_runtime.v1.InitializeResponse.MetadataEntry
-	nil,                        // 14: neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry
-	nil,                        // 15: neuron.capability_runtime.v1.ExecuteResponse.ResultEntry
-	nil,                        // 16: neuron.capability_runtime.v1.ExecuteResponse.MetadataEntry
-	nil,                        // 17: neuron.capability_runtime.v1.Struct.FieldsEntry
+	(*SuspendOutcome)(nil),     // 5: neuron.capability_runtime.v1.SuspendOutcome
+	(*ResumeInput)(nil),        // 6: neuron.capability_runtime.v1.ResumeInput
+	(*HealthRequest)(nil),      // 7: neuron.capability_runtime.v1.HealthRequest
+	(*HealthResponse)(nil),     // 8: neuron.capability_runtime.v1.HealthResponse
+	(*ShutdownRequest)(nil),    // 9: neuron.capability_runtime.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),   // 10: neuron.capability_runtime.v1.ShutdownResponse
+	(*Value)(nil),              // 11: neuron.capability_runtime.v1.Value
+	(*ListValue)(nil),          // 12: neuron.capability_runtime.v1.ListValue
+	(*Struct)(nil),             // 13: neuron.capability_runtime.v1.Struct
+	nil,                        // 14: neuron.capability_runtime.v1.InitializeRequest.MetadataEntry
+	nil,                        // 15: neuron.capability_runtime.v1.InitializeResponse.MetadataEntry
+	nil,                        // 16: neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry
+	nil,                        // 17: neuron.capability_runtime.v1.ExecuteResponse.ResultEntry
+	nil,                        // 18: neuron.capability_runtime.v1.ExecuteResponse.MetadataEntry
+	nil,                        // 19: neuron.capability_runtime.v1.ResumeInput.PayloadEntry
+	nil,                        // 20: neuron.capability_runtime.v1.Struct.FieldsEntry
 }
 var file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_depIdxs = []int32{
-	12, // 0: neuron.capability_runtime.v1.InitializeRequest.metadata:type_name -> neuron.capability_runtime.v1.InitializeRequest.MetadataEntry
-	13, // 1: neuron.capability_runtime.v1.InitializeResponse.metadata:type_name -> neuron.capability_runtime.v1.InitializeResponse.MetadataEntry
-	14, // 2: neuron.capability_runtime.v1.ExecuteRequest.params:type_name -> neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry
-	15, // 3: neuron.capability_runtime.v1.ExecuteResponse.result:type_name -> neuron.capability_runtime.v1.ExecuteResponse.ResultEntry
-	16, // 4: neuron.capability_runtime.v1.ExecuteResponse.metadata:type_name -> neuron.capability_runtime.v1.ExecuteResponse.MetadataEntry
-	0,  // 5: neuron.capability_runtime.v1.Value.null_value:type_name -> neuron.capability_runtime.v1.NullValue
-	10, // 6: neuron.capability_runtime.v1.Value.list_value:type_name -> neuron.capability_runtime.v1.ListValue
-	11, // 7: neuron.capability_runtime.v1.Value.struct_value:type_name -> neuron.capability_runtime.v1.Struct
-	9,  // 8: neuron.capability_runtime.v1.ListValue.values:type_name -> neuron.capability_runtime.v1.Value
-	17, // 9: neuron.capability_runtime.v1.Struct.fields:type_name -> neuron.capability_runtime.v1.Struct.FieldsEntry
-	9,  // 10: neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry.value:type_name -> neuron.capability_runtime.v1.Value
-	9,  // 11: neuron.capability_runtime.v1.ExecuteResponse.ResultEntry.value:type_name -> neuron.capability_runtime.v1.Value
-	9,  // 12: neuron.capability_runtime.v1.Struct.FieldsEntry.value:type_name -> neuron.capability_runtime.v1.Value
-	1,  // 13: neuron.capability_runtime.v1.CapabilityRuntimeService.Initialize:input_type -> neuron.capability_runtime.v1.InitializeRequest
-	3,  // 14: neuron.capability_runtime.v1.CapabilityRuntimeService.Execute:input_type -> neuron.capability_runtime.v1.ExecuteRequest
-	5,  // 15: neuron.capability_runtime.v1.CapabilityRuntimeService.Health:input_type -> neuron.capability_runtime.v1.HealthRequest
-	7,  // 16: neuron.capability_runtime.v1.CapabilityRuntimeService.Shutdown:input_type -> neuron.capability_runtime.v1.ShutdownRequest
-	2,  // 17: neuron.capability_runtime.v1.CapabilityRuntimeService.Initialize:output_type -> neuron.capability_runtime.v1.InitializeResponse
-	4,  // 18: neuron.capability_runtime.v1.CapabilityRuntimeService.Execute:output_type -> neuron.capability_runtime.v1.ExecuteResponse
-	6,  // 19: neuron.capability_runtime.v1.CapabilityRuntimeService.Health:output_type -> neuron.capability_runtime.v1.HealthResponse
-	8,  // 20: neuron.capability_runtime.v1.CapabilityRuntimeService.Shutdown:output_type -> neuron.capability_runtime.v1.ShutdownResponse
-	17, // [17:21] is the sub-list for method output_type
-	13, // [13:17] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 0: neuron.capability_runtime.v1.InitializeRequest.metadata:type_name -> neuron.capability_runtime.v1.InitializeRequest.MetadataEntry
+	15, // 1: neuron.capability_runtime.v1.InitializeResponse.metadata:type_name -> neuron.capability_runtime.v1.InitializeResponse.MetadataEntry
+	16, // 2: neuron.capability_runtime.v1.ExecuteRequest.params:type_name -> neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry
+	6,  // 3: neuron.capability_runtime.v1.ExecuteRequest.resume:type_name -> neuron.capability_runtime.v1.ResumeInput
+	17, // 4: neuron.capability_runtime.v1.ExecuteResponse.result:type_name -> neuron.capability_runtime.v1.ExecuteResponse.ResultEntry
+	18, // 5: neuron.capability_runtime.v1.ExecuteResponse.metadata:type_name -> neuron.capability_runtime.v1.ExecuteResponse.MetadataEntry
+	5,  // 6: neuron.capability_runtime.v1.ExecuteResponse.suspend:type_name -> neuron.capability_runtime.v1.SuspendOutcome
+	19, // 7: neuron.capability_runtime.v1.ResumeInput.payload:type_name -> neuron.capability_runtime.v1.ResumeInput.PayloadEntry
+	0,  // 8: neuron.capability_runtime.v1.Value.null_value:type_name -> neuron.capability_runtime.v1.NullValue
+	12, // 9: neuron.capability_runtime.v1.Value.list_value:type_name -> neuron.capability_runtime.v1.ListValue
+	13, // 10: neuron.capability_runtime.v1.Value.struct_value:type_name -> neuron.capability_runtime.v1.Struct
+	11, // 11: neuron.capability_runtime.v1.ListValue.values:type_name -> neuron.capability_runtime.v1.Value
+	20, // 12: neuron.capability_runtime.v1.Struct.fields:type_name -> neuron.capability_runtime.v1.Struct.FieldsEntry
+	11, // 13: neuron.capability_runtime.v1.ExecuteRequest.ParamsEntry.value:type_name -> neuron.capability_runtime.v1.Value
+	11, // 14: neuron.capability_runtime.v1.ExecuteResponse.ResultEntry.value:type_name -> neuron.capability_runtime.v1.Value
+	11, // 15: neuron.capability_runtime.v1.ResumeInput.PayloadEntry.value:type_name -> neuron.capability_runtime.v1.Value
+	11, // 16: neuron.capability_runtime.v1.Struct.FieldsEntry.value:type_name -> neuron.capability_runtime.v1.Value
+	1,  // 17: neuron.capability_runtime.v1.CapabilityRuntimeService.Initialize:input_type -> neuron.capability_runtime.v1.InitializeRequest
+	3,  // 18: neuron.capability_runtime.v1.CapabilityRuntimeService.Execute:input_type -> neuron.capability_runtime.v1.ExecuteRequest
+	7,  // 19: neuron.capability_runtime.v1.CapabilityRuntimeService.Health:input_type -> neuron.capability_runtime.v1.HealthRequest
+	9,  // 20: neuron.capability_runtime.v1.CapabilityRuntimeService.Shutdown:input_type -> neuron.capability_runtime.v1.ShutdownRequest
+	2,  // 21: neuron.capability_runtime.v1.CapabilityRuntimeService.Initialize:output_type -> neuron.capability_runtime.v1.InitializeResponse
+	4,  // 22: neuron.capability_runtime.v1.CapabilityRuntimeService.Execute:output_type -> neuron.capability_runtime.v1.ExecuteResponse
+	8,  // 23: neuron.capability_runtime.v1.CapabilityRuntimeService.Health:output_type -> neuron.capability_runtime.v1.HealthResponse
+	10, // 24: neuron.capability_runtime.v1.CapabilityRuntimeService.Shutdown:output_type -> neuron.capability_runtime.v1.ShutdownResponse
+	21, // [21:25] is the sub-list for method output_type
+	17, // [17:21] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_init() }
@@ -934,7 +1160,7 @@ func file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_init() {
 	if File_shared_protocol_capabilityruntime_v1_capability_runtime_proto != nil {
 		return
 	}
-	file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[8].OneofWrappers = []any{
+	file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_msgTypes[10].OneofWrappers = []any{
 		(*Value_NullValue)(nil),
 		(*Value_NumberValue)(nil),
 		(*Value_StringValue)(nil),
@@ -948,7 +1174,7 @@ func file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDesc), len(file_shared_protocol_capabilityruntime_v1_capability_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   17,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -614,8 +614,8 @@ func (w *worker) execute(ctx context.Context, req *capabilityrt.Request) (*capab
 
 	execReq := &v1.ExecuteRequest{
 		Params:             make(map[string]*v1.Value, len(req.Params)),
-		AttemptID:          attemptID,
-		LogicalOperationID: logicalOpID,
+		AttemptId:          attemptID,
+		LogicalOperationId: logicalOpID,
 	}
 	for k, v := range req.Params {
 		execReq.Params[k] = makeProtoValue(v)

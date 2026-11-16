@@ -17,4 +17,16 @@ public sealed class ExecutionResult
     /// as an execution failure and surfaces it downstream.
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// When set, asks N.O.R.E. to suspend the capability instead of completing
+    /// it. <see cref="Result"/> must be empty and <see cref="Error"/> must be
+    /// unset when <see cref="Suspend"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// The handler must advertise <see cref="ExecutorConstants.SuspendFeature"/>
+    /// from Initialize. The SDK rejects an unnegotiated suspend explicitly
+    /// rather than treating it as an empty successful result.
+    /// </remarks>
+    public SuspendOutcome? Suspend { get; init; }
 }
