@@ -434,6 +434,157 @@ public class GrpcServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Suspend_Conflicting_Result_Is_Rejected()
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Result = new Dictionary<string, object?> { ["ok"] = true },
+                Suspend = new SdkSuspendOutcome
+                {
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+
+        var response = await client.ExecuteAsync(new ExecuteRequest());
+
+        Assert.Null(response.Suspend);
+        Assert.Contains("unsupported_suspend_outcome", response.Error);
+        Assert.Contains("must not be combined", response.Error);
+        Assert.Empty(response.Result);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Suspend_Conflicting_Error_Is_Rejected()
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Error = "boom",
+                Suspend = new SdkSuspendOutcome
+                {
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+
+        var response = await client.ExecuteAsync(new ExecuteRequest());
+
+        Assert.Null(response.Suspend);
+        Assert.Contains("unsupported_suspend_outcome", response.Error);
+        Assert.Contains("must not be combined", response.Error);
+        Assert.Empty(response.Result);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Theory]
+    [InlineData("bogus", "approval", 0, "wait_type must be")]
+    [InlineData("timer", "", 0, "deadline_unix_ms > 0")]
+    [InlineData("signal", "", 0, "non-empty expected_signal")]
+    public async Task Suspend_Malformed_Outcome_Is_Rejected(string waitType, string expectedSignal, long deadline, string message)
+    {
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) => new ValueTask<InitializeResult>(new InitializeResult
+            {
+                Features = new[] { ExecutorConstants.SuspendFeature },
+            }),
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Suspend = new SdkSuspendOutcome
+                {
+                    WaitType = waitType,
+                    ExpectedSignal = expectedSignal,
+                    DeadlineUnixMs = deadline,
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+        await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+
+        var response = await client.ExecuteAsync(new ExecuteRequest());
+
+        Assert.Null(response.Suspend);
+        Assert.Contains("unsupported_suspend_outcome", response.Error);
+        Assert.Contains(message, response.Error);
+        Assert.Empty(response.Result);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
+    public async Task Initialize_Feature_Negotiation_Is_Monotonic()
+    {
+        int initializeCalls = 0;
+        StartServer(new ExecutorHandler
+        {
+            Initialize = (_, _, _) =>
+            {
+                var advertiseSuspend = Interlocked.Increment(ref initializeCalls) == 2;
+                return new ValueTask<InitializeResult>(new InitializeResult
+                {
+                    Features = advertiseSuspend
+                        ? new[] { ExecutorConstants.SuspendFeature }
+                        : Array.Empty<string>(),
+                });
+            },
+            Execute = (_, _, _) => new ValueTask<ExecutionResult>(new ExecutionResult
+            {
+                Suspend = new SdkSuspendOutcome
+                {
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                },
+            }),
+        });
+
+        var client = await ConnectAsync();
+
+        var first = await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+        Assert.DoesNotContain(ExecutorConstants.SuspendFeature, first.Features);
+        var rejected = await client.ExecuteAsync(new ExecuteRequest());
+        Assert.Contains("unsupported_suspend_outcome", rejected.Error);
+
+        // Advertise suspend, then stop advertising it in a later Initialize.
+        var second = await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+        Assert.Contains(ExecutorConstants.SuspendFeature, second.Features);
+
+        // The response reflects the current declaration, but negotiation must
+        // remain monotonic (parity with the Go SDK): suspend is not revoked.
+        var third = await client.InitializeAsync(new InitializeRequest { ProtocolVersion = ExecutorConstants.ProtocolV1 });
+        Assert.DoesNotContain(ExecutorConstants.SuspendFeature, third.Features);
+
+        var suspended = await client.ExecuteAsync(new ExecuteRequest());
+        Assert.NotNull(suspended.Suspend);
+        Assert.Empty(suspended.Error);
+
+        await RequestShutdownAsync(client);
+    }
+
+    [Fact]
     public async Task Suspend_Duplicate_Resume_Delivery_Is_Delivered()
     {
         var seen = new ConcurrentDictionary<string, int>();

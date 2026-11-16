@@ -199,6 +199,32 @@ func invokeHandler(ctx context.Context, h Handler, req ExecutionRequest) (handle
 	return handlerOutcome{result: result}, nil
 }
 
+// validateSuspendOutcome rejects invalid or conflicting suspend outcomes
+// explicitly. A non-empty message describes the failure.
+func validateSuspendOutcome(outcome handlerOutcome) string {
+	if outcome.suspend == nil {
+		return ""
+	}
+	if len(outcome.result) != 0 || outcome.errText != "" {
+		return "unsupported_suspend_outcome: suspend must not be combined with a non-empty result or error"
+	}
+
+	switch outcome.suspend.WaitType {
+	case WaitTypeSignal:
+		if outcome.suspend.ExpectedSignal == "" {
+			return "unsupported_suspend_outcome: signal wait requires a non-empty expected_signal"
+		}
+	case WaitTypeTimer:
+		if outcome.suspend.DeadlineUnixMs <= 0 {
+			return "unsupported_suspend_outcome: timer wait requires deadline_unix_ms > 0"
+		}
+	default:
+		return "unsupported_suspend_outcome: wait_type must be \"signal\" or \"timer\""
+	}
+
+	return ""
+}
+
 // sdkServer is the internal gRPC server implementation that adapts the
 // Handler to the protobuf capability contract.
 type sdkServer struct {
@@ -216,10 +242,14 @@ func newGRPCServer(h Handler) *sdkServer {
 
 // setFeatures records the features negotiated by the Initialize handshake. A
 // later Execute uses them to decide whether a suspend outcome is allowed.
+// Features are monotonic across repeated Initialize calls so a previously
+// advertised capability (such as suspend) is not revoked.
 func (s *sdkServer) setFeatures(features []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.features = make(map[string]struct{}, len(features))
+	if s.features == nil {
+		s.features = make(map[string]struct{}, len(features))
+	}
 	for _, feature := range features {
 		s.features[feature] = struct{}{}
 	}
@@ -277,6 +307,10 @@ func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.Ex
 		return &v1.ExecuteResponse{
 			Error: err.Error(),
 		}, nil
+	}
+
+	if msg := validateSuspendOutcome(outcome); msg != "" {
+		return &v1.ExecuteResponse{Error: msg}, nil
 	}
 
 	if outcome.errText != "" {

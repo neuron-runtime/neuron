@@ -71,8 +71,9 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
         }
 
         // Remember the negotiated feature so Execute can reject a suspend the
-        // runtime did not opt into. Once advertised it stays advertised for the
-        // process lifetime, matching the Go SDK's feature set.
+        // runtime did not opt into. Suspend negotiation is monotonic across
+        // repeated Initialize calls so a previously advertised capability is
+        // not revoked.
         _suspendNegotiated |= result.Features.Contains(
             ExecutorConstants.SuspendFeature, StringComparer.Ordinal);
 
@@ -95,6 +96,12 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
         ExecutionResult result = await _handler.Execute!(
             input, executionContext, context.CancellationToken);
         ArgumentNullException.ThrowIfNull(result);
+
+        string? validationError = ValidateSuspendOutcome(result);
+        if (validationError is not null)
+        {
+            return new ExecuteResponse { Error = validationError };
+        }
 
         if (!string.IsNullOrEmpty(result.Error))
         {
@@ -122,6 +129,41 @@ internal sealed class GrpcExecutorService : CapabilityRuntimeService.CapabilityR
         }
 
         return response;
+    }
+
+    private static string? ValidateSuspendOutcome(ExecutionResult result)
+    {
+        if (result.Suspend is null)
+        {
+            return null;
+        }
+
+        if (result.Result.Count != 0 || !string.IsNullOrEmpty(result.Error))
+        {
+            return "unsupported_suspend_outcome: suspend must not be combined with a non-empty result or error";
+        }
+
+        if (result.Suspend.WaitType == ExecutorConstants.WaitTypeSignal)
+        {
+            if (string.IsNullOrEmpty(result.Suspend.ExpectedSignal))
+            {
+                return "unsupported_suspend_outcome: signal wait requires a non-empty expected_signal";
+            }
+
+            return null;
+        }
+
+        if (result.Suspend.WaitType == ExecutorConstants.WaitTypeTimer)
+        {
+            if (result.Suspend.DeadlineUnixMs <= 0)
+            {
+                return "unsupported_suspend_outcome: timer wait requires deadline_unix_ms > 0";
+            }
+
+            return null;
+        }
+
+        return "unsupported_suspend_outcome: wait_type must be \"signal\" or \"timer\"";
     }
 
     public override async Task<HealthResponse> Health(HealthRequest request, ServerCallContext context)

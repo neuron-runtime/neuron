@@ -469,3 +469,126 @@ func TestExecuteStdioRejectsSuspend(t *testing.T) {
 		t.Errorf("result = %v, want empty on rejection", resp.Result)
 	}
 }
+
+// TestConformanceRejectsInvalidSuspendOutcomes proves the SDK rejects a suspend
+// outcome that conflicts with a result/error or carries malformed wait fields,
+// through the same gRPC boundary a runtime uses.
+func TestConformanceRejectsInvalidSuspendOutcomes(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  map[string]any
+		errText string
+		suspend *SuspendOutcome
+		want    string
+	}{
+		{
+			name:    "result_and_suspend",
+			result:  map[string]any{"ok": true},
+			suspend: &SuspendOutcome{WaitType: WaitTypeSignal, ExpectedSignal: "s"},
+			want:    "must not be combined",
+		},
+		{
+			name:    "error_and_suspend",
+			errText: "boom",
+			suspend: &SuspendOutcome{WaitType: WaitTypeSignal, ExpectedSignal: "s"},
+			want:    "must not be combined",
+		},
+		{
+			name:    "invalid_wait_type",
+			suspend: &SuspendOutcome{WaitType: "bogus"},
+			want:    "wait_type must be",
+		},
+		{
+			name:    "timer_missing_deadline",
+			suspend: &SuspendOutcome{WaitType: WaitTypeTimer},
+			want:    "deadline_unix_ms > 0",
+		},
+		{
+			name:    "signal_missing_expected",
+			suspend: &SuspendOutcome{WaitType: WaitTypeSignal},
+			want:    "non-empty expected_signal",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := startConformanceServer(t, Handler{
+				Initialize: func(context.Context, string, map[string]string) (*InitializeResult, error) {
+					return &InitializeResult{Features: []string{v1.SuspendFeature}}, nil
+				},
+				ExecuteWithRequest: func(context.Context, ExecutionRequest) (*ExecutionResult, error) {
+					return &ExecutionResult{
+						Result:  tc.result,
+						Error:   tc.errText,
+						Suspend: tc.suspend,
+					}, nil
+				},
+			})
+
+			initialize(t, client)
+			resp := execute(t, client, &v1.ExecuteRequest{})
+
+			if resp.Suspend != nil {
+				t.Fatalf("suspend = %v, want nil for an invalid outcome", resp.Suspend)
+			}
+			if !strings.Contains(resp.Error, "unsupported_suspend_outcome") {
+				t.Errorf("error = %q, want an unsupported_suspend_outcome failure", resp.Error)
+			}
+			if !strings.Contains(resp.Error, tc.want) {
+				t.Errorf("error = %q, want %q", resp.Error, tc.want)
+			}
+			if len(resp.Result) != 0 {
+				t.Errorf("result = %v, want empty on rejection", resp.Result)
+			}
+		})
+	}
+}
+
+func TestInitializeFeatureNegotiationMonotonicAcrossCalls(t *testing.T) {
+	var features []string
+	server := newGRPCServer(Handler{
+		Initialize: func(context.Context, string, map[string]string) (*InitializeResult, error) {
+			return &InitializeResult{Features: features}, nil
+		},
+		Execute: func(context.Context, map[string]any) (map[string]any, error) {
+			return nil, nil
+		},
+	})
+
+	initialize := func() *v1.InitializeResponse {
+		t.Helper()
+		resp, err := server.Initialize(context.Background(), &v1.InitializeRequest{
+			ProtocolVersion: capabilityrt.ProtocolV1,
+		})
+		if err != nil {
+			t.Fatalf("Initialize: %v", err)
+		}
+		return resp
+	}
+
+	if resp := initialize(); v1.HasFeature(resp.Features, v1.SuspendFeature) {
+		t.Fatalf("features = %v, want no %q", resp.Features, v1.SuspendFeature)
+	}
+	if server.supportsSuspend() {
+		t.Fatal("supportsSuspend() = true after empty features, want false")
+	}
+
+	features = []string{v1.SuspendFeature}
+	if resp := initialize(); !v1.HasFeature(resp.Features, v1.SuspendFeature) {
+		t.Fatalf("features = %v, want %q", resp.Features, v1.SuspendFeature)
+	}
+	if !server.supportsSuspend() {
+		t.Fatal("supportsSuspend() = false after advertising suspend, want true")
+	}
+
+	// A later Initialize that no longer advertises suspend changes the response
+	// but must not revoke the previously negotiated capability (parity with
+	// .NET's monotonic negotiation).
+	features = nil
+	if resp := initialize(); v1.HasFeature(resp.Features, v1.SuspendFeature) {
+		t.Fatalf("features = %v, want no %q after revocation", resp.Features, v1.SuspendFeature)
+	}
+	if !server.supportsSuspend() {
+		t.Fatal("supportsSuspend() = false after repeated Initialize without suspend, want true")
+	}
+}

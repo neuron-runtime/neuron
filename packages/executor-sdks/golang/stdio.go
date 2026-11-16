@@ -30,6 +30,9 @@ func executeStdio(ctx context.Context, h Handler, req *capabilityrt.Request) cap
 	if err != nil {
 		return capabilityrt.Response{Result: map[string]any{}, Error: err.Error()}
 	}
+	if msg := validateSuspendOutcome(outcome); msg != "" {
+		return capabilityrt.Response{Result: map[string]any{}, Error: msg}
+	}
 	if outcome.errText != "" {
 		return capabilityrt.Response{Result: map[string]any{}, Error: outcome.errText}
 	}
