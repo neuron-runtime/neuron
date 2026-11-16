@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
@@ -221,6 +222,24 @@ func (nonTransactionalStore) Ping(context.Context) error { return nil }
 
 func (nonTransactionalStore) WithTx(context.Context, func(storage.Tx) error) error {
 	return errors.New("transactions are not supported")
+}
+
+func (nonTransactionalStore) WithTimer(context.Context, func(storage.TimerTx) error) error {
+	return errors.New("transactions are not supported")
+}
+
+func (nonTransactionalStore) PutTimer(context.Context, string, []byte) error { return nil }
+
+func (nonTransactionalStore) GetTimer(context.Context, string) ([]byte, error) {
+	return nil, storage.ErrTimerNotFound
+}
+
+func (nonTransactionalStore) DeleteTimer(context.Context, string) error { return nil }
+
+func (nonTransactionalStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
+
+func (nonTransactionalStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
 }
 
 func (nonTransactionalStore) Close() error { return nil }

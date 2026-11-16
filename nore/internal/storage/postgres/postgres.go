@@ -321,12 +321,12 @@ func compareAndSwap(ctx context.Context, q querier, key string, old, new []byte)
 // timerRecord represents a timer record stored as JSON bytes.
 // The JSON fields are: WaitUntil, CreatedAt, Owner, LeaseExpiresAt, WaitType, ExpectedSignal.
 type timerRecord struct {
-	WaitUntil       int64  `json:"waitUntil"`
-	CreatedAt       int64  `json:"createdAt"`
-	Owner           string `json:"owner"`
-	LeaseExpiresAt  int64  `json:"leaseExpiresAt"`
-	WaitType        string `json:"waitType"`
-	ExpectedSignal  string `json:"expectedSignal"`
+	WaitUntil      int64  `json:"waitUntil"`
+	CreatedAt      int64  `json:"createdAt"`
+	Owner          string `json:"owner"`
+	LeaseExpiresAt int64  `json:"leaseExpiresAt"`
+	WaitType       string `json:"waitType"`
+	ExpectedSignal string `json:"expectedSignal"`
 }
 
 // WithTimer runs fn inside one timer transaction. Returning an error from fn

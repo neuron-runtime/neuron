@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 )
@@ -39,6 +40,22 @@ func (f *metadataFaultStore) List(_ context.Context, prefix string) ([]string, e
 func (f *metadataFaultStore) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
 	return fn(f)
 }
+
+func (f *metadataFaultStore) WithTimer(ctx context.Context, fn func(storage.TimerTx) error) error {
+	return fn(f)
+}
+
+func (f *metadataFaultStore) PutTimer(context.Context, string, []byte) error { return nil }
+
+func (f *metadataFaultStore) GetTimer(context.Context, string) ([]byte, error) {
+	return nil, storage.ErrTimerNotFound
+}
+
+func (f *metadataFaultStore) DeleteTimer(context.Context, string) error { return nil }
+
+func (f *metadataFaultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
+
+func (f *metadataFaultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) { return false, nil }
 
 func (f *metadataFaultStore) Ping(context.Context) error { return nil }
 func (f *metadataFaultStore) Close() error               { return nil }

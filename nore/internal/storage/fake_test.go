@@ -161,6 +161,18 @@ func (s *fakeStore) WithTx(ctx context.Context, fn func(storage.Tx) error) error
 	return nil
 }
 
+// WithTimer implements storage.Store.
+func (s *fakeStore) WithTimer(ctx context.Context, fn func(storage.TimerTx) error) error {
+	if s.closed {
+		return storage.ErrClosed
+	}
+	tx := &fakeTx{kv: s.kv}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Ping implements storage.Store.
 func (s *fakeStore) Ping(ctx context.Context) error {
 	if s.closed {

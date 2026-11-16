@@ -208,11 +208,11 @@ func (s *MemoryStore) ClaimTimer(ctx context.Context, timerKey string, owner str
 		if err := json.Unmarshal(val, &rec); err != nil {
 			// If we can't parse, create a minimal record
 			rec = timerRecord{
-				WaitUntil:   0,
-				CreatedAt:   now,
-				Owner:       owner,
+				WaitUntil:      0,
+				CreatedAt:      now,
+				Owner:          owner,
 				LeaseExpiresAt: now + int64(lease.Seconds()),
-				WaitType:    "",
+				WaitType:       "",
 				ExpectedSignal: "",
 			}
 		} else {
@@ -228,11 +228,11 @@ func (s *MemoryStore) ClaimTimer(ctx context.Context, timerKey string, owner str
 	} else {
 		// Timer doesn't exist - create new with owner and lease
 		rec := timerRecord{
-			WaitUntil:       0,
-			CreatedAt:       now,
-			Owner:           owner,
-			LeaseExpiresAt:  now + int64(lease.Seconds()),
-			WaitType:        "",
+			WaitUntil:      0,
+			CreatedAt:      now,
+			Owner:          owner,
+			LeaseExpiresAt: now + int64(lease.Seconds()),
+			WaitType:       "",
 			ExpectedSignal: "",
 		}
 		newData, err := json.Marshal(rec)
@@ -360,12 +360,12 @@ func cloneMemoryData(src map[string][]byte) map[string][]byte {
 // timerRecord represents a timer record stored as JSON bytes.
 // The JSON fields are: WaitUntil, CreatedAt, Owner, LeaseExpiresAt, WaitType, ExpectedSignal.
 type timerRecord struct {
-	WaitUntil       int64   `json:"waitUntil"`
-	CreatedAt       int64   `json:"createdAt"`
-	Owner           string  `json:"owner"`
-	LeaseExpiresAt  int64   `json:"leaseExpiresAt"`
-	WaitType        string  `json:"waitType"`
-	ExpectedSignal  string  `json:"expectedSignal"`
+	WaitUntil      int64  `json:"waitUntil"`
+	CreatedAt      int64  `json:"createdAt"`
+	Owner          string `json:"owner"`
+	LeaseExpiresAt int64  `json:"leaseExpiresAt"`
+	WaitType       string `json:"waitType"`
+	ExpectedSignal string `json:"expectedSignal"`
 }
 
 // WithTimer runs fn inside one timer transaction. Returning an error from fn
@@ -485,11 +485,11 @@ func (t memoryTimerTx) ClaimTimer(ctx context.Context, timerKey string, owner st
 		if err := json.Unmarshal(val, &rec); err != nil {
 			// If we can't parse, create a minimal record
 			rec = timerRecord{
-				WaitUntil:   0,
-				CreatedAt:   now,
-				Owner:       owner,
+				WaitUntil:      0,
+				CreatedAt:      now,
+				Owner:          owner,
 				LeaseExpiresAt: now + int64(lease.Seconds()),
-				WaitType:    "",
+				WaitType:       "",
 				ExpectedSignal: "",
 			}
 		} else {
@@ -505,11 +505,11 @@ func (t memoryTimerTx) ClaimTimer(ctx context.Context, timerKey string, owner st
 	} else {
 		// Timer doesn't exist - create new with owner and lease
 		rec := timerRecord{
-			WaitUntil:       0,
-			CreatedAt:       now,
-			Owner:           owner,
-			LeaseExpiresAt:  now + int64(lease.Seconds()),
-			WaitType:        "",
+			WaitUntil:      0,
+			CreatedAt:      now,
+			Owner:          owner,
+			LeaseExpiresAt: now + int64(lease.Seconds()),
+			WaitType:       "",
 			ExpectedSignal: "",
 		}
 		newData, err := json.Marshal(rec)

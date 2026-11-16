@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
@@ -68,6 +69,24 @@ func (f *faultStore) WithTx(ctx context.Context, fn func(storage.Tx) error) erro
 	}
 	return fn(f)
 }
+
+func (f *faultStore) WithTimer(ctx context.Context, fn func(storage.TimerTx) error) error {
+	if f.withTx != nil {
+		// Reuse withTx hook only to allow injecting failures; fn receives f (which also satisfies TimerTx? no, faultStore does not implement TimerTx methods).
+		return f.withTx(ctx, func(storage.Tx) error { return fn(f) })
+	}
+	return fn(f)
+}
+
+func (f *faultStore) PutTimer(context.Context, string, []byte) error { return nil }
+
+func (f *faultStore) GetTimer(context.Context, string) ([]byte, error) { return nil, storage.ErrTimerNotFound }
+
+func (f *faultStore) DeleteTimer(context.Context, string) error { return nil }
+
+func (f *faultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
+
+func (f *faultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) { return false, nil }
 
 func (f *faultStore) Ping(context.Context) error { return nil }
 func (f *faultStore) Close() error               { return nil }
