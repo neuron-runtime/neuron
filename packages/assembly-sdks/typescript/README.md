@@ -367,7 +367,7 @@ Assembly()
 ```
 
 A capability that reads from **multiple** capabilities is **fan-in** and is now supported:
-each source gets its own binding with only that source's mappings; the execution
+each source gets its own binding with only its mappings; the execution
 engine merges inputs from all predecessors before dispatch. Route such inputs
 directly — no aggregation capability is needed.
 
@@ -379,6 +379,24 @@ const sys = Assembly().run([
   target.withParams({ x: a.result.x, y: b.result.y }),
 ]);
 // toManifest() succeeds; manifest carries two bindings from a and b respectively.
+```
+
+### Fan-in with shared target path
+
+When multiple sources contribute to the **same** target field path, the SDK now allows it — each source emits its own binding with its own mappings, and the runtime merges all inputs before dispatch. This enables patterns like collecting multiple independent results into a single capability:
+
+```ts
+const target = Capability("target").paramsSchema({ count: number() });
+const a = Capability("a").resultSchema({ value: number() });
+const b = Capability("b").resultSchema({ value: number() });
+
+const sys = Assembly().run([
+  a.withParams({}),
+  b.withParams({}),
+  target.withParams({ count: a.result.value + b.result.value }),
+]);
+// toManifest() succeeds with two bindings from a and b, both mapping to `count`.
+// The runtime merges both `value` inputs before the target executes.
 ```
 
 Fan-out still works as before — multiple capabilities reading from the same source
