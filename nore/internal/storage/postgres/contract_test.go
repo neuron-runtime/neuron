@@ -17,7 +17,7 @@ func TestContract(t *testing.T) {
 	if dsn == "" {
 		t.Skipf("postgres DSN not set (NEURON_TEST_POSTGRES_DSN or NEURON_DATABASE_URL); skipping contract tests")
 	}
-	storagetest.Run(t, func(t *testing.T) storage.Store {
+	open := func(t *testing.T) storage.Store {
 		t.Helper()
 		ctx := context.Background()
 		store, err := New(ctx, storage.Config{DSN: dsn})
@@ -28,5 +28,7 @@ func TestContract(t *testing.T) {
 			_ = store.Close()
 		})
 		return store
-	})
+	}
+	storagetest.Run(t, open)
+	storagetest.RunTimerContract(t, open)
 }

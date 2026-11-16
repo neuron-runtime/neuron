@@ -10,7 +10,7 @@ import (
 )
 
 func TestSQLiteStorageContract(t *testing.T) {
-	storagetest.Run(t, func(t *testing.T) storage.Store {
+	open := func(t *testing.T) storage.Store {
 		t.Helper()
 		store, err := sqlite.New(context.Background(), storage.Config{DataDir: t.TempDir()})
 		if err != nil {
@@ -18,5 +18,7 @@ func TestSQLiteStorageContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = store.Close() })
 		return store
-	})
+	}
+	storagetest.Run(t, open)
+	storagetest.RunTimerContract(t, open)
 }

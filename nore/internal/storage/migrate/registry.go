@@ -36,6 +36,24 @@ func KVStoreMigrations(drv Driver) []Migration {
 					return err
 				},
 			},
+			{
+				Version:     3,
+				Description: "add timer due time and lease index",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					stmts := []string{
+						`ALTER TABLE timer_store ADD COLUMN due_at TIMESTAMP`,
+						`ALTER TABLE timer_store ADD COLUMN owner TEXT`,
+						`ALTER TABLE timer_store ADD COLUMN lease_expires_at TIMESTAMP`,
+						`CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`,
+					}
+					for _, stmt := range stmts {
+						if _, err := tx.ExecContext(ctx, stmt); err != nil {
+							return err
+						}
+					}
+					return nil
+				},
+			},
 		}
 	case DriverPostgres:
 		return []Migration{
@@ -71,6 +89,24 @@ func KVStoreMigrations(drv Driver) []Migration {
 					}
 					_, err = tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_timer_store_key ON timer_store (key)`)
 					return err
+				},
+			},
+			{
+				Version:     3,
+				Description: "add timer due time and lease index",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					stmts := []string{
+						`ALTER TABLE timer_store ADD COLUMN due_at TIMESTAMPTZ`,
+						`ALTER TABLE timer_store ADD COLUMN owner TEXT`,
+						`ALTER TABLE timer_store ADD COLUMN lease_expires_at TIMESTAMPTZ`,
+						`CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`,
+					}
+					for _, stmt := range stmts {
+						if _, err := tx.ExecContext(ctx, stmt); err != nil {
+							return err
+						}
+					}
+					return nil
 				},
 			},
 		}

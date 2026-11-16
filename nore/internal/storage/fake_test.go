@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,43 +20,63 @@ import (
 // It is used in tests to prove that no storage-specific logic leaks into the
 // execution, event, instance, or assembly packages.
 type fakeStore struct {
-	// kv holds the key/value mappings. A key that does not exist in kv is
-	// considered "not found" by Get.
-	kv map[string][]byte
-	// closed tracks whether Close has been called.
+	mu     sync.Mutex
+	kv     map[string][]byte
+	timers map[string]fakeTimer
 	closed bool
+}
+
+type fakeTimer struct {
+	DueAt          time.Time
+	Owner          string
+	LeaseExpiresAt time.Time
+	Data           []byte
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		kv: make(map[string][]byte),
+		kv:     make(map[string][]byte),
+		timers: make(map[string]fakeTimer),
 	}
+}
+
+func (s *fakeStore) guard() error {
+	if s.closed {
+		return storage.ErrClosed
+	}
+	return nil
 }
 
 // Get implements storage.Store.
 func (s *fakeStore) Get(ctx context.Context, key string) ([]byte, error) {
-	if s.closed {
-		return nil, storage.ErrClosed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
 	}
 	if val, ok := s.kv[key]; ok {
-		return val, nil
+		return append([]byte(nil), val...), nil
 	}
 	return nil, storage.ErrNotFound
 }
 
 // Put implements storage.Store.
 func (s *fakeStore) Put(ctx context.Context, key string, data []byte) error {
-	if s.closed {
-		return storage.ErrClosed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
 	}
-	s.kv[key] = append(s.kv[key], data...)
+	s.kv[key] = append([]byte(nil), data...)
 	return nil
 }
 
 // Delete implements storage.Store.
 func (s *fakeStore) Delete(ctx context.Context, key string) error {
-	if s.closed {
-		return storage.ErrClosed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
 	}
 	delete(s.kv, key)
 	return nil
@@ -61,8 +84,10 @@ func (s *fakeStore) Delete(ctx context.Context, key string) error {
 
 // CompareAndSwap implements storage.Store.
 func (s *fakeStore) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
-	if s.closed {
-		return storage.ErrClosed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
 	}
 	current, ok := s.kv[key]
 	if !ok {
@@ -75,194 +100,261 @@ func (s *fakeStore) CompareAndSwap(ctx context.Context, key string, old, new []b
 	return nil
 }
 
-// PutTimer implements storage.Store.
-func (s *fakeStore) PutTimer(ctx context.Context, timerKey string, data []byte) error {
-	if s.closed {
-		return storage.ErrClosed
-	}
-	s.kv[timerKey] = append(s.kv[timerKey], data...)
-	return nil
-}
-
-// GetTimer implements storage.Store.
-func (s *fakeStore) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
-	if s.closed {
-		return nil, storage.ErrClosed
-	}
-	if val, ok := s.kv[timerKey]; ok {
-		return val, nil
-	}
-	return nil, storage.ErrTimerNotFound
-}
-
-// DeleteTimer implements storage.Store.
-func (s *fakeStore) DeleteTimer(ctx context.Context, timerKey string) error {
-	if s.closed {
-		return storage.ErrClosed
-	}
-	delete(s.kv, timerKey)
-	return nil
-}
-
-// ListTimers implements storage.Store.
-func (s *fakeStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
-	if s.closed {
-		return nil, storage.ErrClosed
-	}
-	var keys []string
-	for k := range s.kv {
-		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
-			keys = append(keys, k)
-		}
-	}
-	return keys, nil
-}
-
-// ClaimTimer implements storage.Store.
-func (s *fakeStore) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
-	if s.closed {
-		return false, storage.ErrClosed
-	}
-	if _, ok := s.kv[timerKey]; ok {
-		// Timer exists - update owner (lease is informational in fake)
-		return true, nil
-	}
-	// Timer doesn't exist - create new
-	s.kv[timerKey] = []byte("timer-claimed")
-	return true, nil
-}
-
 // List implements storage.Store.
 func (s *fakeStore) List(ctx context.Context, prefix string) ([]string, error) {
-	if s.closed {
-		return nil, storage.ErrClosed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
 	}
-	var keys []string
+	keys := make([]string, 0)
 	for k := range s.kv {
-		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
+		if strings.HasPrefix(k, prefix) {
 			keys = append(keys, k)
 		}
 	}
+	sort.Strings(keys)
 	return keys, nil
 }
 
 // WithTx implements storage.Store.
 func (s *fakeStore) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
-	if s.closed {
-		return storage.ErrClosed
-	}
-	tx := &fakeTx{kv: s.kv}
-	if err := fn(tx); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
 		return err
 	}
-	// The fake tx shares the same underlying map; commits are effectively
-	// no-ops since we don't track read/write sets. Real transaction semantics
-	// are tested against concrete backends.
-	return nil
+	tx := &fakeTx{store: s}
+	return fn(tx)
 }
 
 // WithTimer implements storage.Store.
 func (s *fakeStore) WithTimer(ctx context.Context, fn func(storage.TimerTx) error) error {
-	if s.closed {
-		return storage.ErrClosed
-	}
-	tx := &fakeTx{kv: s.kv}
-	if err := fn(tx); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
 		return err
 	}
+	tx := &fakeTx{store: s}
+	return fn(tx)
+}
+
+// PutTimer implements storage.Store.
+func (s *fakeStore) PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	s.timers[timerKey] = fakeTimer{DueAt: dueAt, Data: append([]byte(nil), data...)}
 	return nil
+}
+
+// GetTimer implements storage.Store.
+func (s *fakeStore) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
+	}
+	t, ok := s.timers[timerKey]
+	if !ok {
+		return nil, storage.ErrTimerNotFound
+	}
+	return append([]byte(nil), t.Data...), nil
+}
+
+// DeleteTimer implements storage.Store.
+func (s *fakeStore) DeleteTimer(ctx context.Context, timerKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return err
+	}
+	delete(s.timers, timerKey)
+	return nil
+}
+
+// ListTimers implements storage.Store.
+func (s *fakeStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0)
+	for k := range s.timers {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// ClaimTimer implements storage.Store.
+func (s *fakeStore) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	return claimFakeTimer(s.timers, timerKey, owner, lease, time.Now())
+}
+
+// DueTimers implements storage.Store.
+func (s *fakeStore) DueTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return nil, err
+	}
+	return dueFakeTimers(s.timers, now, limit), nil
 }
 
 // Ping implements storage.Store.
 func (s *fakeStore) Ping(ctx context.Context) error {
-	if s.closed {
-		return storage.ErrClosed
-	}
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.guard()
 }
 
 // Close implements storage.Store.
 func (s *fakeStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.closed = true
 	return nil
 }
 
 type fakeTx struct {
-	kv map[string][]byte
+	store *fakeStore
 }
 
-func (s *fakeTx) Get(ctx context.Context, key string) ([]byte, error) {
-	if val, ok := s.kv[key]; ok {
-		return val, nil
+func (t *fakeTx) Get(ctx context.Context, key string) ([]byte, error) {
+	if val, ok := t.store.kv[key]; ok {
+		return append([]byte(nil), val...), nil
 	}
 	return nil, storage.ErrNotFound
 }
 
-func (s *fakeTx) Put(ctx context.Context, key string, data []byte) error {
-	s.kv[key] = append(s.kv[key], data...)
+func (t *fakeTx) Put(ctx context.Context, key string, data []byte) error {
+	t.store.kv[key] = append([]byte(nil), data...)
 	return nil
 }
 
-func (s *fakeTx) Delete(ctx context.Context, key string) error {
-	delete(s.kv, key)
+func (t *fakeTx) Delete(ctx context.Context, key string) error {
+	delete(t.store.kv, key)
 	return nil
 }
 
-func (s *fakeTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
-	current, ok := s.kv[key]
+func (t *fakeTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	current, ok := t.store.kv[key]
 	if !ok {
 		return storage.ErrNotFound
 	}
 	if !bytes.Equal(current, old) {
 		return storage.ErrConflict
 	}
-	s.kv[key] = append([]byte(nil), new...)
+	t.store.kv[key] = append([]byte(nil), new...)
 	return nil
 }
 
-func (s *fakeTx) List(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	for k := range s.kv {
-		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
+func (t *fakeTx) List(ctx context.Context, prefix string) ([]string, error) {
+	keys := make([]string, 0)
+	for k := range t.store.kv {
+		if strings.HasPrefix(k, prefix) {
 			keys = append(keys, k)
 		}
 	}
+	sort.Strings(keys)
 	return keys, nil
 }
 
 func (t *fakeTx) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
-	if val, ok := t.kv[timerKey]; ok {
-		return val, nil
+	rec, ok := t.store.timers[timerKey]
+	if !ok {
+		return nil, storage.ErrTimerNotFound
 	}
-	return nil, storage.ErrTimerNotFound
+	return append([]byte(nil), rec.Data...), nil
 }
 
-func (t *fakeTx) PutTimer(ctx context.Context, timerKey string, data []byte) error {
-	t.kv[timerKey] = append(t.kv[timerKey], data...)
+func (t *fakeTx) PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error {
+	t.store.timers[timerKey] = fakeTimer{DueAt: dueAt, Data: append([]byte(nil), data...)}
 	return nil
 }
 
 func (t *fakeTx) DeleteTimer(ctx context.Context, timerKey string) error {
-	delete(t.kv, timerKey)
+	delete(t.store.timers, timerKey)
 	return nil
 }
 
 func (t *fakeTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	for k := range t.kv {
-		if len(k) >= len(prefix) && len(k) > 0 && k[:len(prefix)] == prefix {
+	keys := make([]string, 0)
+	for k := range t.store.timers {
+		if strings.HasPrefix(k, prefix) {
 			keys = append(keys, k)
 		}
 	}
+	sort.Strings(keys)
 	return keys, nil
 }
 
 func (t *fakeTx) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
-	if _, ok := t.kv[timerKey]; ok {
-		return true, nil
+	return claimFakeTimer(t.store.timers, timerKey, owner, lease, time.Now())
+}
+
+func (t *fakeTx) DueTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
+	return dueFakeTimers(t.store.timers, now, limit), nil
+}
+
+func claimFakeTimer(timers map[string]fakeTimer, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	rec, ok := timers[timerKey]
+	if !ok {
+		return false, nil
 	}
-	t.kv[timerKey] = []byte("timer-claimed")
+	if rec.DueAt.After(now) {
+		return false, nil
+	}
+	if rec.Owner != "" && !rec.LeaseExpiresAt.IsZero() && rec.LeaseExpiresAt.After(now) {
+		return false, nil
+	}
+	rec.Owner = owner
+	rec.LeaseExpiresAt = now.Add(lease)
+	timers[timerKey] = rec
 	return true, nil
+}
+
+func dueFakeTimers(timers map[string]fakeTimer, now time.Time, limit int) []storage.Timer {
+	if limit <= 0 {
+		return []storage.Timer{}
+	}
+	out := make([]storage.Timer, 0)
+	for key, rec := range timers {
+		if rec.DueAt.After(now) {
+			continue
+		}
+		if rec.Owner != "" && !rec.LeaseExpiresAt.IsZero() && rec.LeaseExpiresAt.After(now) {
+			continue
+		}
+		out = append(out, storage.Timer{
+			Key:            key,
+			DueAt:          rec.DueAt,
+			Owner:          rec.Owner,
+			LeaseExpiresAt: rec.LeaseExpiresAt,
+			Data:           append([]byte(nil), rec.Data...),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DueAt.Equal(out[j].DueAt) {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].DueAt.Before(out[j].DueAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 // TestFakeStoreProvesNoLeak verifies that the neutral storage contract works
@@ -389,7 +481,6 @@ func TestFakeStoreProvesNoLeak(t *testing.T) {
 		ctx := context.Background()
 
 		_ = execution.NewExecutionStore(store)
-		// Verify the type is correctly assigned
 		var _ storage.Store = store
 		key, _ := storage.Key("exec-test")
 		_ = store.Put(ctx, key, []byte("ok"))

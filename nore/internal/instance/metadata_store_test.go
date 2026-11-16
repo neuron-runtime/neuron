@@ -45,7 +45,7 @@ func (f *metadataFaultStore) WithTimer(ctx context.Context, fn func(storage.Time
 	return fn(f)
 }
 
-func (f *metadataFaultStore) PutTimer(context.Context, string, []byte) error { return nil }
+func (f *metadataFaultStore) PutTimer(context.Context, string, time.Time, []byte) error { return nil }
 
 func (f *metadataFaultStore) GetTimer(context.Context, string) ([]byte, error) {
 	return nil, storage.ErrTimerNotFound
@@ -55,7 +55,13 @@ func (f *metadataFaultStore) DeleteTimer(context.Context, string) error { return
 
 func (f *metadataFaultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
 
-func (f *metadataFaultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) { return false, nil }
+func (f *metadataFaultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (f *metadataFaultStore) DueTimers(context.Context, time.Time, int) ([]storage.Timer, error) {
+	return nil, nil
+}
 
 func (f *metadataFaultStore) Ping(context.Context) error { return nil }
 func (f *metadataFaultStore) Close() error               { return nil }

@@ -77,25 +77,41 @@ type Tx interface {
 	KV
 }
 
+// Timer is the durable, indexed timer substrate record. DueAt is the scheduling
+// time used for discovery; Owner and LeaseExpiresAt form the claim lease; Data
+// carries the opaque timer payload.
+type Timer struct {
+	Key            string
+	DueAt          time.Time
+	Owner          string
+	LeaseExpiresAt time.Time
+	Data           []byte
+}
+
 // TimerTx is a transaction surface for timer operations. Every operation on a
 // TimerTx participates in the timer transaction opened by Store.WithTimer.
+// TimerTx.KV addresses the main KV surface on every backend.
 type TimerTx interface {
 	KV
 
 	// GetTimer retrieves the data stored at the given timer key.
 	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
-	// PutTimer stores data at the given timer key. If the key already exists,
-	// the write is an overwrite (compare-and-swap with existing value).
-	PutTimer(ctx context.Context, timerKey string, data []byte) error
+	// PutTimer stores data at the given timer key with an explicit due time.
+	// If the key already exists, the write is an overwrite.
+	PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error
 	// DeleteTimer deletes the timer record at the given key.
 	DeleteTimer(ctx context.Context, timerKey string) error
 	// ListTimers returns all timer keys matching the given prefix.
 	ListTimers(ctx context.Context, prefix string) ([]string, error)
-	// ClaimTimer atomically claims a timer lease. Returns (claimed, error).
-	// If the timer key does not exist, it is created with the owner and lease.
-	// If the timer key already exists, the owner is updated and the lease is extended.
-	// The function returns true if the claim succeeded, false otherwise.
+	// ClaimTimer atomically claims a timer lease. It claims only when the timer
+	// exists, is due at or before now, and is unowned or its lease is expired.
+	// It returns (false, nil) for a missing timer, a not-yet-due timer, or a
+	// timer held by a live lease.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
+	// DueTimers returns at most limit due, unleased timers ordered by due time
+	// then key. A timer is due when due_at <= now and its lease is unowned or
+	// expired.
+	DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error)
 }
 
 // Store is the only storage type runtime components receive. It exposes plain
@@ -121,14 +137,12 @@ type Store interface {
 
 	// Timer operations for Phase 5 (signals, timers, and long-running execution).
 
-	// WithTimer runs fn inside one timer transaction. Returning an error from fn
-	// rolls the transaction back. WithTimer is analogous to WithTx but operates
-	// on the timer surface and provides a TimerTx bound to the timer KV surface.
+	// WithTimer runs fn inside one timer transaction over the main KV surface and
+	// the timer surface. Returning an error from fn rolls the transaction back.
 	WithTimer(ctx context.Context, fn func(TimerTx) error) error
 
-	// PutTimer stores data at the given timer key. If the key already exists,
-	// the write is an overwrite (compare-and-swap with existing value).
-	PutTimer(ctx context.Context, timerKey string, data []byte) error
+	// PutTimer stores data at the given timer key with an explicit due time.
+	PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error
 
 	// GetTimer retrieves the data stored at the given timer key.
 	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
@@ -139,11 +153,13 @@ type Store interface {
 	// ListTimers returns all timer keys matching the given prefix.
 	ListTimers(ctx context.Context, prefix string) ([]string, error)
 
-	// ClaimTimer atomically claims a timer lease. Returns (claimed, error).
-	// If the timer key does not exist, it is created with the owner and lease.
-	// If the timer key already exists, the owner is updated and the lease is extended.
-	// The function returns true if the claim succeeded, false otherwise.
+	// ClaimTimer atomically claims a timer lease. It claims only when the timer
+	// exists, is due at or before now, and is unowned or its lease is expired.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
+
+	// DueTimers returns at most limit due, unleased timers ordered by due time
+	// then key.
+	DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error)
 }
 
 // Config selects and configures a storage backend.

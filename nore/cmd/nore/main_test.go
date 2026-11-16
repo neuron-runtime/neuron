@@ -228,7 +228,7 @@ func (nonTransactionalStore) WithTimer(context.Context, func(storage.TimerTx) er
 	return errors.New("transactions are not supported")
 }
 
-func (nonTransactionalStore) PutTimer(context.Context, string, []byte) error { return nil }
+func (nonTransactionalStore) PutTimer(context.Context, string, time.Time, []byte) error { return nil }
 
 func (nonTransactionalStore) GetTimer(context.Context, string) ([]byte, error) {
 	return nil, storage.ErrTimerNotFound
@@ -240,6 +240,10 @@ func (nonTransactionalStore) ListTimers(context.Context, string) ([]string, erro
 
 func (nonTransactionalStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
 	return false, nil
+}
+
+func (nonTransactionalStore) DueTimers(context.Context, time.Time, int) ([]storage.Timer, error) {
+	return nil, nil
 }
 
 func (nonTransactionalStore) Close() error { return nil }

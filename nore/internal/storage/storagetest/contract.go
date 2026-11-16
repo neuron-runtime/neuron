@@ -460,3 +460,170 @@ func mustPrefix(t *testing.T, parts ...string) string {
 	}
 	return prefix
 }
+
+func RunTimerContract(t *testing.T, open func(t *testing.T) storage.Store) {
+	t.Helper()
+
+	t.Run("put/get/delete/list", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		now := time.Now().Truncate(time.Millisecond)
+		if err := store.PutTimer(ctx, "timers/a/1", now.Add(-time.Minute), []byte("one")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		if err := store.PutTimer(ctx, "timers/a/2", now, []byte("two")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		if err := store.PutTimer(ctx, "timers/b/1", now, []byte("other")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		if got, err := store.GetTimer(ctx, "timers/a/1"); err != nil || string(got) != "one" {
+			t.Fatalf("get timer = %q, %v; want one", got, err)
+		}
+		keys, err := store.ListTimers(ctx, "timers/a/")
+		if err != nil {
+			t.Fatalf("list timers: %v", err)
+		}
+		if len(keys) != 2 || keys[0] != "timers/a/1" || keys[1] != "timers/a/2" {
+			t.Fatalf("list timers = %v", keys)
+		}
+		if err := store.DeleteTimer(ctx, "timers/a/1"); err != nil {
+			t.Fatalf("delete timer: %v", err)
+		}
+		if _, err := store.GetTimer(ctx, "timers/a/1"); !errors.Is(err, storage.ErrTimerNotFound) {
+			t.Fatalf("get deleted timer = %v, want ErrTimerNotFound", err)
+		}
+	})
+
+	t.Run("due timers ordered and limited", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		base := time.Now().Add(-10 * time.Minute).Truncate(time.Millisecond)
+		now := base.Add(5 * time.Minute)
+		for _, tc := range []struct {
+			key  string
+			due  time.Time
+			data string
+		}{
+			{"timers/b", base.Add(1 * time.Minute), "b"},
+			{"timers/a", base.Add(1 * time.Minute), "a"},
+			{"timers/c", base.Add(2 * time.Minute), "c"},
+			{"timers/future", base.Add(10 * time.Minute), "future"},
+		} {
+			if err := store.PutTimer(ctx, tc.key, tc.due, []byte(tc.data)); err != nil {
+				t.Fatalf("put timer %s: %v", tc.key, err)
+			}
+		}
+		due, err := store.DueTimers(ctx, now, 10)
+		if err != nil {
+			t.Fatalf("due timers: %v", err)
+		}
+		if len(due) != 3 || due[0].Key != "timers/a" || due[1].Key != "timers/b" || due[2].Key != "timers/c" {
+			t.Fatalf("due timers = %#v", due)
+		}
+		if string(due[0].Data) != "a" || string(due[1].Data) != "b" {
+			t.Fatalf("due timer data mismatch: %#v", due[:2])
+		}
+		limited, err := store.DueTimers(ctx, now, 2)
+		if err != nil {
+			t.Fatalf("limited due timers: %v", err)
+		}
+		if len(limited) != 2 || limited[0].Key != "timers/a" || limited[1].Key != "timers/b" {
+			t.Fatalf("limited due timers = %#v", limited)
+		}
+	})
+
+	t.Run("claim respects due and live lease", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		now := time.Now()
+		due := now.Add(-time.Minute)
+
+		claimed, err := store.ClaimTimer(ctx, "missing", "w1", time.Minute)
+		if err != nil || claimed {
+			t.Fatalf("claim missing = %v, %v; want false,nil", claimed, err)
+		}
+
+		if err := store.PutTimer(ctx, "future", now.Add(time.Hour), []byte("x")); err != nil {
+			t.Fatalf("put future: %v", err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "future", "w1", time.Minute)
+		if err != nil || claimed {
+			t.Fatalf("claim future = %v, %v; want false,nil", claimed, err)
+		}
+
+		if err := store.PutTimer(ctx, "due", due, []byte("x")); err != nil {
+			t.Fatalf("put due: %v", err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "due", "w1", time.Hour)
+		if err != nil || !claimed {
+			t.Fatalf("claim due = %v, %v; want true,nil", claimed, err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "due", "w2", time.Hour)
+		if err != nil || claimed {
+			t.Fatalf("claim live lease = %v, %v; want false,nil", claimed, err)
+		}
+		dueTimers, err := store.DueTimers(ctx, time.Now(), 10)
+		if err != nil {
+			t.Fatalf("due timers after claim: %v", err)
+		}
+		for _, tm := range dueTimers {
+			if tm.Key == "due" {
+				t.Fatalf("live-lease timer returned by DueTimers: %#v", tm)
+			}
+		}
+
+		if err := store.PutTimer(ctx, "expired", due, []byte("x")); err != nil {
+			t.Fatalf("put expired: %v", err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "expired", "w1", time.Millisecond)
+		if err != nil || !claimed {
+			t.Fatalf("initial claim expired-case = %v, %v", claimed, err)
+		}
+		time.Sleep(15 * time.Millisecond)
+		claimed, err = store.ClaimTimer(ctx, "expired", "w2", time.Hour)
+		if err != nil || !claimed {
+			t.Fatalf("reclaim expired lease = %v, %v; want true,nil", claimed, err)
+		}
+	})
+
+	t.Run("timer tx is atomic with kv and timers", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		due := time.Now().Add(-time.Minute)
+		abort := errors.New("abort")
+		err := store.WithTimer(ctx, func(tx storage.TimerTx) error {
+			if err := tx.Put(ctx, "kv/key", []byte("v")); err != nil {
+				return err
+			}
+			if err := tx.PutTimer(ctx, "timers/rollback", due, []byte("t")); err != nil {
+				return err
+			}
+			return abort
+		})
+		if !errors.Is(err, abort) {
+			t.Fatalf("with timer err = %v, want abort", err)
+		}
+		if _, err := store.Get(ctx, "kv/key"); !errors.Is(err, storage.ErrNotFound) {
+			t.Fatalf("kv after rollback = %v, want ErrNotFound", err)
+		}
+		if _, err := store.GetTimer(ctx, "timers/rollback"); !errors.Is(err, storage.ErrTimerNotFound) {
+			t.Fatalf("timer after rollback = %v, want ErrTimerNotFound", err)
+		}
+
+		if err := store.WithTimer(ctx, func(tx storage.TimerTx) error {
+			if err := tx.Put(ctx, "kv/ok", []byte("v")); err != nil {
+				return err
+			}
+			return tx.PutTimer(ctx, "timers/ok", due, []byte("t"))
+		}); err != nil {
+			t.Fatalf("with timer commit: %v", err)
+		}
+		if _, err := store.Get(ctx, "kv/ok"); err != nil {
+			t.Fatalf("kv after commit: %v", err)
+		}
+		if _, err := store.GetTimer(ctx, "timers/ok"); err != nil {
+			t.Fatalf("timer after commit: %v", err)
+		}
+	})
+}
