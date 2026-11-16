@@ -66,6 +66,10 @@ type CapabilityExecutionState struct {
 	// may be re-attempted. Nil when the capability is not awaiting a retry.
 	NextAttemptAt *time.Time
 
+	// WaitUntil is the earliest time at which a waiting capability may be resumed.
+	// Nil when the capability is not awaiting a signal/timer/deadline wait.
+	WaitUntil *time.Time
+
 	// DispatchState tracks whether the capability has been dispatched
 	// and prevents duplicate dispatch. Values: "dispatched", "pending".
 	DispatchState string
@@ -307,6 +311,10 @@ func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) bool
 // It reports whether the state changed, for the same reason as
 // MarkCapabilityFailed: the engine can observe a stop after the execution has
 // already recorded an outcome for this capability, and must not overwrite it.
+//
+// If the capability is a join target, this also propagates the cancellation
+// to the join state so that any pending join involving this capability's
+// predecessors will be discarded (R3-23).
 func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -324,6 +332,12 @@ func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error
 		state.Error = reason.Error()
 	}
 	e.states[capabilityID] = state
+	// If this capability is a join target, propagate cancellation to join state
+	// so that any pending joins involving its predecessor bindings are discarded.
+	ji, isJoinTarget := e.joinState[capabilityID]
+	if isJoinTarget && ji != nil {
+		e.PropagateCancellationToJoins()
+	}
 	return true
 }
 
@@ -398,6 +412,11 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 			}
 			active++
 		case CapabilityWaiting:
+			if state.WaitUntil == nil || !state.WaitUntil.After(now) {
+				state.Status = CapabilityReady
+				e.states[capabilityID] = state
+				dispatch = append(dispatch, capabilityID)
+			}
 			active++
 		case CapabilityPending:
 			if e.recoverPendingLocked(capabilityID, &state) {
@@ -500,6 +519,34 @@ func (e *Execution) PropagateFailureToJoins() {
 				ji.FailedBindings = make(map[shared.ID]bool)
 			}
 			ji.FailedBindings[predecessor.BindingID] = true
+		}
+	}
+}
+
+// PropagateCancellationToJoins records which predecessor bindings of join targets
+// have been cancelled. This enforces the "cancelled predecessor discards the join"
+// semantics: if a required predecessor has been cancelled, the join cannot be
+// satisfied and buffered inputs are discarded. The caller must already hold e.mu
+// or ensure external synchronization.
+func (e *Execution) PropagateCancellationToJoins() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Blueprint == nil {
+		return
+	}
+	for capabilityID, node := range e.Blueprint.Nodes {
+		ji, isJoinTarget := e.joinState[capabilityID]
+		if !isJoinTarget || ji == nil {
+			continue
+		}
+		for _, predecessor := range node.Predecessors {
+			if ji.CancelledBindings != nil && ji.CancelledBindings[predecessor.BindingID] {
+				continue
+			}
+			if ji.CancelledBindings == nil {
+				ji.CancelledBindings = make(map[shared.ID]bool)
+			}
+			ji.CancelledBindings[predecessor.BindingID] = true
 		}
 	}
 }
@@ -736,6 +783,7 @@ type joinStateInfo struct {
 	CompletedBindings map[shared.ID]bool
 	PredecessorInputs map[shared.ID]map[string]any
 	FailedBindings    map[shared.ID]bool
+	CancelledBindings map[shared.ID]bool
 	Dispatched        bool
 }
 
@@ -744,6 +792,7 @@ func newJoinState() *joinStateInfo {
 		CompletedBindings: make(map[shared.ID]bool),
 		PredecessorInputs: make(map[shared.ID]map[string]any),
 		FailedBindings:    make(map[shared.ID]bool),
+		CancelledBindings: make(map[shared.ID]bool),
 	}
 }
 
@@ -754,6 +803,11 @@ func newJoinState() *joinStateInfo {
 // predecessor returns ready=true, so a target can never be dispatched twice even
 // if completion events arrive concurrently or more than once. A call made after
 // the target was dispatched returns false and contributes nothing further.
+//
+// If any predecessor binding has been cancelled, the join cannot be satisfied
+// and this call discards its input and returns ready=false. This implements
+// R3-23: cancellation with a pending join discards buffered inputs and the
+// join never fires.
 //
 // partialInput is the target params produced by this predecessor's binding
 // mappings. Contributions are merged in blueprint predecessor order (binding ID,
@@ -783,6 +837,15 @@ func (e *Execution) RecordJoinContribution(capabilityID shared.ID, bindingID sha
 	if ji.PredecessorInputs == nil {
 		ji.PredecessorInputs = make(map[shared.ID]map[string]any)
 	}
+	if ji.CancelledBindings == nil {
+		ji.CancelledBindings = make(map[shared.ID]bool)
+	}
+
+	// If any predecessor binding has been cancelled, the join cannot be
+	// satisfied. Discard this contribution and return ready=false.
+	if ji.CancelledBindings[bindingID] {
+		return false, nil, nil
+	}
 
 	ji.CompletedBindings[bindingID] = true
 	ji.PredecessorInputs[bindingID] = data.CanonicalMap(partialInput)
@@ -790,10 +853,24 @@ func (e *Execution) RecordJoinContribution(capabilityID shared.ID, bindingID sha
 	// Readiness is decided from the blueprint's predecessor set, not from the
 	// number of contributions received: a stray or unknown binding can never
 	// satisfy a join.
+	// However, if any predecessor is cancelled, the join cannot fire.
+	cancelledAny := false
 	for _, predecessor := range node.Predecessors {
+		if ji.CancelledBindings[predecessor.BindingID] {
+			cancelledAny = true
+			break
+		}
 		if !ji.CompletedBindings[predecessor.BindingID] {
 			return false, nil, nil
 		}
+	}
+	// If any predecessor was cancelled, discard the join and return ready=false.
+	if cancelledAny {
+		// Reset the just-set completion so the join can be retried if desired,
+		// but since the capability is cancelled, it won't help. We keep the
+		// state as-is to record the cancellation, but the join will never fire.
+		ji.Dispatched = true // Prevent further contributions
+		return false, nil, nil
 	}
 
 	ji.Dispatched = true

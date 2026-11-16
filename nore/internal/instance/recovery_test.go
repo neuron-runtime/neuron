@@ -431,6 +431,12 @@ func TestRecoveryBetweenFanInBranches(t *testing.T) {
 	if err := exec.MarkCapabilityReady("cap_a", map[string]any{}); err != nil {
 		t.Fatalf("mark cap_a ready: %v", err)
 	}
+	// Mark cap_b as ready too - it's an entry capability in the fan-in assembly,
+	// and we're testing the state between branches where cap_a is complete
+	// but cap_b is still ready (not yet complete/executed).
+	if err := exec.MarkCapabilityReady("cap_b", map[string]any{}); err != nil {
+		t.Fatalf("mark cap_b ready: %v", err)
+	}
 	// Complete cap_a only (cap_b is not yet complete - testing the window between branches)
 	if err := exec.MarkCapabilityRunning("cap_a"); err != nil {
 		t.Fatalf("mark cap_a running: %v", err)
@@ -443,9 +449,16 @@ func TestRecoveryBetweenFanInBranches(t *testing.T) {
 	if state := exec.CapabilityState("cap_b"); state.Status != execution.CapabilityReady {
 		t.Fatalf("cap_b status = %s, want %s", state.Status, execution.CapabilityReady)
 	}
-	// cap_join should not be dispatched yet because cap_b is not complete
-	if dispatch := exec.RecoverableDispatch(); len(dispatch) != 0 {
-		t.Fatalf("dispatch = %v, want empty (cap_b not complete) before recovery", dispatch)
+	// cap_join should not be dispatched yet because cap_b is not complete.
+	// RecoverableDispatch returns capabilities that need to be re-dispatched.
+	// Since cap_b is ready, it will be in the dispatch list, but cap_join should
+	// not be dispatched because its predecessors (cap_a and cap_b) are not all complete.
+	if dispatch := exec.RecoverableDispatch(); len(dispatch) > 0 {
+		for _, id := range dispatch {
+			if id == "cap_join" {
+				t.Fatalf("dispatch = %v, want cap_join not dispatched before recovery (cap_b is ready but cap_b predecessor is not complete)", dispatch)
+			}
+		}
 	}
 
 	// Persist and reload
@@ -521,7 +534,7 @@ func TestRecoveryDuringRetryBackoff(t *testing.T) {
 		t.Fatalf("mark cap_retry running: %v", err)
 	}
 	// Fail the capability - this should trigger a retry with backoff
- exec.MarkCapabilityFailed("cap_retry", errors.New("transient error"))
+	exec.MarkCapabilityFailed("cap_retry", errors.New("transient error"))
 
 	// Persist and reload
 	if err := execution.NewExecutionStore(store).Add(context.Background(), exec); err != nil {

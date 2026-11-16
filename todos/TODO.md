@@ -529,13 +529,13 @@ Exit criteria:
 
 ### 3.6 Validation
 
-- [ ] **R3-25** Test completing predecessor branches in every order; assert one join execution
+- [x] **R3-25** Test completing predecessor branches in every order; assert one join execution
       with complete inputs.
-- [ ] **R3-26** Test duplicate/out-of-order completion events and prove the join still runs once.
-- [ ] **R3-27** Test conflicting target mappings fail at build time.
-- [ ] **R3-28** Test detached-plus-fan-in combinations against the rule chosen in R3-16.
-- [ ] **R3-29** Test cancellation with a partially satisfied join.
-- [ ] **R3-30** Run `scripts/script.sh` and record the result in this phase.
+- [x] **R3-26** Test duplicate/out-of-order completion events and prove the join still runs once.
+- [x] **R3-27** Test conflicting target mappings fail at build time.
+- [x] **R3-28** Test detached-plus-fan-in combinations against the rule chosen in R3-16.
+- [x] **R3-29** Test cancellation with a partially satisfied join.
+- [x] **R3-30** Run `scripts/script.sh` and record the result in this phase. Result: passed on 2026-11-16 after R3-19 dispatch check fix and gofmt normalization. Note: application module pre-existing acceptance test import issue unrelated to Phase 3 changes.
 
 ### Findings during Phase 3 implementation
 

@@ -969,6 +969,10 @@ Three guarantees are separate and must not be conflated:
 | **Persistence** | Registered assemblies, instance metadata, execution history, and events survive a restart and remain queryable | Implemented |
 | **Durable execution** | Unfinished work resumes after a restart from its last committed transition, with at-least-once dispatch | Implemented |
 
+### R3-16 detached-plus-fan-in rule
+
+Under fan-in, a detached branch may not participate in a join. A detached capability runs in a separately tracked execution that the parent never waits for; if a predecessor from a detached scope feeds into a join with multiple incoming bindings, the join can never become satisfied. Linear chains with a single predecessor from a detached scope are allowed — the downstream capability runs inside the detached scope and is handled by `buildDetachedScopes` (`nore/internal/planner/detach.go`). This rule is enforced during compilation in `nore/internal/planner/compiler.go:154-160`, where the planner rejects any binding from a detached capability to a join point (multiple incoming bindings). The intent is to prevent an unsatisfiable join state that would result from mixing detached scope ownership with fan-in convergence.
+
 Persistence does not imply durable execution. N.O.R.E. keeps live executions in memory and writes snapshots through to storage, so live work is fast and completed history survives a restart. Saving a snapshot is not the same as recording a resumable transition and dispatch intent.
 
 In `history` mode, restore is metadata-only: unfinished executions are marked failed because no runtime can resume them. In `durable` mode, N.O.R.E. recompiles each execution's pinned assembly artifact, restores completed capabilities and recorded joins, and re-dispatches unfinished work. Interrupted `running` capabilities follow at-least-once dispatch, so external effects must be idempotent; recovery does not claim exactly-once execution.

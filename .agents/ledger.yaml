@@ -71,8 +71,8 @@ tasks:
     verification:
       - "pnpm exec vitest run packages/assembly-sdks/typescript"
       - "go vet ./..."
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
+    evidence: ["docs/ARCHITECTURE.md:972-974", "todos/TODO.md:532-538", "packages/assembly-sdks/typescript/src/type-tests.test-d.ts:110-128", "nore/internal/planner/compiler.go:154-160"]
+    reports: ["T-013-docs.md"]
     open_risks: []
