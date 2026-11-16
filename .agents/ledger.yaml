@@ -93,8 +93,9 @@ tasks:
     verification:
       - "git diff -- todos/TODO.md"
       - "grep -n 'R5-' todos/TODO.md (manual review that only verified items are checked)"
-    status: in_progress
-    lease: { owner: documenter, paths: ["todos/TODO.md"], task: T-019 }
+    status: done
+    lease: null
+    commit: e9af770
     evidence: []
     reports: []
     open_risks: []
@@ -120,11 +121,12 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/storage ./internal/execution ./internal/instance ./cmd/nore"
       - "gofmt -l nore/internal/storage/memory.go nore/internal/storage/postgres/postgres.go"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/storage/fake_test.go", "nore/internal/execution/store_failure_test.go", "nore/internal/instance/metadata_store_test.go", "nore/cmd/nore/main_test.go", "nore/internal/storage/memory.go", "nore/internal/storage/postgres/postgres.go"], task: T-020 }
-    evidence: []
-    reports: []
-    open_risks: ["Baseline: four test packages currently fail to build (missing ClaimTimer/WithTimer)."]
+    status: done
+    lease: null
+    commit: 0a4b42d
+    evidence: ["Commit 0a4b42d contains the fake/timer contract and gofmt fixes.", "T-020 agent reported targeted storage/execution/instance/cmd packages pass; coordinator will re-run before final validation."]
+    reports: ["T-020"]
+    open_risks: ["faultStore.WithTimer contains a stale explanatory comment claiming faultStore is not a TimerTx; reviewer should confirm or remove."]
 
   - id: T-021
     objective: "Make the acceptance harness stop idempotent and repair the hanging/vacuous R4-24 tests"
@@ -132,19 +134,19 @@ tasks:
     owner: bugfixer
     reviewer: reviewer
     signoff: [reviewer]
-    dependencies: []
+    dependencies: [T-033]
     acceptance:
       - "runtimeSession.stop is safe to call more than once and terminates"
       - "R4-24 SIGKILL tests assert real recovered state instead of placeholders"
       - "The acceptance package no longer hangs under the package timeout"
     verification:
       - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance"
-      - "cd application && GOWORK=off go test -count=1 -timeout 5m -run 'R4-24' ./internal/acceptance"
-    status: in_progress
+      - "cd application && GOWORK=off go test -count=1 -timeout 5m -run 'R4_24' ./internal/acceptance"
+    status: blocked
     lease: { owner: bugfixer, paths: ["application/internal/acceptance/**"], task: T-021 }
-    evidence: []
-    reports: []
-    open_risks: ["Baseline: TestR4_24SigKill* timed out after 10m due to non-idempotent stop."]
+    evidence: ["T-021 edits compile: `cd application && GOWORK=off go test -c -o /tmp/neuron-acceptance.test ./internal/acceptance` exited 0.", "Full acceptance run failed at TestMain build: worker.go:617-618 uses AttemptID/LogicalOperationID but regenerated pb.go exposes AttemptId/LogicalOperationId."]
+    reports: ["T-021"]
+    open_risks: ["Blocker T-033: `application` TestMain builds `nore`, which cannot compile against the regenerated protocol fields.", "`-run R4-24` is not a valid Go test selector; use `-run R4_24`."]
 
   - id: T-022
     objective: "Implement the storage timer substrate: due-time index, bounded due query, lease-aware claim, and backend parity"
@@ -201,11 +203,31 @@ tasks:
       - "cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./..."
       - "dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore"
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
-    status: in_progress
+    status: blocked
     lease: { owner: coder, paths: ["shared/protocol/capabilityruntime/**", "packages/executor-sdks/golang/**", "packages/executor-sdks/dotnet/**", "nore/internal/mechanism/conformance_test.go"], task: T-023 }
-    evidence: []
+    evidence: ["Go SDK: `cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./...` -> ok, 1.451s.", ".NET: `dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` -> 32 passed, 0 failed, 0 skipped.", "Protocol: `cd shared && GOWORK=off go build ./...` -> pass; generated via `PATH=\"$HOME/go/bin:$PATH\" ./scripts/generate-proto.sh`.", "Mechanism: `cd nore && GOWORK=off go test -count=1 ./internal/mechanism/...` -> FAIL (build): worker.go:617 unknown field AttemptID (have AttemptId); worker.go:618 unknown field LogicalOperationID (have LogicalOperationId)."]
+    reports: ["T-023"]
+    open_risks: ["Blocker T-033: process worker must use generated field names before T-023 can be committed or marked done.", "No TypeScript executor SDK exists; document as out of scope.", "Architect/security sign-off still required."]
+
+  - id: T-033
+    objective: "Repair the process worker's generated-protocol field names so the regenerated capability runtime protocol compiles"
+    scope: ["nore/internal/mechanism/process/worker.go"]
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [reviewer]
+    dependencies: [T-023]
+    acceptance:
+      - "worker.go references AttemptId and LogicalOperationId exactly as emitted by the repository protobuf generator"
+      - "The mechanism process package compiles"
+      - "No behavior change beyond field-name alignment"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
+    status: in_progress
+    lease: { owner: bugfixer, paths: ["nore/internal/mechanism/process/worker.go"], task: T-033 }
+    evidence: ["Build failure reproduced by T-023 and T-021: worker.go:617 unknown field AttemptID; worker.go:618 unknown field LogicalOperationID."]
     reports: []
-    open_risks: ["No TypeScript executor SDK exists; document as out of scope.", "Proto generation command must be confirmed."]
+    open_risks: ["T-026 will later own process adapter suspend/resume; this task is limited to the compile repair."]
+    commit: null
 
   - id: T-024
     objective: "Implement durable wait state, scheduler-owned wait transitions, recovery, deadlines, and snapshot v3"
