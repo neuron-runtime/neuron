@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
@@ -63,11 +64,11 @@ type Config struct {
 //
 // Concurrent startup is serialized per driver: PostgreSQL holds a session
 // advisory lock for the duration of the run while applying each migration in
-// its own transaction (preserving per-step atomicity); SQLite performs each
-// migration step inside a BEGIN IMMEDIATE transaction so concurrent starters
-// block until the step commits. Migration steps and their ADD COLUMN operations
-// are idempotent/duplicate-tolerant so a raced or partially-applied step can be
-// retried safely.
+// its own transaction (preserving per-step atomicity); SQLite applies each
+// migration step in its own transaction and retries bounded SQLITE_BUSY
+// contention so concurrent starters converge deterministically. Migration steps
+// and their ADD COLUMN operations are idempotent/duplicate-tolerant so a raced
+// or partially-applied step can be retried safely.
 func Migrate(ctx context.Context, cfg Config) error {
 	if cfg.DB == nil {
 		return fmt.Errorf("migrate: db is required")
@@ -155,18 +156,38 @@ func migratePostgres(ctx context.Context, cfg Config, table string, migs []Migra
 }
 
 func migrateSQLite(ctx context.Context, cfg Config, table string, migs []Migration) error {
-	// Each step runs in its own BEGIN IMMEDIATE transaction so concurrent
-	// starters serialize on the database write lock and per-step commits remain
-	// durable independently.
-	for {
+	// Each step runs in its own transaction and is idempotent/duplicate-tolerant.
+	// Concurrent starters may contend for the write lock (SQLITE_BUSY) depending
+	// on DSN/driver transaction mode; retry boundedly so they serialize without
+	// failing startup.
+	const maxBusyRetries = 50
+	for attempt := 0; attempt < maxBusyRetries; attempt++ {
 		applied, err := migrateSQLiteStep(ctx, cfg, table, migs)
-		if err != nil {
+		if err == nil {
+			if !applied {
+				return nil
+			}
+			attempt = -1
+			continue
+		}
+		if !isSQLiteBusy(err) || attempt == maxBusyRetries-1 {
 			return err
 		}
-		if !applied {
-			return nil
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("migrate: sqlite busy retry: %w", ctx.Err())
+		case <-time.After(20 * time.Millisecond):
 		}
 	}
+	return fmt.Errorf("migrate: sqlite busy: exceeded retries")
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sqlite_busy") || strings.Contains(msg, "database is locked")
 }
 
 func migrateSQLiteStep(ctx context.Context, cfg Config, table string, migs []Migration) (bool, error) {

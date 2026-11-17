@@ -42,15 +42,10 @@ func KVStoreMigrations(drv Driver) []Migration {
 			},
 			{
 				Version:     3,
-				Description: "add timer due time and lease index; backfill/quarantine legacy timer rows",
+				Description: "add timer due time and lease index",
 				Up: func(ctx context.Context, tx *sql.Tx) error {
-					// Idempotent/duplicate-tolerant column additions for concurrent or
-					// partially-applied startup retries. Legacy v2 rows (no scheduling
-					// metadata) are explicitly handled: due_at is backfilled from a
-					// safely parseable legacy JSON wait-until field when present; rows
-					// that cannot be parsed remain with due_at NULL and are therefore
-					// explicitly quarantined as non-schedulable (not silently
-					// discoverable by DueTimers/ClaimTimer). Inert-by-decision per ADR.
+					// v3 is immutable DDL-only (23aca93). Legacy row handling is
+					// performed by v4 so databases already recorded at v3 are repaired.
 					for _, stmt := range []string{
 						`ALTER TABLE timer_store ADD COLUMN due_at TIMESTAMP`,
 						`ALTER TABLE timer_store ADD COLUMN owner TEXT`,
@@ -60,10 +55,15 @@ func KVStoreMigrations(drv Driver) []Migration {
 							return err
 						}
 					}
-					if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`); err != nil {
-						return err
-					}
-					return backfillLegacyTimerDueAt(ctx, tx)
+					_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`)
+					return err
+				},
+			},
+			{
+				Version:     4,
+				Description: "backfill/quarantine legacy timer rows with null due_at",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					return backfillLegacyTimerDueAt(ctx, tx, DriverSQLite)
 				},
 			},
 		}
@@ -105,28 +105,29 @@ func KVStoreMigrations(drv Driver) []Migration {
 			},
 			{
 				Version:     3,
-				Description: "add timer due time and lease index; backfill/quarantine legacy timer rows",
+				Description: "add timer due time and lease index",
 				Up: func(ctx context.Context, tx *sql.Tx) error {
-					// Idempotent/duplicate-tolerant column additions for concurrent or
-					// partially-applied startup retries. Legacy v2 rows (no scheduling
-					// metadata) are explicitly handled: due_at is backfilled from a
-					// safely parseable legacy JSON wait-until field when present; rows
-					// that cannot be parsed remain with due_at NULL and are therefore
-					// explicitly quarantined as non-schedulable (not silently
-					// discoverable by DueTimers/ClaimTimer). Inert-by-decision per ADR.
-					for _, stmt := range []string{
+					// v3 is immutable DDL-only (23aca93). Legacy row handling is
+					// performed by v4 so databases already recorded at v3 are repaired.
+					stmts := []string{
 						`ALTER TABLE timer_store ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`,
 						`ALTER TABLE timer_store ADD COLUMN IF NOT EXISTS owner TEXT`,
 						`ALTER TABLE timer_store ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ`,
-					} {
+						`CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`,
+					}
+					for _, stmt := range stmts {
 						if _, err := tx.ExecContext(ctx, stmt); err != nil {
 							return err
 						}
 					}
-					if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_timer_store_due_key ON timer_store (due_at, key)`); err != nil {
-						return err
-					}
-					return backfillLegacyTimerDueAt(ctx, tx)
+					return nil
+				},
+			},
+			{
+				Version:     4,
+				Description: "backfill/quarantine legacy timer rows with null due_at",
+				Up: func(ctx context.Context, tx *sql.Tx) error {
+					return backfillLegacyTimerDueAt(ctx, tx, DriverPostgres)
 				},
 			},
 		}
@@ -140,8 +141,10 @@ func execAddColumnSQLite(ctx context.Context, tx *sql.Tx, stmt string) error {
 	if err == nil {
 		return nil
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "duplicate column name") || strings.Contains(msg, "already exists") {
+	// Narrow to SQLite's verified duplicate-column condition. Do not suppress
+	// unrelated "already exists" failures (e.g. other objects) so real DDL
+	// problems fail the migration.
+	if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return nil
 	}
 	return err
@@ -152,8 +155,13 @@ func execAddColumnSQLite(ctx context.Context, tx *sql.Tx, stmt string) error {
 // (waitUntil/wait_until/dueAt/due_at) from the stored value and sets due_at when
 // parseable. Rows with no parseable due time are left with due_at NULL, which
 // keeps them explicitly quarantined/non-schedulable (excluded from
-// DueTimers/ClaimTimer) rather than silently scheduled. This is idempotent.
-func backfillLegacyTimerDueAt(ctx context.Context, tx *sql.Tx) error {
+// DueTimers/ClaimTimer) rather than silently scheduled. This is idempotent and
+// only mutates rows where due_at IS NULL.
+//
+// SQL is driver-dispatched: PostgreSQL uses $1/$2 placeholders and SQLite uses ?.
+// A failing placeholder probe must never be executed inside a PostgreSQL
+// transaction because it aborts the transaction.
+func backfillLegacyTimerDueAt(ctx context.Context, tx *sql.Tx, drv Driver) error {
 	rows, err := tx.QueryContext(ctx, `SELECT key, value FROM timer_store WHERE due_at IS NULL`)
 	if err != nil {
 		return fmt.Errorf("migrate: list legacy timer rows: %w", err)
@@ -180,13 +188,13 @@ func backfillLegacyTimerDueAt(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("migrate: iterate legacy timer rows: %w", err)
 	}
 
+	updateSQL := `UPDATE timer_store SET due_at = ? WHERE key = ? AND due_at IS NULL`
+	if drv == DriverPostgres {
+		updateSQL = `UPDATE timer_store SET due_at = $1 WHERE key = $2 AND due_at IS NULL`
+	}
 	for _, u := range updates {
-		// Try both placeholder styles: migrations/backfill run inside a driver tx and
-		// this helper is shared by SQLite (?) and PostgreSQL ($n).
-		if _, err := tx.ExecContext(ctx, `UPDATE timer_store SET due_at = ? WHERE key = ? AND due_at IS NULL`, u.due.UTC(), u.key); err != nil {
-			if _, err2 := tx.ExecContext(ctx, `UPDATE timer_store SET due_at = $1 WHERE key = $2 AND due_at IS NULL`, u.due.UTC(), u.key); err2 != nil {
-				return fmt.Errorf("migrate: backfill legacy timer %q: %w", u.key, err2)
-			}
+		if _, err := tx.ExecContext(ctx, updateSQL, u.due.UTC(), u.key); err != nil {
+			return fmt.Errorf("migrate: backfill legacy timer %q: %w", u.key, err)
 		}
 	}
 	return nil
