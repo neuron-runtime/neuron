@@ -318,7 +318,7 @@ func (s *MemoryStore) DeleteTimerOwned(ctx context.Context, timerKey string, own
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return deleteTimerOwnedLocked(s.timers, timerKey, owner), nil
+	return deleteTimerOwnedLocked(s.timers, timerKey, owner)
 }
 
 func (s *MemoryStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
@@ -571,7 +571,7 @@ func (t memoryTimerTx) DeleteTimerOwned(ctx context.Context, timerKey string, ow
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	return deleteTimerOwnedLocked(t.store.timers, timerKey, owner), nil
+	return deleteTimerOwnedLocked(t.store.timers, timerKey, owner)
 }
 
 func (t memoryTimerTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
@@ -647,6 +647,9 @@ func putTimerLocked(timers map[string]timerEntry, timerKey string, dueAt time.Ti
 }
 
 func claimTimerLocked(timers map[string]timerEntry, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", ErrTimerOwnerEmpty)
+	}
 	entry, ok := timers[timerKey]
 	if !ok {
 		return false, nil
@@ -664,6 +667,9 @@ func claimTimerLocked(timers map[string]timerEntry, timerKey string, owner strin
 }
 
 func renewTimerLocked(timers map[string]timerEntry, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", ErrTimerOwnerEmpty)
+	}
 	entry, ok := timers[timerKey]
 	if !ok {
 		return false, nil
@@ -679,13 +685,16 @@ func renewTimerLocked(timers map[string]timerEntry, timerKey string, owner strin
 	return true, nil
 }
 
-func deleteTimerOwnedLocked(timers map[string]timerEntry, timerKey string, owner string) bool {
+func deleteTimerOwnedLocked(timers map[string]timerEntry, timerKey string, owner string) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", ErrTimerOwnerEmpty)
+	}
 	entry, ok := timers[timerKey]
 	if !ok || entry.Owner != owner {
-		return false
+		return false, nil
 	}
 	delete(timers, timerKey)
-	return true
+	return true, nil
 }
 
 func dueTimersLocked(timers map[string]timerEntry, now time.Time, limit int) []Timer {

@@ -500,18 +500,7 @@ func putTimer(ctx context.Context, q querier, key string, dueAt time.Time, data 
 		return fmt.Errorf("sqlite put timer %q rows affected: %w", key, err)
 	}
 	if affected == 0 {
-		var owner sql.NullString
-		var leaseExpires sql.NullTime
-		err := q.QueryRowContext(ctx, `SELECT owner, lease_expires_at FROM timer_store WHERE key = ?`, key).Scan(&owner, &leaseExpires)
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("sqlite put timer %q: conflict without row", key)
-		}
-		if err != nil {
-			return fmt.Errorf("sqlite put timer %q: %w", key, err)
-		}
-		if owner.Valid && owner.String != "" && leaseExpires.Valid && leaseExpires.Time.After(now) {
-			return fmt.Errorf("%w: %s", storage.ErrTimerLeased, key)
-		}
+		return fmt.Errorf("%w: %s", storage.ErrTimerLeased, key)
 	}
 	return nil
 }
@@ -537,6 +526,9 @@ func delTimer(ctx context.Context, q querier, key string) error {
 }
 
 func deleteTimerOwned(ctx context.Context, q querier, key string, owner string) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", storage.ErrTimerOwnerEmpty)
+	}
 	res, err := q.ExecContext(ctx, `DELETE FROM timer_store WHERE key = ? AND owner = ?`, key, owner)
 	if err != nil {
 		return false, fmt.Errorf("sqlite delete timer owned %q: %w", key, err)
@@ -549,6 +541,9 @@ func deleteTimerOwned(ctx context.Context, q querier, key string, owner string) 
 }
 
 func renewTimer(ctx context.Context, q querier, key string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", storage.ErrTimerOwnerEmpty)
+	}
 	leaseExpires := now.Add(lease).UTC()
 	res, err := q.ExecContext(ctx,
 		`UPDATE timer_store
@@ -594,6 +589,9 @@ func listTimers(ctx context.Context, q querier, prefix string) ([]string, error)
 }
 
 func claimTimer(ctx context.Context, q querier, key string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	if owner == "" {
+		return false, fmt.Errorf("%w", storage.ErrTimerOwnerEmpty)
+	}
 	leaseExpires := now.Add(lease).UTC()
 	res, err := q.ExecContext(ctx,
 		`UPDATE timer_store

@@ -53,6 +53,9 @@ var (
 	// ErrTimerLeased reports that a timer is held under a live lease and cannot
 	// be overwritten by PutTimer.
 	ErrTimerLeased = errors.New("storage: timer leased")
+	// ErrTimerOwnerEmpty reports that a timer claim/fencing owner is required and
+	// must be a non-empty, opaque per-claim token.
+	ErrTimerOwnerEmpty = errors.New("storage: timer owner required")
 )
 
 // KV is the key/value surface shared by a Store and a transaction. Keys are
@@ -116,11 +119,13 @@ type TimerTx interface {
 	ListTimers(ctx context.Context, prefix string) ([]string, error)
 	// ClaimTimer atomically claims a timer lease. It claims only when the timer
 	// exists, is due at or before now, and is unowned or its lease is expired.
-	// It returns (false, nil) for a missing timer, a not-yet-due timer, or a
-	// timer held by a live lease.
+	// Owner is an opaque per-claim fencing token and must be non-empty; an empty
+	// owner returns ErrTimerOwnerEmpty. It returns (false, nil) for a missing
+	// timer, a not-yet-due timer, or a timer held by a live lease.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 	// RenewTimer extends the lease only when the record exists, is owned by owner,
-	// and the lease is still live (not expired). It returns (false, nil) otherwise.
+	// and the lease is still live (not expired). Owner must be non-empty; an empty
+	// owner returns ErrTimerOwnerEmpty. It returns (false, nil) otherwise.
 	RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 	// DueTimers returns at most limit due, unleased timers ordered by due time
 	// then key. A timer is due when due_at <= now and its lease is unowned or
@@ -167,8 +172,9 @@ type Store interface {
 	DeleteTimer(ctx context.Context, timerKey string) error
 
 	// DeleteTimerOwned deletes the timer record only when it exists and is owned
-	// by owner. It returns (false, nil) when the timer is missing or owned by a
-	// different owner.
+	// by owner. Owner is an opaque per-claim fencing token and must be non-empty;
+	// an empty owner returns ErrTimerOwnerEmpty. It returns (false, nil) when the
+	// timer is missing or owned by a different owner.
 	DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error)
 
 	// ListTimers returns all timer keys matching the given prefix.
@@ -176,10 +182,14 @@ type Store interface {
 
 	// ClaimTimer atomically claims a timer lease. It claims only when the timer
 	// exists, is due at or before now, and is unowned or its lease is expired.
+	// Owner is an opaque per-claim fencing token and must be non-empty; an empty
+	// owner returns ErrTimerOwnerEmpty. It returns (false, nil) for a missing
+	// timer, a not-yet-due timer, or a timer held by a live lease.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 
 	// RenewTimer extends the lease only when the record exists, is owned by owner,
-	// and the lease is still live (not expired). It returns (false, nil) otherwise.
+	// and the lease is still live (not expired). Owner must be non-empty; an empty
+	// owner returns ErrTimerOwnerEmpty. It returns (false, nil) otherwise.
 	RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 
 	// DueTimers returns at most limit due, unleased timers ordered by due time
