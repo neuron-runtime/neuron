@@ -146,6 +146,9 @@ func (s *fakeStore) PutTimer(ctx context.Context, timerKey string, dueAt time.Ti
 	if err := s.guard(); err != nil {
 		return err
 	}
+	if rec, ok := s.timers[timerKey]; ok && rec.Owner != "" && !rec.LeaseExpiresAt.IsZero() && rec.LeaseExpiresAt.After(time.Now()) {
+		return storage.ErrTimerLeased
+	}
 	s.timers[timerKey] = fakeTimer{DueAt: dueAt, Data: append([]byte(nil), data...)}
 	return nil
 }
@@ -175,6 +178,21 @@ func (s *fakeStore) DeleteTimer(ctx context.Context, timerKey string) error {
 	return nil
 }
 
+// DeleteTimerOwned implements storage.Store.
+func (s *fakeStore) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	rec, ok := s.timers[timerKey]
+	if !ok || rec.Owner != owner {
+		return false, nil
+	}
+	delete(s.timers, timerKey)
+	return true, nil
+}
+
 // ListTimers implements storage.Store.
 func (s *fakeStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
 	s.mu.Lock()
@@ -200,6 +218,16 @@ func (s *fakeStore) ClaimTimer(ctx context.Context, timerKey string, owner strin
 		return false, err
 	}
 	return claimFakeTimer(s.timers, timerKey, owner, lease, time.Now())
+}
+
+// RenewTimer implements storage.Store.
+func (s *fakeStore) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	return renewFakeTimer(s.timers, timerKey, owner, lease, time.Now())
 }
 
 // DueTimers implements storage.Store.
@@ -280,6 +308,9 @@ func (t *fakeTx) GetTimer(ctx context.Context, timerKey string) ([]byte, error) 
 }
 
 func (t *fakeTx) PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error {
+	if rec, ok := t.store.timers[timerKey]; ok && rec.Owner != "" && !rec.LeaseExpiresAt.IsZero() && rec.LeaseExpiresAt.After(time.Now()) {
+		return storage.ErrTimerLeased
+	}
 	t.store.timers[timerKey] = fakeTimer{DueAt: dueAt, Data: append([]byte(nil), data...)}
 	return nil
 }
@@ -287,6 +318,15 @@ func (t *fakeTx) PutTimer(ctx context.Context, timerKey string, dueAt time.Time,
 func (t *fakeTx) DeleteTimer(ctx context.Context, timerKey string) error {
 	delete(t.store.timers, timerKey)
 	return nil
+}
+
+func (t *fakeTx) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	rec, ok := t.store.timers[timerKey]
+	if !ok || rec.Owner != owner {
+		return false, nil
+	}
+	delete(t.store.timers, timerKey)
+	return true, nil
 }
 
 func (t *fakeTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
@@ -302,6 +342,10 @@ func (t *fakeTx) ListTimers(ctx context.Context, prefix string) ([]string, error
 
 func (t *fakeTx) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
 	return claimFakeTimer(t.store.timers, timerKey, owner, lease, time.Now())
+}
+
+func (t *fakeTx) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	return renewFakeTimer(t.store.timers, timerKey, owner, lease, time.Now())
 }
 
 func (t *fakeTx) DueTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
@@ -320,6 +364,22 @@ func claimFakeTimer(timers map[string]fakeTimer, timerKey string, owner string, 
 		return false, nil
 	}
 	rec.Owner = owner
+	rec.LeaseExpiresAt = now.Add(lease)
+	timers[timerKey] = rec
+	return true, nil
+}
+
+func renewFakeTimer(timers map[string]fakeTimer, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	rec, ok := timers[timerKey]
+	if !ok {
+		return false, nil
+	}
+	if rec.Owner != owner {
+		return false, nil
+	}
+	if rec.Owner == "" || rec.LeaseExpiresAt.IsZero() || !rec.LeaseExpiresAt.After(now) {
+		return false, nil
+	}
 	rec.LeaseExpiresAt = now.Add(lease)
 	timers[timerKey] = rec
 	return true, nil

@@ -49,6 +49,10 @@ var (
 	// ErrTimerAlreadyExists reports that an insert-only write found an existing
 	// timer record.
 	ErrTimerAlreadyExists = errors.New("storage: timer already exists")
+
+	// ErrTimerLeased reports that a timer is held under a live lease and cannot
+	// be overwritten by PutTimer.
+	ErrTimerLeased = errors.New("storage: timer leased")
 )
 
 // KV is the key/value surface shared by a Store and a transaction. Keys are
@@ -97,10 +101,17 @@ type TimerTx interface {
 	// GetTimer retrieves the data stored at the given timer key.
 	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
 	// PutTimer stores data at the given timer key with an explicit due time.
-	// If the key already exists, the write is an overwrite.
+	// Overwriting an existing timer held under a live lease returns ErrTimerLeased.
+	// Re-putting an unleased or expired-lease timer is allowed and clears stale
+	// owner/lease.
 	PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error
-	// DeleteTimer deletes the timer record at the given key.
+	// DeleteTimer deletes the timer record at the given key. It is unfenced and
+	// intended for admin/cleanup; pollers should prefer DeleteTimerOwned.
 	DeleteTimer(ctx context.Context, timerKey string) error
+	// DeleteTimerOwned deletes the timer record only when it exists and is owned
+	// by owner. It returns (false, nil) when the timer is missing or owned by a
+	// different owner.
+	DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error)
 	// ListTimers returns all timer keys matching the given prefix.
 	ListTimers(ctx context.Context, prefix string) ([]string, error)
 	// ClaimTimer atomically claims a timer lease. It claims only when the timer
@@ -108,6 +119,9 @@ type TimerTx interface {
 	// It returns (false, nil) for a missing timer, a not-yet-due timer, or a
 	// timer held by a live lease.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
+	// RenewTimer extends the lease only when the record exists, is owned by owner,
+	// and the lease is still live (not expired). It returns (false, nil) otherwise.
+	RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 	// DueTimers returns at most limit due, unleased timers ordered by due time
 	// then key. A timer is due when due_at <= now and its lease is unowned or
 	// expired.
@@ -142,13 +156,20 @@ type Store interface {
 	WithTimer(ctx context.Context, fn func(TimerTx) error) error
 
 	// PutTimer stores data at the given timer key with an explicit due time.
+	// Overwriting an existing timer held under a live lease returns ErrTimerLeased.
 	PutTimer(ctx context.Context, timerKey string, dueAt time.Time, data []byte) error
 
 	// GetTimer retrieves the data stored at the given timer key.
 	GetTimer(ctx context.Context, timerKey string) ([]byte, error)
 
-	// DeleteTimer deletes the timer record at the given key.
+	// DeleteTimer deletes the timer record at the given key. It is unfenced and
+	// intended for admin/cleanup; pollers should prefer DeleteTimerOwned.
 	DeleteTimer(ctx context.Context, timerKey string) error
+
+	// DeleteTimerOwned deletes the timer record only when it exists and is owned
+	// by owner. It returns (false, nil) when the timer is missing or owned by a
+	// different owner.
+	DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error)
 
 	// ListTimers returns all timer keys matching the given prefix.
 	ListTimers(ctx context.Context, prefix string) ([]string, error)
@@ -156,6 +177,10 @@ type Store interface {
 	// ClaimTimer atomically claims a timer lease. It claims only when the timer
 	// exists, is due at or before now, and is unowned or its lease is expired.
 	ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
+
+	// RenewTimer extends the lease only when the record exists, is owned by owner,
+	// and the lease is still live (not expired). It returns (false, nil) otherwise.
+	RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error)
 
 	// DueTimers returns at most limit due, unleased timers ordered by due time
 	// then key.

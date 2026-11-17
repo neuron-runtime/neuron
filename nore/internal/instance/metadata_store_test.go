@@ -53,9 +53,17 @@ func (f *metadataFaultStore) GetTimer(context.Context, string) ([]byte, error) {
 
 func (f *metadataFaultStore) DeleteTimer(context.Context, string) error { return nil }
 
+func (f *metadataFaultStore) DeleteTimerOwned(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (f *metadataFaultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
 
 func (f *metadataFaultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (f *metadataFaultStore) RenewTimer(context.Context, string, string, time.Duration) (bool, error) {
 	return false, nil
 }
 

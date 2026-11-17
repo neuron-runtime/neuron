@@ -262,8 +262,7 @@ func (s *MemoryStore) PutTimer(ctx context.Context, timerKey string, dueAt time.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timers[timerKey] = timerEntry{DueAt: dueAt, Data: append([]byte(nil), data...)}
-	return nil
+	return putTimerLocked(s.timers, timerKey, dueAt, data, time.Now())
 }
 
 func (s *MemoryStore) GetTimer(ctx context.Context, timerKey string) ([]byte, error) {
@@ -305,6 +304,23 @@ func (s *MemoryStore) DeleteTimer(ctx context.Context, timerKey string) error {
 	return nil
 }
 
+func (s *MemoryStore) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return false, err
+	}
+	defer s.gate.EndRead()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return deleteTimerOwnedLocked(s.timers, timerKey, owner), nil
+}
+
 func (s *MemoryStore) ListTimers(ctx context.Context, prefix string) ([]string, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
@@ -337,6 +353,23 @@ func (s *MemoryStore) ClaimTimer(ctx context.Context, timerKey string, owner str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return claimTimerLocked(s.timers, timerKey, owner, lease, time.Now())
+}
+
+func (s *MemoryStore) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return false, err
+	}
+	defer s.gate.EndRead()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return renewTimerLocked(s.timers, timerKey, owner, lease, time.Now())
 }
 
 func (s *MemoryStore) DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error) {
@@ -523,8 +556,7 @@ func (t memoryTimerTx) PutTimer(ctx context.Context, timerKey string, dueAt time
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	t.store.timers[timerKey] = timerEntry{DueAt: dueAt, Data: append([]byte(nil), data...)}
-	return nil
+	return putTimerLocked(t.store.timers, timerKey, dueAt, data, time.Now())
 }
 
 func (t memoryTimerTx) DeleteTimer(ctx context.Context, timerKey string) error {
@@ -533,6 +565,13 @@ func (t memoryTimerTx) DeleteTimer(ctx context.Context, timerKey string) error {
 	}
 	delete(t.store.timers, timerKey)
 	return nil
+}
+
+func (t memoryTimerTx) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return deleteTimerOwnedLocked(t.store.timers, timerKey, owner), nil
 }
 
 func (t memoryTimerTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
@@ -547,6 +586,13 @@ func (t memoryTimerTx) ClaimTimer(ctx context.Context, timerKey string, owner st
 		return false, err
 	}
 	return claimTimerLocked(t.store.timers, timerKey, owner, lease, time.Now())
+}
+
+func (t memoryTimerTx) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return renewTimerLocked(t.store.timers, timerKey, owner, lease, time.Now())
 }
 
 func (t memoryTimerTx) DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error) {
@@ -592,6 +638,14 @@ func leaseLive(entry timerEntry, now time.Time) bool {
 	return entry.Owner != "" && !entry.LeaseExpiresAt.IsZero() && entry.LeaseExpiresAt.After(now)
 }
 
+func putTimerLocked(timers map[string]timerEntry, timerKey string, dueAt time.Time, data []byte, now time.Time) error {
+	if entry, ok := timers[timerKey]; ok && leaseLive(entry, now) {
+		return fmt.Errorf("%w: %s", ErrTimerLeased, timerKey)
+	}
+	timers[timerKey] = timerEntry{DueAt: dueAt, Data: append([]byte(nil), data...)}
+	return nil
+}
+
 func claimTimerLocked(timers map[string]timerEntry, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
 	entry, ok := timers[timerKey]
 	if !ok {
@@ -607,6 +661,31 @@ func claimTimerLocked(timers map[string]timerEntry, timerKey string, owner strin
 	entry.LeaseExpiresAt = now.Add(lease)
 	timers[timerKey] = entry
 	return true, nil
+}
+
+func renewTimerLocked(timers map[string]timerEntry, timerKey string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	entry, ok := timers[timerKey]
+	if !ok {
+		return false, nil
+	}
+	if entry.Owner != owner {
+		return false, nil
+	}
+	if !leaseLive(entry, now) {
+		return false, nil
+	}
+	entry.LeaseExpiresAt = now.Add(lease)
+	timers[timerKey] = entry
+	return true, nil
+}
+
+func deleteTimerOwnedLocked(timers map[string]timerEntry, timerKey string, owner string) bool {
+	entry, ok := timers[timerKey]
+	if !ok || entry.Owner != owner {
+		return false
+	}
+	delete(timers, timerKey)
+	return true
 }
 
 func dueTimersLocked(timers map[string]timerEntry, now time.Time, limit int) []Timer {

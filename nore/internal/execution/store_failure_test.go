@@ -85,9 +85,17 @@ func (f *faultStore) GetTimer(context.Context, string) ([]byte, error) {
 
 func (f *faultStore) DeleteTimer(context.Context, string) error { return nil }
 
+func (f *faultStore) DeleteTimerOwned(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (f *faultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
 
 func (f *faultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (f *faultStore) RenewTimer(context.Context, string, string, time.Duration) (bool, error) {
 	return false, nil
 }
 

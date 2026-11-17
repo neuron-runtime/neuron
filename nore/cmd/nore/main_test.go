@@ -236,9 +236,17 @@ func (nonTransactionalStore) GetTimer(context.Context, string) ([]byte, error) {
 
 func (nonTransactionalStore) DeleteTimer(context.Context, string) error { return nil }
 
+func (nonTransactionalStore) DeleteTimerOwned(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (nonTransactionalStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
 
 func (nonTransactionalStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (nonTransactionalStore) RenewTimer(context.Context, string, string, time.Duration) (bool, error) {
 	return false, nil
 }
 

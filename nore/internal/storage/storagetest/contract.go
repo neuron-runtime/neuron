@@ -587,6 +587,116 @@ func RunTimerContract(t *testing.T, open func(t *testing.T) storage.Store) {
 		}
 	})
 
+	t.Run("renew extends live owned lease", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		due := time.Now().Add(-time.Minute)
+
+		if err := store.PutTimer(ctx, "renew", due, []byte("x")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		claimed, err := store.ClaimTimer(ctx, "renew", "w1", 50*time.Millisecond)
+		if err != nil || !claimed {
+			t.Fatalf("claim = %v, %v; want true,nil", claimed, err)
+		}
+		ok, err := store.RenewTimer(ctx, "renew", "w1", time.Hour)
+		if err != nil || !ok {
+			t.Fatalf("renew = %v, %v; want true,nil", ok, err)
+		}
+		time.Sleep(80 * time.Millisecond)
+		claimed, err = store.ClaimTimer(ctx, "renew", "w2", time.Hour)
+		if err != nil || claimed {
+			t.Fatalf("claim after renew = %v, %v; want false,nil (lease should still be live)", claimed, err)
+		}
+		ok, err = store.RenewTimer(ctx, "renew", "w2", time.Hour)
+		if err != nil || ok {
+			t.Fatalf("renew wrong owner = %v, %v; want false,nil", ok, err)
+		}
+
+		ok, err = store.RenewTimer(ctx, "missing", "w1", time.Hour)
+		if err != nil || ok {
+			t.Fatalf("renew missing = %v, %v; want false,nil", ok, err)
+		}
+
+		if err := store.PutTimer(ctx, "expired-renew", due, []byte("x")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "expired-renew", "w1", time.Millisecond)
+		if err != nil || !claimed {
+			t.Fatalf("claim = %v, %v; want true,nil", claimed, err)
+		}
+		time.Sleep(15 * time.Millisecond)
+		ok, err = store.RenewTimer(ctx, "expired-renew", "w1", time.Hour)
+		if err != nil || ok {
+			t.Fatalf("renew expired lease = %v, %v; want false,nil", ok, err)
+		}
+	})
+
+	t.Run("delete owned and put lease fencing", func(t *testing.T) {
+		store := open(t)
+		ctx := context.Background()
+		due := time.Now().Add(-time.Minute)
+
+		ok, err := store.DeleteTimerOwned(ctx, "missing", "w1")
+		if err != nil || ok {
+			t.Fatalf("delete owned missing = %v, %v; want false,nil", ok, err)
+		}
+
+		if err := store.PutTimer(ctx, "owned", due, []byte("x")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		claimed, err := store.ClaimTimer(ctx, "owned", "w1", time.Hour)
+		if err != nil || !claimed {
+			t.Fatalf("claim = %v, %v; want true,nil", claimed, err)
+		}
+		ok, err = store.DeleteTimerOwned(ctx, "owned", "w2")
+		if err != nil || ok {
+			t.Fatalf("delete by wrong owner = %v, %v; want false,nil", ok, err)
+		}
+		if _, err := store.GetTimer(ctx, "owned"); err != nil {
+			t.Fatalf("timer removed by wrong owner: %v", err)
+		}
+		if err := store.PutTimer(ctx, "owned", due, []byte("y")); !errors.Is(err, storage.ErrTimerLeased) {
+			t.Fatalf("put over live lease = %v, want ErrTimerLeased", err)
+		}
+		ok, err = store.DeleteTimerOwned(ctx, "owned", "w1")
+		if err != nil || !ok {
+			t.Fatalf("delete by owner = %v, %v; want true,nil", ok, err)
+		}
+		if _, err := store.GetTimer(ctx, "owned"); !errors.Is(err, storage.ErrTimerNotFound) {
+			t.Fatalf("get after owner delete = %v, want ErrTimerNotFound", err)
+		}
+
+		if err := store.PutTimer(ctx, "stale", due, []byte("x")); err != nil {
+			t.Fatalf("put timer: %v", err)
+		}
+		claimed, err = store.ClaimTimer(ctx, "stale", "w1", time.Millisecond)
+		if err != nil || !claimed {
+			t.Fatalf("claim = %v, %v; want true,nil", claimed, err)
+		}
+		time.Sleep(15 * time.Millisecond)
+		if err := store.PutTimer(ctx, "stale", due.Add(-time.Minute), []byte("new")); err != nil {
+			t.Fatalf("put over expired lease: %v", err)
+		}
+		got, err := store.GetTimer(ctx, "stale")
+		if err != nil || string(got) != "new" {
+			t.Fatalf("get after expired re-put = %q, %v; want new", got, err)
+		}
+		// stale owner cleared: another worker can claim and delete-owned
+		claimed, err = store.ClaimTimer(ctx, "stale", "w2", time.Hour)
+		if err != nil || !claimed {
+			t.Fatalf("claim after expired re-put = %v, %v; want true,nil", claimed, err)
+		}
+		ok, err = store.DeleteTimerOwned(ctx, "stale", "w1")
+		if err != nil || ok {
+			t.Fatalf("stale owner delete = %v, %v; want false,nil", ok, err)
+		}
+		ok, err = store.DeleteTimerOwned(ctx, "stale", "w2")
+		if err != nil || !ok {
+			t.Fatalf("new owner delete = %v, %v; want true,nil", ok, err)
+		}
+	})
+
 	t.Run("timer tx is atomic with kv and timers", func(t *testing.T) {
 		store := open(t)
 		ctx := context.Background()

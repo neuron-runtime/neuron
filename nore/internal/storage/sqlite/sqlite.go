@@ -250,6 +250,17 @@ func (s *Store) DeleteTimer(ctx context.Context, timerKey string) error {
 	return delTimer(ctx, s.db, timerKey)
 }
 
+func (s *Store) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return false, err
+	}
+	defer s.gate.EndRead()
+	return deleteTimerOwned(ctx, s.db, timerKey, owner)
+}
+
 func (s *Store) ListTimers(ctx context.Context, prefix string) ([]string, error) {
 	if err := s.guard(); err != nil {
 		return nil, err
@@ -270,6 +281,17 @@ func (s *Store) ClaimTimer(ctx context.Context, timerKey string, owner string, l
 	}
 	defer s.gate.EndRead()
 	return claimTimer(ctx, s.db, timerKey, owner, lease, time.Now())
+}
+
+func (s *Store) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	if err := s.guard(); err != nil {
+		return false, err
+	}
+	if err := s.gate.BeginRead(); err != nil {
+		return false, err
+	}
+	defer s.gate.EndRead()
+	return renewTimer(ctx, s.db, timerKey, owner, lease, time.Now())
 }
 
 func (s *Store) DueTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
@@ -347,11 +369,17 @@ func (t timerTx) PutTimer(ctx context.Context, timerKey string, dueAt time.Time,
 func (t timerTx) DeleteTimer(ctx context.Context, timerKey string) error {
 	return delTimer(ctx, t.tx, timerKey)
 }
+func (t timerTx) DeleteTimerOwned(ctx context.Context, timerKey string, owner string) (bool, error) {
+	return deleteTimerOwned(ctx, t.tx, timerKey, owner)
+}
 func (t timerTx) ListTimers(ctx context.Context, prefix string) ([]string, error) {
 	return listTimers(ctx, t.tx, prefix)
 }
 func (t timerTx) ClaimTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
 	return claimTimer(ctx, t.tx, timerKey, owner, lease, time.Now())
+}
+func (t timerTx) RenewTimer(ctx context.Context, timerKey string, owner string, lease time.Duration) (bool, error) {
+	return renewTimer(ctx, t.tx, timerKey, owner, lease, time.Now())
 }
 func (t timerTx) DueTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
 	return dueTimers(ctx, t.tx, now, limit)
@@ -451,7 +479,8 @@ func escapeLike(s string) string {
 }
 
 func putTimer(ctx context.Context, q querier, key string, dueAt time.Time, data []byte) error {
-	_, err := q.ExecContext(ctx,
+	now := time.Now().UTC()
+	res, err := q.ExecContext(ctx,
 		`INSERT INTO timer_store (key, value, due_at, owner, lease_expires_at, created_at, updated_at)
 		 VALUES (?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		 ON CONFLICT(key) DO UPDATE SET
@@ -459,11 +488,30 @@ func putTimer(ctx context.Context, q querier, key string, dueAt time.Time, data 
 		   due_at = excluded.due_at,
 		   owner = NULL,
 		   lease_expires_at = NULL,
-		   updated_at = CURRENT_TIMESTAMP`,
-		key, data, dueAt.UTC(),
+		   updated_at = CURRENT_TIMESTAMP
+		 WHERE timer_store.owner IS NULL OR timer_store.owner = '' OR timer_store.lease_expires_at IS NULL OR timer_store.lease_expires_at <= ?`,
+		key, data, dueAt.UTC(), now,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite put timer %q: %w", key, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite put timer %q rows affected: %w", key, err)
+	}
+	if affected == 0 {
+		var owner sql.NullString
+		var leaseExpires sql.NullTime
+		err := q.QueryRowContext(ctx, `SELECT owner, lease_expires_at FROM timer_store WHERE key = ?`, key).Scan(&owner, &leaseExpires)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("sqlite put timer %q: conflict without row", key)
+		}
+		if err != nil {
+			return fmt.Errorf("sqlite put timer %q: %w", key, err)
+		}
+		if owner.Valid && owner.String != "" && leaseExpires.Valid && leaseExpires.Time.After(now) {
+			return fmt.Errorf("%w: %s", storage.ErrTimerLeased, key)
+		}
 	}
 	return nil
 }
@@ -486,6 +534,39 @@ func delTimer(ctx context.Context, q querier, key string) error {
 		return fmt.Errorf("sqlite delete timer %q: %w", key, err)
 	}
 	return nil
+}
+
+func deleteTimerOwned(ctx context.Context, q querier, key string, owner string) (bool, error) {
+	res, err := q.ExecContext(ctx, `DELETE FROM timer_store WHERE key = ? AND owner = ?`, key, owner)
+	if err != nil {
+		return false, fmt.Errorf("sqlite delete timer owned %q: %w", key, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("sqlite delete timer owned %q rows affected: %w", key, err)
+	}
+	return affected == 1, nil
+}
+
+func renewTimer(ctx context.Context, q querier, key string, owner string, lease time.Duration, now time.Time) (bool, error) {
+	leaseExpires := now.Add(lease).UTC()
+	res, err := q.ExecContext(ctx,
+		`UPDATE timer_store
+		    SET lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
+		  WHERE key = ?
+		    AND owner = ?
+		    AND lease_expires_at IS NOT NULL
+		    AND lease_expires_at > ?`,
+		leaseExpires, key, owner, now.UTC(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("sqlite renew timer %q: %w", key, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("sqlite renew timer %q rows affected: %w", key, err)
+	}
+	return affected == 1, nil
 }
 
 func listTimers(ctx context.Context, q querier, prefix string) ([]string, error) {
