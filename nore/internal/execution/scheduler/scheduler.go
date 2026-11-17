@@ -19,6 +19,8 @@ type Scheduler struct {
 	executions          contracts.ExecutionRepository
 	scopes              *executionmodel.ScopeRegistry
 	committer           contracts.TransitionCommitter
+	waitStore           WaitStore
+	pollConfig          TimerPollConfig
 	executionStarted    event.Subscription
 	capabilityCompleted event.Subscription
 	capabilityFailed    event.Subscription
@@ -39,6 +41,18 @@ func WithTransitionCommitter(committer contracts.TransitionCommitter) Option {
 	}
 }
 
+// WithWaitStore supplies the durable wait boundary and the due-timer poller
+// configuration. It is supplied only in durable mode. Without it, wait
+// transitions are refused and the poller is a no-op, so non-durable mode keeps
+// its existing event-driven behavior. A zero-valued config receives bounded
+// defaults; an invalid config is rejected when the scheduler is built.
+func WithWaitStore(store WaitStore, cfg TimerPollConfig) Option {
+	return func(s *Scheduler) {
+		s.waitStore = store
+		s.pollConfig = cfg
+	}
+}
+
 // New builds a scheduler that advances executions and owns their cancellable
 // scopes. Ownership lives here because advancing an execution and ending it are
 // the same responsibility: the scheduler binds a scope when an execution starts,
@@ -56,6 +70,13 @@ func New(bus contracts.EventBus, executions contracts.ExecutionRepository, scope
 		if opt != nil {
 			opt(s)
 		}
+	}
+	if s.waitStore != nil {
+		validated, err := s.pollConfig.validated()
+		if err != nil {
+			return nil, err
+		}
+		s.pollConfig = validated
 	}
 	started, err := bus.Subscribe(event.ExecutionStarted, 64)
 	if err != nil {

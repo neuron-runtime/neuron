@@ -360,6 +360,42 @@ func (s *ExecutionStore) loadFromStore(ctx context.Context, executionID shared.I
 	return exec, nil
 }
 
+// Reload returns a fresh copy of executionID read directly from durable storage,
+// bypassing the live memory cache. An idempotent wait replay writes nothing, so
+// the caller's in-memory Execution may already have been mutated; Reload is what
+// lets it restore durable state before attempting another transition.
+func (s *ExecutionStore) Reload(ctx context.Context, executionID shared.ID) (*Execution, error) {
+	return s.loadFromStore(ctx, executionID)
+}
+
+// GetSignalDelivery returns the durable delivery record for deliveryID, or
+// storage.ErrNotFound when it has not been recorded. The scheduler uses it to
+// recognize an idempotent replay before mutating an execution for a delivery
+// that was already accepted.
+func (s *ExecutionStore) GetSignalDelivery(ctx context.Context, executionID shared.ID, deliveryID string) (*SignalDelivery, error) {
+	key, err := SignalDeliveryKey(executionID, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.store.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var delivery SignalDelivery
+	if err := json.Unmarshal(data, &delivery); err != nil {
+		return nil, fmt.Errorf("decode signal delivery %s: %w", key, err)
+	}
+	return &delivery, nil
+}
+
+// DueWaitTimers returns at most limit due, unleased wait timers ordered by due
+// time then key, including timers whose due time passed while the process was
+// down. It is the discovery half of the scheduler's due-timer poller; the timer
+// substrate owns the due-time query so the poller never scans the timer space.
+func (s *ExecutionStore) DueWaitTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
+	return s.store.DueTimers(ctx, now, limit)
+}
+
 func (s *ExecutionStore) key(id shared.ID) (string, error) {
 	return storage.Key("executions", string(id))
 }

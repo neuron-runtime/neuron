@@ -226,7 +226,13 @@ func (e *Execution) resolveWaitLocked(capabilityID shared.ID, payload map[string
 	e.clearWaitMetadataLocked(&state)
 	state.Status = CapabilityReady
 	if payload != nil {
-		state.DeliveredPayload = data.CanonicalMap(payload)
+		canonical := data.CanonicalMap(payload)
+		state.DeliveredPayload = canonical
+		// The delivered payload is the capability's resume input. The engine
+		// reads Params(capabilityID) when it dispatches a ready capability, so
+		// storing the payload only on the wait state would resume the
+		// capability with its stale pre-wait input.
+		e.params[capabilityID] = canonical
 	}
 	e.states[capabilityID] = state
 	e.acquireWorkerLocked()
