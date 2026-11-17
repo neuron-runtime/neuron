@@ -438,11 +438,18 @@ func (e *Execution) SeedInitialParams(params map[string]any) {
 //
 // The returned IDs are sorted so replay is deterministic. The in-flight count is
 // rebuilt from the recovered states rather than trusted blindly, because it is
-// the scheduler's accounting for work that may no longer exist.
+// the scheduler's accounting for work that may no longer exist. The derived
+// execution status is re-derived at the end, so a fully waiting execution that
+// resumes elapsed work becomes running again while a non-due wait stays waiting.
+//
+// This method is single-shot per recovery: a capability already recorded as
+// ready is returned again if called twice. Exactly-once dispatch rests on the
+// scheduler calling it once inside its clear-intents/commit/publish sequence,
+// not on this method being idempotent.
 func (e *Execution) RecoverableDispatch() []shared.ID {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.status != StatusRunning || e.Blueprint == nil {
+	if (e.status != StatusRunning && e.status != StatusWaiting) || e.Blueprint == nil {
 		return nil
 	}
 
@@ -484,6 +491,7 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 	}
 	sort.Slice(dispatch, func(i, j int) bool { return dispatch[i] < dispatch[j] })
 	e.inFlight = active
+	e.refreshStatusLocked()
 	return dispatch
 }
 

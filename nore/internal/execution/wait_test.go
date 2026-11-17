@@ -289,6 +289,11 @@ func TestNilWaitUntilIsNeverDue(t *testing.T) {
 	if got := restored.InFlight(); got != 1 {
 		t.Errorf("in-flight = %d, want 1 (waiting capability not counted)", got)
 	}
+	// A nil WaitUntil is never due, so recovery cannot clear this wait and the
+	// derived status must track the resumed sibling rather than report waiting.
+	if got := restored.Status(); got != StatusRunning {
+		t.Errorf("status = %s, want %s with a runnable sibling revived", got, StatusRunning)
+	}
 }
 
 func TestRecoverableDispatchResumesOnlyElapsedTimeWaits(t *testing.T) {

@@ -136,7 +136,9 @@ type dispatchIntentResetter interface {
 // an ExecutionStarted event carrying the input recorded on the snapshot. A
 // running execution is reconciled: interrupted capabilities are returned to
 // ready, stale intents are discarded, the recovered state and its new intents
-// are committed together, and only then is the ready work announced.
+// are committed together, and only then is the ready work announced. A fully
+// waiting execution follows the same reconciliation: elapsed waits resume, and
+// a non-due wait is committed as still waiting with no work announced.
 //
 // Recovery runs before the scheduler and engine start, so publishing here only
 // fills their subscriptions; the work is processed as soon as they run.
@@ -157,12 +159,18 @@ func (s *Scheduler) RecoverExecution(ctx context.Context, execution *executionmo
 			event.ExecutionStartedPayload{Params: execution.InitialParams()},
 		))
 	}
-	if execution.Status() != executionmodel.StatusRunning {
+	if execution.Status() != executionmodel.StatusRunning && execution.Status() != executionmodel.StatusWaiting {
 		return nil
 	}
 
 	dispatch := execution.RecoverableDispatch()
-	if len(dispatch) == 0 && execution.InFlight() == 0 && execution.UnfinishedCapabilityCount() > 0 {
+	// A healthy wait legitimately has unfinished capabilities, no in-flight work
+	// and no immediate dispatch. Only fail when unfinished work is neither
+	// running nor legitimately waiting, using the authoritative wait list rather
+	// than the derived status so a stuck capability is still detected.
+	if len(dispatch) == 0 && execution.InFlight() == 0 &&
+		execution.UnfinishedCapabilityCount() > 0 &&
+		len(execution.WaitingCapabilities()) < execution.UnfinishedCapabilityCount() {
 		s.failExecution(ctx, execution.ID, fmt.Errorf("execution %s has unfinished capabilities but no recoverable work", execution.ID))
 		return nil
 	}
