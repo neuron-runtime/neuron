@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -138,16 +139,21 @@ func KVStoreMigrations(drv Driver) []Migration {
 
 func execAddColumnSQLite(ctx context.Context, tx *sql.Tx, stmt string) error {
 	_, err := tx.ExecContext(ctx, stmt)
-	if err == nil {
-		return nil
-	}
-	// Narrow to SQLite's verified duplicate-column condition. Do not suppress
-	// unrelated "already exists" failures (e.g. other objects) so real DDL
-	// problems fail the migration.
-	if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+	if isSQLiteDuplicateColumnError(err) {
 		return nil
 	}
 	return err
+}
+
+// isSQLiteDuplicateColumnError recognizes only SQLite's duplicate-column DDL
+// signal, which a retried/partially-applied ADD COLUMN can legitimately emit.
+// A generic "already exists" match is deliberately avoided: it would also
+// swallow unrelated object-creation failures and hide real migration defects.
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
 
 // backfillLegacyTimerDueAt explicitly handles pre-v3 timer rows that have no
@@ -188,16 +194,23 @@ func backfillLegacyTimerDueAt(ctx context.Context, tx *sql.Tx, drv Driver) error
 		return fmt.Errorf("migrate: iterate legacy timer rows: %w", err)
 	}
 
-	updateSQL := `UPDATE timer_store SET due_at = ? WHERE key = ? AND due_at IS NULL`
-	if drv == DriverPostgres {
-		updateSQL = `UPDATE timer_store SET due_at = $1 WHERE key = $2 AND due_at IS NULL`
-	}
+	updateSQL := legacyBackfillUpdateSQL(drv)
 	for _, u := range updates {
 		if _, err := tx.ExecContext(ctx, updateSQL, u.due.UTC(), u.key); err != nil {
 			return fmt.Errorf("migrate: backfill legacy timer %q: %w", u.key, err)
 		}
 	}
 	return nil
+}
+
+// legacyBackfillUpdateSQL returns the driver-specific parameterized update.
+// PostgreSQL must use $n only: a failing ? probe inside a migration
+// transaction would abort it and poison every subsequent statement.
+func legacyBackfillUpdateSQL(drv Driver) string {
+	if drv == DriverPostgres {
+		return `UPDATE timer_store SET due_at = $1 WHERE key = $2 AND due_at IS NULL`
+	}
+	return `UPDATE timer_store SET due_at = ? WHERE key = ? AND due_at IS NULL`
 }
 
 func parseLegacyTimerDueAt(value []byte) (time.Time, bool) {
@@ -221,12 +234,19 @@ func parseLegacyTimerDueAt(value []byte) (time.Time, bool) {
 				}
 			}
 		case float64:
-			// Treat as unix milliseconds if large, else seconds.
+			// JSON numbers decode as float64. Reject non-finite values and
+			// epochs that cannot be converted to int64: an out-of-range
+			// conversion wraps to a past instant and would silently schedule a
+			// timer that should have been quarantined.
+			if math.IsNaN(v) || math.IsInf(v, 0) || v >= float64(math.MaxInt64) {
+				continue
+			}
+			// Treat as unix milliseconds if large, else seconds with fraction.
 			if v > 1e12 {
-				return time.UnixMilli(int64(v)), true
+				return time.UnixMilli(int64(v)).UTC(), true
 			}
 			if v > 0 {
-				return time.Unix(int64(v), int64((v-float64(int64(v)))*1e9)), true
+				return time.Unix(int64(v), int64((v-float64(int64(v)))*1e9)).UTC(), true
 			}
 		}
 	}

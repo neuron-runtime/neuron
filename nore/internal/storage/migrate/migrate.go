@@ -22,6 +22,11 @@ var (
 
 	// ErrNoMigrations indicates no migrations were provided to the runner.
 	ErrNoMigrations = errors.New("storage/migrate: no migrations registered")
+
+	// errSQLiteBusyExhausted reports that a migration step kept losing the
+	// SQLite write lock until its bounded per-step retry budget was spent. The
+	// step transaction was rolled back, so no partial migration was recorded.
+	errSQLiteBusyExhausted = errors.New("migrate: sqlite busy: retries exhausted")
 )
 
 // Migration represents one schema change.
@@ -52,6 +57,14 @@ func NormalizeDriver(d string) Driver {
 }
 
 // Config configures migration execution.
+//
+// SQLite callers must open DB with an immediate-transaction DSN: for
+// modernc.org/sqlite that is _txlock=immediate together with a bounded
+// _busy_timeout, and SetMaxOpenConns(1). This matches the production DSN in
+// nore/internal/storage/sqlite. The migration runner cannot force the
+// transaction mode because Migration.Up receives a *sql.Tx whose BEGIN is
+// issued by database/sql at BeginTx time; only the opening DSN controls it.
+// See Migrate for the concurrency contract and failure behavior.
 type Config struct {
 	DB         *sql.DB
 	Driver     Driver
@@ -62,13 +75,22 @@ type Config struct {
 
 // Migrate ensures the schema is up to date.
 //
-// Concurrent startup is serialized per driver: PostgreSQL holds a session
-// advisory lock for the duration of the run while applying each migration in
-// its own transaction (preserving per-step atomicity); SQLite applies each
-// migration step in its own transaction and retries bounded SQLITE_BUSY
-// contention so concurrent starters converge deterministically. Migration steps
-// and their ADD COLUMN operations are idempotent/duplicate-tolerant so a raced
-// or partially-applied step can be retried safely.
+// Concurrent startup is serialized per driver. PostgreSQL holds a session
+// advisory lock on a pinned connection for the whole run and applies each
+// migration in its own transaction (preserving per-step atomicity).
+//
+// SQLite applies one migration per transaction and retries bounded SQLITE_BUSY
+// contention. Deterministic serialization is a caller DSN contract: DB must be
+// opened with immediate transactions (_txlock=immediate for modernc.org/sqlite),
+// a bounded _busy_timeout, and SetMaxOpenConns(1), as production does. With a
+// deferred/plain DSN the runner cannot reserve the write lock before a step
+// reads the version; steps still roll back on write contention and the retry is
+// bounded, so concurrent starters either converge or Migrate returns an
+// explicit busy/exhaustion error. Deferred DSNs are unsupported for concurrent
+// startup safety and must never be treated as serialized.
+//
+// Migration steps and their ADD COLUMN operations are idempotent and narrowly
+// duplicate-tolerant so a raced or partially-applied step can be retried safely.
 func Migrate(ctx context.Context, cfg Config) error {
 	if cfg.DB == nil {
 		return fmt.Errorf("migrate: db is required")
@@ -155,39 +177,65 @@ func migratePostgres(ctx context.Context, cfg Config, table string, migs []Migra
 	return nil
 }
 
+const (
+	// sqliteMaxBusyRetries is the per-step SQLite write-lock retry budget. It
+	// resets after each successfully applied step, so the overall bound is
+	// (number of migrations + 1) * (sqliteMaxBusyRetries + 1) attempts.
+	sqliteMaxBusyRetries = 50
+	sqliteBusyRetryDelay = 20 * time.Millisecond
+)
+
 func migrateSQLite(ctx context.Context, cfg Config, table string, migs []Migration) error {
-	// Each step runs in its own transaction and is idempotent/duplicate-tolerant.
-	// Concurrent starters may contend for the write lock (SQLITE_BUSY) depending
-	// on DSN/driver transaction mode; retry boundedly so they serialize without
-	// failing startup.
-	const maxBusyRetries = 50
-	for attempt := 0; attempt < maxBusyRetries; attempt++ {
-		applied, err := migrateSQLiteStep(ctx, cfg, table, migs)
+	return migrateSQLiteWithRetry(ctx, sqliteBusyRetryDelay, func() (bool, error) {
+		return migrateSQLiteStep(ctx, cfg, table, migs)
+	})
+}
+
+// migrateSQLiteWithRetry drives one-at-a-time migration steps. Each step is
+// atomic; a non-busy error is returned unchanged and a busy error is retried
+// only within a bounded per-step budget. The budget resets after a step applies
+// a migration so forward progress is capped by the migration count and ctx.
+func migrateSQLiteWithRetry(ctx context.Context, retryDelay time.Duration, step func() (bool, error)) error {
+	busyRetries := 0
+	for {
+		applied, err := step()
 		if err == nil {
 			if !applied {
 				return nil
 			}
-			attempt = -1
+			busyRetries = 0
 			continue
 		}
-		if !isSQLiteBusy(err) || attempt == maxBusyRetries-1 {
+		if !isSQLiteBusy(err) {
 			return err
 		}
+		if busyRetries == sqliteMaxBusyRetries {
+			return fmt.Errorf("%w: %d retries", errSQLiteBusyExhausted, sqliteMaxBusyRetries)
+		}
+		busyRetries++
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("migrate: sqlite busy retry: %w", ctx.Err())
-		case <-time.After(20 * time.Millisecond):
+		case <-time.After(retryDelay):
 		}
 	}
-	return fmt.Errorf("migrate: sqlite busy: exceeded retries")
 }
 
+// isSQLiteBusy classifies SQLite write-lock contention. modernc.org/sqlite
+// reports SQLITE_BUSY and its extended SQLITE_BUSY_SNAPSHOT variant as
+// "database is locked (5|517) ... (SQLITE_BUSY...)"; the shared-cache
+// SQLITE_LOCKED variant reports "database table is locked".
 func isSQLiteBusy(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "sqlite_busy") || strings.Contains(msg, "database is locked")
+	for _, token := range []string{"sqlite_busy", "sqlite_locked", "database is locked", "database table is locked"} {
+		if strings.Contains(msg, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func migrateSQLiteStep(ctx context.Context, cfg Config, table string, migs []Migration) (bool, error) {
