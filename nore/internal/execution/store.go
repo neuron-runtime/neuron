@@ -2,13 +2,31 @@ package execution
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
+)
+
+var (
+	// ErrSignalDeliveryConflict reports a repeated delivery ID carrying a
+	// different payload. The original delivery record is left untouched.
+	ErrSignalDeliveryConflict = errors.New("execution: signal delivery id already used with a different payload")
+
+	// ErrWaitTimerLeaseLost reports that a claimed wait timer was no longer
+	// owned by the caller when the transition tried to fence it. The transition
+	// is not committed.
+	ErrWaitTimerLeaseLost = errors.New("execution: wait timer lease lost")
+
+	// ErrWaitTimerMissing reports that a required wait timer did not exist when
+	// the transition was committed. The transition is not committed.
+	ErrWaitTimerMissing = errors.New("execution: wait timer missing")
 )
 
 // ExecutionStore is the durable execution repository. Memory is a read-through
@@ -110,21 +128,12 @@ func (s *ExecutionStore) Save(ctx context.Context, execution *Execution) error {
 
 	var nextRevision uint64
 	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
-		old, currentRevision, err := storedExecution(ctx, tx, key)
+		next, err := writeExecutionRevision(ctx, tx, key, execution)
 		if err != nil {
 			return err
 		}
-		if execution.Revision() != currentRevision {
-			return fmt.Errorf("%w: execution %s is at revision %d, stored revision is %d",
-				storage.ErrConflict, execution.ID, execution.Revision(), currentRevision)
-		}
-
-		nextRevision = currentRevision + 1
-		data, err := marshalExecutionAt(execution, nextRevision)
-		if err != nil {
-			return err
-		}
-		return tx.CompareAndSwap(ctx, key, old, data)
+		nextRevision = next
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("persist execution %s: %w", execution.ID, err)
@@ -165,76 +174,27 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 	// fails fast. CreatedAt is applied to copies and only written back to the
 	// caller's intents after the commit, so a rolled-back transition does not
 	// mutate them.
-	type pendingIntent struct {
-		key          string
-		record       DispatchIntent
-		setCreatedAt bool
-	}
-	pending := make([]pendingIntent, 0, len(intents))
-	for _, intent := range intents {
-		if intent == nil {
-			return fmt.Errorf("dispatch intent is required")
-		}
-		if intent.ExecutionID == "" || intent.CapabilityID == "" || intent.AttemptID == "" {
-			return fmt.Errorf("dispatch intent requires execution, capability, and attempt IDs")
-		}
-		intentKey, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
-		if err != nil {
-			return err
-		}
-		pending = append(pending, pendingIntent{
-			key:          intentKey,
-			record:       *intent,
-			setCreatedAt: intent.CreatedAt.IsZero(),
-		})
+	pending, err := prepareDispatchIntents(intents)
+	if err != nil {
+		return err
 	}
 
 	var nextRevision uint64
 	createdAt := time.Now().UTC()
 	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
-		old, currentRevision, err := storedExecution(ctx, tx, key)
+		next, err := writeExecutionRevision(ctx, tx, key, execution)
 		if err != nil {
 			return err
 		}
-		if execution.Revision() != currentRevision {
-			return fmt.Errorf("%w: execution %s is at revision %d, stored revision is %d",
-				storage.ErrConflict, execution.ID, execution.Revision(), currentRevision)
-		}
-
-		nextRevision = currentRevision + 1
-		data, err := marshalExecutionAt(execution, nextRevision)
-		if err != nil {
-			return err
-		}
-		if err := tx.CompareAndSwap(ctx, key, old, data); err != nil {
-			return err
-		}
-
-		for i := range pending {
-			item := &pending[i]
-			if item.setCreatedAt {
-				item.record.CreatedAt = createdAt
-			}
-			encoded, err := json.Marshal(&item.record)
-			if err != nil {
-				return fmt.Errorf("marshal dispatch intent %s: %w", item.key, err)
-			}
-			if err := tx.Put(ctx, item.key, encoded); err != nil {
-				return fmt.Errorf("write dispatch intent %s: %w", item.key, err)
-			}
-		}
-		return nil
+		nextRevision = next
+		return writeDispatchIntents(ctx, tx, pending, createdAt)
 	})
 	if err != nil {
 		return fmt.Errorf("persist execution %s transition: %w", execution.ID, err)
 	}
 
 	execution.setRevision(nextRevision)
-	for i := range pending {
-		if pending[i].setCreatedAt {
-			intents[i].CreatedAt = pending[i].record.CreatedAt
-		}
-	}
+	applyDispatchIntentTimestamps(intents, pending)
 	if err := s.mem.Save(ctx, execution); err != nil {
 		return fmt.Errorf("record execution %s in memory after durable transition: %w", execution.ID, err)
 	}
@@ -439,6 +399,85 @@ func storedExecution(ctx context.Context, tx storage.Tx, key string) ([]byte, ui
 
 func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
 	return json.Marshal(execution.snapshotAt(revision))
+}
+
+// writeExecutionRevision compares execution's revision with the persisted one
+// and writes its next snapshot inside tx. It is the single implementation of
+// the compare-and-swap precondition shared by every transition path.
+func writeExecutionRevision(ctx context.Context, tx storage.KV, key string, execution *Execution) (uint64, error) {
+	old, currentRevision, err := storedExecution(ctx, tx, key)
+	if err != nil {
+		return 0, err
+	}
+	if execution.Revision() != currentRevision {
+		return 0, fmt.Errorf("%w: execution %s is at revision %d, stored revision is %d",
+			storage.ErrConflict, execution.ID, execution.Revision(), currentRevision)
+	}
+	nextRevision := currentRevision + 1
+	data, err := marshalExecutionAt(execution, nextRevision)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.CompareAndSwap(ctx, key, old, data); err != nil {
+		return 0, err
+	}
+	return nextRevision, nil
+}
+
+// pendingDispatchIntent holds an intent's resolved key and a copy of its
+// record. Copies keep a rolled-back transaction from mutating caller-owned
+// intents.
+type pendingDispatchIntent struct {
+	key          string
+	record       DispatchIntent
+	setCreatedAt bool
+}
+
+func prepareDispatchIntents(intents []*DispatchIntent) ([]pendingDispatchIntent, error) {
+	pending := make([]pendingDispatchIntent, 0, len(intents))
+	for _, intent := range intents {
+		if intent == nil {
+			return nil, fmt.Errorf("dispatch intent is required")
+		}
+		if intent.ExecutionID == "" || intent.CapabilityID == "" || intent.AttemptID == "" {
+			return nil, fmt.Errorf("dispatch intent requires execution, capability, and attempt IDs")
+		}
+		intentKey, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+		if err != nil {
+			return nil, err
+		}
+		pending = append(pending, pendingDispatchIntent{
+			key:          intentKey,
+			record:       *intent,
+			setCreatedAt: intent.CreatedAt.IsZero(),
+		})
+	}
+	return pending, nil
+}
+
+func writeDispatchIntents(ctx context.Context, tx storage.KV, pending []pendingDispatchIntent, createdAt time.Time) error {
+	for i := range pending {
+		item := &pending[i]
+		if item.setCreatedAt {
+			item.record.CreatedAt = createdAt
+		}
+		encoded, err := json.Marshal(&item.record)
+		if err != nil {
+			return fmt.Errorf("marshal dispatch intent %s: %w", item.key, err)
+		}
+		if err := tx.Put(ctx, item.key, encoded); err != nil {
+			return fmt.Errorf("write dispatch intent %s: %w", item.key, err)
+		}
+	}
+	return nil
+}
+
+func applyDispatchIntentTimestamps(intents []*DispatchIntent, pending []pendingDispatchIntent) {
+	for i := range pending {
+		if pending[i].setCreatedAt {
+			intents[i].CreatedAt = pending[i].record.CreatedAt
+		}
+	}
 }
 
 // DispatchIntent represents a unit of ready work that a worker should claim and
@@ -721,4 +760,357 @@ func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner st
 		}
 	}
 	return claimed, nil
+}
+
+// SignalDeliveryStatus is the outcome returned to the original sender and
+// retained with the delivery record.
+type SignalDeliveryStatus string
+
+const (
+	// SignalDeliveryAccepted means the delivery matched a waiting capability
+	// and was committed with its resolution.
+	SignalDeliveryAccepted SignalDeliveryStatus = "accepted"
+)
+
+// SignalDelivery is the durable record of one accepted signal delivery. It is
+// stored at SignalDeliveryKey and exists only for matched attempts; an
+// unmatched delivery is not recorded so a later retry can still succeed.
+// PayloadHash binds an idempotent replay to the original payload without
+// retaining the payload itself.
+type SignalDelivery struct {
+	DeliveryID     string               `json:"delivery_id"`
+	ExecutionID    shared.ID            `json:"execution_id"`
+	SignalName     string               `json:"signal_name"`
+	CorrelationKey string               `json:"correlation_key,omitempty"`
+	CapabilityID   shared.ID            `json:"capability_id"`
+	PayloadHash    string               `json:"payload_hash"`
+	Status         SignalDeliveryStatus `json:"status"`
+	CreatedAt      time.Time            `json:"created_at"`
+}
+
+// NewSignalDelivery builds a delivery record and hashes its payload for
+// duplicate detection. Validation happens here so the persistence boundary
+// never has to guess what identifies a delivery.
+func NewSignalDelivery(executionID, capabilityID shared.ID, deliveryID, signalName, correlationKey string, payload map[string]any) (*SignalDelivery, error) {
+	if executionID == "" || capabilityID == "" {
+		return nil, fmt.Errorf("signal delivery requires execution and capability IDs")
+	}
+	if deliveryID == "" {
+		return nil, fmt.Errorf("signal delivery id is required")
+	}
+	if signalName == "" {
+		return nil, fmt.Errorf("signal name is required")
+	}
+	encoded, err := json.Marshal(data.CanonicalMap(payload))
+	if err != nil {
+		return nil, fmt.Errorf("marshal signal payload: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return &SignalDelivery{
+		DeliveryID:     deliveryID,
+		ExecutionID:    executionID,
+		SignalName:     signalName,
+		CorrelationKey: correlationKey,
+		CapabilityID:   capabilityID,
+		PayloadHash:    hex.EncodeToString(sum[:]),
+		Status:         SignalDeliveryAccepted,
+	}, nil
+}
+
+// SignalDeliveryKey returns the durable key for a delivery record. Key
+// validation rejects traversal segments in deliveryID.
+func SignalDeliveryKey(executionID shared.ID, deliveryID string) (string, error) {
+	if deliveryID == "" {
+		return "", fmt.Errorf("signal delivery id is required")
+	}
+	return storage.Key("signals", string(executionID), deliveryID)
+}
+
+// WaitTimerKey returns the durable timer key for one wait or retry attempt. It
+// delegates to the storage key constructor so the execution layer does not
+// duplicate the timer key format. A resumed capability gets a new attempt ID,
+// so its next wait writes a new timer rather than reusing a stale one.
+func WaitTimerKey(executionID, capabilityID, attemptID shared.ID) (string, error) {
+	if executionID == "" || capabilityID == "" || attemptID == "" {
+		return "", fmt.Errorf("wait timer requires execution, capability, and attempt IDs")
+	}
+	return storage.TimerKey(string(executionID), string(capabilityID), string(attemptID))
+}
+
+// WaitTimerPayload is the opaque payload stored with a wait timer. The
+// execution snapshot remains authoritative; this record only identifies which
+// capability a due timer should wake.
+type WaitTimerPayload struct {
+	ExecutionID  shared.ID `json:"execution_id"`
+	CapabilityID shared.ID `json:"capability_id"`
+	WaitType     WaitType  `json:"wait_type,omitempty"`
+	AttemptID    shared.ID `json:"attempt_id,omitempty"`
+}
+
+// EncodeWaitTimer serializes a wait timer payload. There is one encoding so
+// every writer and the due-timer consumer agree on the record shape.
+func EncodeWaitTimer(payload WaitTimerPayload) ([]byte, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal wait timer payload: %w", err)
+	}
+	return encoded, nil
+}
+
+// DecodeWaitTimer parses a wait timer payload. Invalid data is an error, never
+// an empty payload, so a corrupt index entry cannot silently wake work.
+func DecodeWaitTimer(data []byte) (*WaitTimerPayload, error) {
+	var payload WaitTimerPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("decode wait timer payload: %w", err)
+	}
+	if payload.ExecutionID == "" || payload.CapabilityID == "" {
+		return nil, fmt.Errorf("wait timer payload requires execution and capability IDs")
+	}
+	return &payload, nil
+}
+
+// WaitTimerWrite is one timer index entry to upsert as part of a transition.
+type WaitTimerWrite struct {
+	Key   string
+	DueAt time.Time
+	Data  []byte
+}
+
+// WaitTimerDelete removes a timer index entry as part of a transition. Owner,
+// when set, is the fencing token from a claim and makes the delete conditional
+// on still holding that claim. RequireExisting fails the transition when the
+// timer is already gone; an unfenced, non-required delete is best-effort.
+type WaitTimerDelete struct {
+	Key             string
+	Owner           string
+	RequireExisting bool
+}
+
+// WaitEffects are the derived records that must become durable with one wait
+// transition. Each field is optional so entry, resolution, cancellation,
+// retry, and deadline transitions can share one commit method.
+type WaitEffects struct {
+	PutTimers    []WaitTimerWrite
+	DeleteTimers []WaitTimerDelete
+	Delivery     *SignalDelivery
+	Intents      []*DispatchIntent
+}
+
+// WaitTransitionRequest is one atomic wait transition. Execution must already
+// carry the new state; the store persists its next revision together with
+// Effects in a single WithTimer transaction.
+type WaitTransitionRequest struct {
+	Execution *Execution
+	Effects   WaitEffects
+}
+
+// WaitTransitionResult reports what a wait transition committed.
+type WaitTransitionResult struct {
+	// Revision is the new snapshot revision. It is zero on an idempotent replay.
+	Revision uint64
+	// Replay is true when the delivery ID was already recorded with the same
+	// payload. No writes occurred in that case, and Execution's revision is
+	// unchanged. The caller's in-memory Execution may already have been mutated
+	// before the call, so it must be reloaded before another transition.
+	Replay bool
+	// Delivery is the record written by this transition or found on replay.
+	Delivery *SignalDelivery
+}
+
+// SaveWaitTransition atomically commits a wait state change with the timer,
+// delivery, and dispatch intent records it produced. Nothing is published
+// here: callers publish only after a successful return, and the durable intent
+// is the source of truth if publishing fails.
+//
+// A repeated delivery ID with the same payload is an idempotent replay: no
+// snapshot, timer, or intent is written. A different payload returns
+// ErrSignalDeliveryConflict. A fenced timer delete that has lost its lease
+// returns ErrWaitTimerLeaseLost, and a required missing timer returns
+// ErrWaitTimerMissing; both leave all durable and in-memory state untouched.
+func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransitionRequest) (*WaitTransitionResult, error) {
+	execution := req.Execution
+	if execution == nil {
+		return nil, fmt.Errorf("execution is required")
+	}
+	execution.saveMu.Lock()
+	defer execution.saveMu.Unlock()
+
+	key, err := s.key(execution.ID)
+	if err != nil {
+		return nil, err
+	}
+	pending, err := prepareDispatchIntents(req.Effects.Intents)
+	if err != nil {
+		return nil, err
+	}
+
+	delivery := req.Effects.Delivery
+	deliveryKey := ""
+	if delivery != nil {
+		if delivery.DeliveryID == "" || delivery.ExecutionID == "" || delivery.CapabilityID == "" || delivery.PayloadHash == "" {
+			return nil, fmt.Errorf("signal delivery requires id, execution, capability, and payload hash")
+		}
+		if delivery.ExecutionID != execution.ID {
+			return nil, fmt.Errorf("signal delivery execution %s does not match transition execution %s", delivery.ExecutionID, execution.ID)
+		}
+		deliveryKey, err = SignalDeliveryKey(delivery.ExecutionID, delivery.DeliveryID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, write := range req.Effects.PutTimers {
+		if write.Key == "" || write.DueAt.IsZero() {
+			return nil, fmt.Errorf("wait timer write requires a key and a due time")
+		}
+	}
+	for _, del := range req.Effects.DeleteTimers {
+		if del.Key == "" {
+			return nil, fmt.Errorf("wait timer delete requires a key")
+		}
+	}
+
+	var nextRevision uint64
+	result := &WaitTransitionResult{}
+	createdAt := time.Now().UTC()
+	err = s.store.WithTimer(ctx, func(tx storage.TimerTx) error {
+		if delivery != nil {
+			data, err := tx.Get(ctx, deliveryKey)
+			switch {
+			case err == nil:
+				var existing SignalDelivery
+				if err := json.Unmarshal(data, &existing); err != nil {
+					return fmt.Errorf("decode signal delivery %s: %w", deliveryKey, err)
+				}
+				if existing.PayloadHash != delivery.PayloadHash {
+					return ErrSignalDeliveryConflict
+				}
+				result.Replay = true
+				result.Delivery = &existing
+				return nil
+			case !errors.Is(err, storage.ErrNotFound):
+				return fmt.Errorf("read signal delivery %s: %w", deliveryKey, err)
+			}
+		}
+
+		for _, del := range req.Effects.DeleteTimers {
+			if del.Owner != "" {
+				deleted, err := tx.DeleteTimerOwned(ctx, del.Key, del.Owner)
+				if err != nil {
+					return fmt.Errorf("delete owned wait timer %s: %w", del.Key, err)
+				}
+				if !deleted {
+					return ErrWaitTimerLeaseLost
+				}
+				continue
+			}
+			_, err := tx.GetTimer(ctx, del.Key)
+			if errors.Is(err, storage.ErrTimerNotFound) {
+				if del.RequireExisting {
+					return ErrWaitTimerMissing
+				}
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("read wait timer %s: %w", del.Key, err)
+			}
+			if err := tx.DeleteTimer(ctx, del.Key); err != nil {
+				return fmt.Errorf("delete wait timer %s: %w", del.Key, err)
+			}
+		}
+
+		next, err := writeExecutionRevision(ctx, tx, key, execution)
+		if err != nil {
+			return err
+		}
+		nextRevision = next
+
+		for _, write := range req.Effects.PutTimers {
+			if err := tx.PutTimer(ctx, write.Key, write.DueAt, write.Data); err != nil {
+				return fmt.Errorf("write wait timer %s: %w", write.Key, err)
+			}
+		}
+		if delivery != nil {
+			record := *delivery
+			if record.CreatedAt.IsZero() {
+				record.CreatedAt = createdAt
+			}
+			encoded, err := json.Marshal(&record)
+			if err != nil {
+				return fmt.Errorf("marshal signal delivery %s: %w", deliveryKey, err)
+			}
+			if err := tx.Put(ctx, deliveryKey, encoded); err != nil {
+				return fmt.Errorf("write signal delivery %s: %w", deliveryKey, err)
+			}
+			result.Delivery = &record
+		}
+		return writeDispatchIntents(ctx, tx, pending, createdAt)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("persist wait transition %s: %w", execution.ID, err)
+	}
+	if result.Replay {
+		return result, nil
+	}
+
+	execution.setRevision(nextRevision)
+	applyDispatchIntentTimestamps(req.Effects.Intents, pending)
+	if err := s.mem.Save(ctx, execution); err != nil {
+		return nil, fmt.Errorf("record execution %s in memory after durable wait transition: %w", execution.ID, err)
+	}
+	result.Revision = nextRevision
+	return result, nil
+}
+
+// ClaimWaitTimer claims a due timer under a fresh owner token. Owner must be a
+// non-empty, opaque per-claim value; reusing one across claims breaks fencing.
+// It returns false when the timer is missing, not yet due, or under a live
+// lease.
+func (s *ExecutionStore) ClaimWaitTimer(ctx context.Context, key, owner string, lease time.Duration) (bool, error) {
+	if key == "" {
+		return false, fmt.Errorf("wait timer key is required")
+	}
+	if owner == "" {
+		return false, storage.ErrTimerOwnerEmpty
+	}
+	if lease <= 0 {
+		return false, fmt.Errorf("wait timer lease must be positive")
+	}
+	return s.store.ClaimTimer(ctx, key, owner, lease)
+}
+
+// RenewWaitTimer extends a live lease held by owner. Lease loss is reported as
+// ErrWaitTimerLeaseLost instead of an ambiguous false so callers stop work
+// before attempting a fenced commit.
+func (s *ExecutionStore) RenewWaitTimer(ctx context.Context, key, owner string, lease time.Duration) error {
+	if key == "" {
+		return fmt.Errorf("wait timer key is required")
+	}
+	if owner == "" {
+		return storage.ErrTimerOwnerEmpty
+	}
+	if lease <= 0 {
+		return fmt.Errorf("wait timer lease must be positive")
+	}
+	ok, err := s.store.RenewTimer(ctx, key, owner, lease)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrWaitTimerLeaseLost
+	}
+	return nil
+}
+
+// DeleteWaitTimerOwned removes a timer only while owner still holds the claim.
+// Lease loss is reported explicitly; a timer already removed by the owner's
+// own committed transition returns false because it is no longer owned.
+func (s *ExecutionStore) DeleteWaitTimerOwned(ctx context.Context, key, owner string) (bool, error) {
+	if key == "" {
+		return false, fmt.Errorf("wait timer key is required")
+	}
+	if owner == "" {
+		return false, storage.ErrTimerOwnerEmpty
+	}
+	return s.store.DeleteTimerOwned(ctx, key, owner)
 }
