@@ -28,15 +28,18 @@
 - Retry backoff is an in-process sleep (`nore/internal/execution/engine/invocation.go:132-139`, `:232-244`); `StatusRetryWait`, `CapabilityRetryWait`, and `NextAttemptAt` have no writer.
 - Durable recovery restores executions and calls `RecoverExecution` (`nore/internal/instance/manager.go:87-183`, `:232-324`); recovery is gated on durability mode (`:42-45`, `:98`, `:124-126`).
 
-**Storage and timers**
+**Storage and timers (pre-substrate observations retained for rationale)**
 
-- `storage.Store` embeds `KV` and adds `WithTimer`, `PutTimer`, `GetTimer`, `DeleteTimer`, `ListTimers`, and `ClaimTimer` (`nore/internal/storage/provider.go:105-147`). `TimerTx` embeds `KV` plus timer methods (`:80-99`).
-- Sentinel errors include `ErrTimerNotFound`, `ErrTimerConflict`, and `ErrTimerAlreadyExists` (`provider.go:42-51`).
-- **Parity defect:** `TimerTx.KV` maps to `kv_store` in SQLite (`nore/internal/storage/sqlite/sqlite.go:403-421` calls generic `get/put/del/list/compareAndSwap`) but to `timer_store` in PostgreSQL (`nore/internal/storage/postgres/postgres.go:382-400` calls `getTimer/putTimer/delTimer/listTimer/compareAndSwapTimer`). The same interface targets different tables on the two backends.
-- SQLite `WithTimer` opens one database transaction and can currently write both tables (`sqlite.go:353-392`); PostgreSQL `WithTimer` does the same (`postgres.go:332-371`).
-- `claimer` implementations overwrite an existing owner unconditionally; they do not reject a live lease (`sqlite.go:528-596`, `postgres.go:547-614`).
-- `timer_store` has no due-time column or index; migrations only create `key/value/created_at/updated_at` (`nore/internal/storage/migrate/registry.go:9-39`, `:40+`). `ListTimers` is prefix-only (`provider.go:139-140`), so there is no bounded "due now" query.
-- `MemoryStore` holds the timer surface with its own lock; prior locking/deadlock history is acknowledged. The coordinator reports gofmt drift in `memory.go` and `postgres.go`.
+- Pre-`23aca93`, `TimerTx.KV` diverged by backend (SQLite `kv_store`, PostgreSQL `timer_store`), `ClaimTimer` did not reject live leases, `timer_store` had no due-time/index, and `PutTimer`/discovery lacked bounded due-time semantics. These defects motivated D1/D2.
+- Pre-`23aca93` baseline also included gofmt drift in `memory.go`/`postgres.go` and storage/execution/instance/cmd test-fake build breakage reported by the coordinator.
+
+**Implementation update — timer substrate (commit `23aca93`, 2026-11-17)**
+
+- **D1 (implemented in code):** `TimerTx.KV` is unified to the main KV surface on every backend, and `TimerTx` remains the internal storage transaction surface over main KV plus the timer surface (`nore/internal/storage/provider.go`; `nore/internal/storage/postgres/postgres.go`, `sqlite/sqlite.go`, `memory.go` in `23aca93`).
+- **D2 substrate (implemented in code):** migration **v3** adds `due_at`, `owner`, `lease_expires_at`, and index `idx_timer_store_due_key (due_at, key)` for SQLite and PostgreSQL (`nore/internal/storage/migrate/registry.go` in `23aca93`). `Timer` records, `PutTimer(ctx, key, dueAt, data)` with explicit due time, bounded `DueTimers(now, limit)` ordered by due time then key, and live-lease-aware `ClaimTimer`/claim semantics are implemented across the storage contract and Memory/SQLite/PostgreSQL backends (`provider.go`, `memory.go`, `sqlite/sqlite.go`, `postgres/postgres.go`, and storage contract tests in `23aca93`).
+- **Parity/verification (not overclaimed):** PostgreSQL implements the same timer substrate in code, but PostgreSQL contract/parity execution is environment-gated by DSN availability and remains **unverified without a DSN** (ledger T-022 evidence records Postgres contract tests skipped with no DSN).
+- **Legacy rows:** timer rows without `due_at` are **inert by decision**. Optional backfill may parse `waitUntil` where such rows exist, but it is **not silently assumed**.
+- **Not claimed by `23aca93`:** lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (tracked as `T-037`/`T-038`), not delivered by this commit. The storage-vs-scheduler boundary is unchanged: the timer store is an indexed lease/index mechanism; the execution snapshot remains authoritative.
 
 **API, protocol, and SDKs**
 
@@ -47,10 +50,10 @@
 - Go executor SDK: `packages/executor-sdks/golang/capabilityruntime.go:1-44`. .NET executor SDK: `packages/executor-sdks/dotnet/src/Neuron.Executor/ExecutorHandler.cs:15-36`, `ExecutionResult.cs:11-19`. **No TypeScript executor SDK exists**; this ADR does not authorize one.
 - Runtime configuration groups and defaults: `shared/types/core/runtimeconfig.go:28-36`, `nore/internal/runtimeconfig/runtimeconfig.go:31-38`, `application/config/defaults.go:22-26`, `application/config/validate.go:34-58`.
 
-**Known pre-existing breakage**
+**Known pre-existing breakage (historical snapshot; may be partially addressed by later commits)**
 
-- Coordinator reports four test-fake/tooling failures: `nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, and `nore/cmd/nore/main_test.go`, plus gofmt drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`.
-- Coordinator reports acceptance harness stop non-idempotency in `application/internal/acceptance/harness_test.go` and vacuous/hanging `R4-24` tests.
+- Coordinator reported four test-fake/tooling failures: `nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, and `nore/cmd/nore/main_test.go`, plus gofmt drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`.
+- Coordinator reported acceptance harness stop non-idempotency in `application/internal/acceptance/harness_test.go` and vacuous/hanging `R4-24` tests.
 
 ### Forces
 
@@ -62,17 +65,19 @@
 
 ## Decision
 
-### D1 — Timer transaction atomicity (adopted)
+### D1 — Timer transaction atomicity (adopted; substrate implemented in `23aca93`)
 
-`TimerTx` is one transaction over **the main KV surface plus the timer surface**. `TimerTx.KV` must address the same main KV table on every backend. The current SQLite (`kv_store`) versus PostgreSQL (`timer_store`) divergence is a defect and must be fixed in PostgreSQL. `TimerTx` continues to expose the timer-specific operations.
+`TimerTx` is one transaction over **the main KV surface plus the timer surface**. `TimerTx.KV` addresses the same main KV table on every backend (the pre-`23aca93` SQLite `kv_store` / PostgreSQL `timer_store` divergence is fixed). `TimerTx` continues to expose the timer-specific operations.
 
 Consequence: one `WithTimer` transaction can atomically write an execution snapshot, a signal delivery record, and a timer record, delete the timer, and commit dispatch intents. No wait resolution may require two transactions.
 
 `TimerTx` remains internal to the storage boundary. It must not be passed into scheduler/engine code directly; the transition committer owns the transaction.
 
-### D2 — Due-timer substrate (adopted)
+Lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (`T-037`/`T-038`) and are not claimed by `23aca93`.
 
-Add a `due_at` column and index to `timer_store` in a new migration (next available, expected v3) for SQLite and PostgreSQL. Add a bounded storage primitive:
+### D2 — Due-timer substrate (adopted; substrate implemented in `23aca93`)
+
+Migration **v3** adds `due_at`, `owner`, `lease_expires_at`, and index `idx_timer_store_due_key (due_at, key)` to `timer_store` for SQLite and PostgreSQL (`nore/internal/storage/migrate/registry.go`, commit `23aca93`). The bounded storage primitive and record are implemented in the storage contract (`nore/internal/storage/provider.go`, `23aca93`):
 
 ```go
 type Timer struct {
@@ -88,13 +93,15 @@ type Timer struct {
 DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error)
 ```
 
-- `PutTimer` becomes `PutTimer(ctx, key string, dueAt time.Time, data []byte) error` on both `Store` and `TimerTx`. There are no production consumers, so the signature change is safe.
-- `ClaimTimer` must claim only when the timer is unowned or its lease is expired; a live lease returns `(false, nil)`. It must use compare-and-set on the complete record.
+- `PutTimer` is `PutTimer(ctx, key string, dueAt time.Time, data []byte) error` on both `Store` and `TimerTx`, persisting an explicit due time (no production consumers at the time of change).
+- `ClaimTimer` claims only when the timer is due/unowned or its lease is expired; a live lease returns `(false, nil)`. It uses compare-and-set/atomic claim semantics on the timer record.
 - `DueTimers` must never return a timer with a live lease.
-- The poller interval defaults to 1s and is configurable. Batch size defaults to 256 and is configurable.
-- No full-table scan is permitted. Prefix listing remains for cleanup only.
-- Pre-existing timer rows without `due_at` are inert. If any exist, a one-time backfill may parse the JSON `waitUntil`; otherwise they are documented as non-schedulable.
-- `MemoryStore` implements the same semantics under one lock, without re-entering its own mutex.
+- The poller interval defaults to 1s and is configurable. Batch size defaults to 256 and is configurable. (Scheduler/poller consumption remains governed by later Phase 5 execution work; this ADR preserves the storage-vs-scheduler boundary.)
+- No full-table scan is permitted for due discovery. Prefix listing remains for cleanup/listing only.
+- **Legacy rows:** pre-existing timer rows without `due_at` are **inert by decision**. If any exist, a one-time backfill may parse the JSON `waitUntil`; this is **optional and not silently assumed**.
+- `MemoryStore` implements the same substrate semantics (implemented in `23aca93`).
+
+**Parity/verification:** SQLite and PostgreSQL implement the substrate in code with migration v3 and the due-key index; Memory implements parity semantics. PostgreSQL contract/parity execution is environment-gated by DSN availability and remains **unverified without a DSN** (see T-022 evidence). **Not claimed by `23aca93`:** lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (`T-037`/`T-038`).
 
 ### D3 — Capability suspend protocol (adopted)
 
