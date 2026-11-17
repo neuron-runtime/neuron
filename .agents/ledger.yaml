@@ -142,11 +142,12 @@ tasks:
     verification:
       - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance"
       - "cd application && GOWORK=off go test -count=1 -timeout 5m -run 'R4_24' ./internal/acceptance"
-    status: blocked
-    lease: { owner: bugfixer, paths: ["application/internal/acceptance/**"], task: T-021 }
-    evidence: ["T-021 edits compile: `cd application && GOWORK=off go test -c -o /tmp/neuron-acceptance.test ./internal/acceptance` exited 0.", "Full acceptance run failed at TestMain build: worker.go:617-618 uses AttemptID/LogicalOperationID but regenerated pb.go exposes AttemptId/LogicalOperationId."]
+    status: done
+    lease: null
+    commit: 3d2e6d5
+    evidence: ["`cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance` -> ok, 34.292s.", "`cd application && GOWORK=off go test -count=1 -timeout 5m -run 'R4_24' ./internal/acceptance` -> ok, 20.769s; TestR4_24SigKillAfterCompletion and TestR4_24SigKillRecoveryVerifiesExecutionState pass.", "`gofmt -l` on edited files -> clean.", "Fixed test-fixture nondeterminism with `-trimpath -buildvcs=false`; installer digest-refusal behavior left unchanged."]
     reports: ["T-021"]
-    open_risks: ["Blocker T-033: `application` TestMain builds `nore`, which cannot compile against the regenerated protocol fields.", "`-run R4-24` is not a valid Go test selector; use `-run R4_24`."]
+    open_risks: ["Reviewer approved; non-blocking gaps: concurrent stop/kill not directly exercised, in-flight recovery does not compare completedAt stability."]
 
   - id: T-022
     objective: "Implement the storage timer substrate: due-time index, bounded due query, lease-aware claim, and backend parity"
@@ -176,11 +177,12 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/storage/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/..."
       - "cd nore && NEURON_TEST_POSTGRES_DSN='<dsn>' GOWORK=off go test -count=1 ./internal/storage/postgres/... (or record DSN unavailable)"
-    status: not_started
+    status: needs_review
     lease: null
-    evidence: []
+    commit: 23aca93
+    evidence: ["`cd nore && GOWORK=off go test -race -count=1 ./internal/storage ./internal/storage/sqlite` -> PASS (storage 1.689s, sqlite 2.318s).", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` -> PASS.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/postgres` -> PASS with contract tests skipped (no DSN); Postgres parity unverified.", "`cd nore && GOWORK=off go test -count=1 ./internal/execution ./internal/instance` -> PASS.", "`cd nore && GOWORK=off go build ./...` -> PASS.", "`cd nore && GOWORK=off go test -run '^$' ./...` -> PASS after updating `nore/cmd/nore/main_test.go` fake.", "`gofmt -l` on changed Go files -> clean.", "Commit 23aca93; migration v3 and index `idx_timer_store_due_key` added for SQLite and PostgreSQL."]
     reports: []
-    open_risks: ["Postgres DSN unavailable in baseline; parity cannot be claimed without it.", "WithTimer serializes writes; contention must be measured."]
+    open_risks: ["Postgres DSN unavailable in baseline; parity cannot be claimed without it.", "WithTimer serializes writes; contention must be measured.", "Architect approved with ADR update (T-036) and reviewer approved with a minor Postgres-limitation note. Security requested changes; lease/PutTimer fencing is addressed by T-037, migration safety by T-038. Re-review required.", "Low residual risks: local wall-clock lease decisions, memory DueTimers copies before limit, unbounded ListTimers, index does not cover lease state."]
 
   - id: T-023
     objective: "Add the additive capability-runtime suspend/resume contract and update Go/.NET SDKs with conformance"
@@ -203,11 +205,12 @@ tasks:
       - "cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./..."
       - "dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore"
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
-    status: blocked
-    lease: { owner: coder, paths: ["shared/protocol/capabilityruntime/**", "packages/executor-sdks/golang/**", "packages/executor-sdks/dotnet/**", "nore/internal/mechanism/conformance_test.go"], task: T-023 }
-    evidence: ["Go SDK: `cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./...` -> ok, 1.451s.", ".NET: `dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` -> 32 passed, 0 failed, 0 skipped.", "Protocol: `cd shared && GOWORK=off go build ./...` -> pass; generated via `PATH=\"$HOME/go/bin:$PATH\" ./scripts/generate-proto.sh`.", "Mechanism: `cd nore && GOWORK=off go test -count=1 ./internal/mechanism/...` -> FAIL (build): worker.go:617 unknown field AttemptID (have AttemptId); worker.go:618 unknown field LogicalOperationID (have LogicalOperationId)."]
+    status: done
+    lease: null
+    commit: 157ac66
+    evidence: ["Go SDK: `cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./...` -> ok, 1.178s.", ".NET: `dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` -> 32 passed, 0 failed, 0 skipped.", "Protocol: `cd shared && GOWORK=off go build ./...` -> pass; `PATH=\"$HOME/go/bin:$PATH\" ./scripts/generate-proto.sh` reproduces identical pb.go SHA-256.", "Mechanism: `cd nore && GOWORK=off go test -count=1 ./internal/mechanism/...` -> ok: mechanism 14.210s, process 22.552s, wasm 15.002s.", "Commit 157ac66 includes T-023 and the T-033 worker field alignment. Architect approved 157ac66. Reviewer/security changes were closed by T-034 (18dc6a6) and T-035 (100d9dd), both approved."]
     reports: ["T-023"]
-    open_risks: ["Blocker T-033: process worker must use generated field names before T-023 can be committed or marked done.", "No TypeScript executor SDK exists; document as out of scope.", "Architect/security sign-off still required."]
+    open_risks: ["No TypeScript executor SDK exists; documented as out of scope.", "Truly old N.O.R.E. clients cannot reject an unknown protobuf field; additive-v1 compatibility residual risk documented for T-026.", "End-to-end N.O.R.E. suspension depends on T-024/T-026."]
 
   - id: T-033
     objective: "Repair the process worker's generated-protocol field names so the regenerated capability runtime protocol compiles"
@@ -222,12 +225,144 @@ tasks:
       - "No behavior change beyond field-name alignment"
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
-    status: in_progress
-    lease: { owner: bugfixer, paths: ["nore/internal/mechanism/process/worker.go"], task: T-033 }
-    evidence: ["Build failure reproduced by T-023 and T-021: worker.go:617 unknown field AttemptID; worker.go:618 unknown field LogicalOperationID."]
+    status: done
+    lease: null
+    evidence: ["Reproduced build failure: worker.go:617 unknown field AttemptID; worker.go:618 unknown field LogicalOperationID.", "`cd nore && GOWORK=off go build ./internal/mechanism/...` -> pass.", "`cd nore && GOWORK=off go test -count=1 ./internal/mechanism/...` -> ok: mechanism/process/wasm.", "`gofmt -l nore/internal/mechanism/process/worker.go` -> clean."]
+    reports: ["T-033"]
+    open_risks: ["T-026 will later own process adapter suspend/resume; this task was limited to the compile repair."]
+    commit: 157ac66
+
+  - id: T-034
+    objective: "Fail closed when the process client receives a suspend outcome it cannot yet handle"
+    scope:
+      - "nore/internal/mechanism/process/worker.go"
+      - "nore/internal/mechanism/process/*_test.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [security]
+    dependencies: [T-023]
+    acceptance:
+      - "A suspend outcome from a capability runtime is never converted into an empty successful result"
+      - "The worker returns an explicit unsupported_suspend_outcome error until suspend handling is implemented by T-026"
+      - "A focused regression test proves the fail-closed behavior"
+      - "No other process-transport behavior changes"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/process/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/..."
+    status: done
+    lease: null
+    evidence: ["`cd nore && GOWORK=off go test -count=1 ./internal/mechanism/process/...` -> ok, 16.223s.", "`cd nore && GOWORK=off go test -count=1 ./internal/mechanism/...` -> all three packages ok.", "`gofmt -l nore/internal/mechanism/process` -> clean.", "Focused `TestWorkerExecuteRejectsSuspendOutcome` returns explicit unsupported_suspend_outcome and no response.", "Reviewer approved; security approved 18dc6a6/100d9dd, confirming fail-closed client behavior."]
     reports: []
-    open_risks: ["T-026 will later own process adapter suspend/resume; this task is limited to the compile repair."]
+    open_risks: ["T-026 will replace this guard with real suspend/resume mapping."]
+    commit: 18dc6a6
+
+  - id: T-035
+    objective: "Harden SDK suspend outcomes and align Go/.NET negotiation semantics"
+    scope:
+      - "packages/executor-sdks/golang/**"
+      - "packages/executor-sdks/dotnet/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [security]
+    dependencies: [T-023]
+    acceptance:
+      - "Both SDKs reject a suspend outcome combined with a non-empty result or error"
+      - "Both SDKs validate wait_type and timer/signal required fields before emitting suspend"
+      - "Go and .NET feature negotiation have the same repeated-Initialize behavior"
+      - "The inaccurate .NET parity comment is corrected"
+      - "Focused tests cover each rejection and the negotiation parity"
+    verification:
+      - "cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./..."
+      - "dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore"
+    status: done
+    lease: null
+    evidence: ["`cd packages/executor-sdks/golang && GOWORK=off go test -race -count=1 ./...` -> ok, 1.229s.", "`dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` -> 38 passed, 0 failed.", "`gofmt -l` on changed Go files -> clean; `go vet` pass.", "Go and .NET now reject conflicting/malformed suspend outcomes and use monotonic repeated-Initialize negotiation.", "Reviewer approved with non-blocking test-coverage suggestions; security approved."]
+    reports: ["T-035"]
+    open_risks: ["Malicious executors can bypass SDK checks; N.O.R.E. client enforcement is provided by T-034 and will be replaced by T-026.", "Non-blocking coverage gaps: Go negotiation test uses internals; Go stdio malformed outcomes and pool-level fail-closed path untested."]
+    commit: 100d9dd
+
+  - id: T-036
+    objective: "Align ADR 0001 with the shipped timer substrate without overclaiming"
+    scope: [".agents/decisions/0001-phase5-signals-timers.md"]
+    owner: architect
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: [T-022]
+    acceptance:
+      - "ADR records timer substrate implementation in 23aca93"
+      - "Postgres parity is explicitly env-gated/unverified without a DSN"
+      - "Legacy rows without due_at are documented as inert"
+      - "Lease renewal/fencing and migration hardening are recorded as follow-ups, not claimed"
+    verification:
+      - "git diff -- .agents/decisions/0001-phase5-signals-timers.md"
+    status: done
+    lease: null
+    commit: ce13556
+    evidence: ["Architect updated ADR 0001: substrate implemented; Postgres parity env-gated; legacy rows inert; T-037/T-038 follow-ups explicit."]
+    reports: []
+    open_risks: ["ADR needs a final one-line update after T-037 lands (lease renewal/fencing now implemented)."]
+
+  - id: T-037
+    objective: "Add timer lease renewal and owner-fenced completion"
+    scope:
+      - "nore/internal/storage/provider.go"
+      - "nore/internal/storage/memory.go"
+      - "nore/internal/storage/sqlite/**"
+      - "nore/internal/storage/postgres/**"
+      - "nore/internal/storage/storagetest/**"
+      - "nore/internal/storage/**/*_test.go"
+      - "nore/internal/storage/fake_test.go"
+      - "nore/internal/execution/store_failure_test.go"
+      - "nore/internal/instance/metadata_store_test.go"
+      - "nore/cmd/nore/main_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-022]
+    acceptance:
+      - "RenewTimer extends only a live lease owned by the caller"
+      - "DeleteTimerOwned deletes only when the owner matches"
+      - "PutTimer rejects overwriting a live lease with ErrTimerLeased and allows unleased/expired re-put"
+      - "Memory/SQLite/PostgreSQL implement the primitives and shared contract tests cover them"
+      - "Memory passes under -race; no full-table scan introduced"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/storage/..."
+      - "cd nore && GOWORK=off go build ./..."
+      - "cd nore && GOWORK=off go test -run '^$' ./..."
+      - "gofmt -l on changed Go files"
+    status: needs_review
+    lease: null
+    commit: 8a01be9
+    evidence: ["`cd nore && GOWORK=off go test -race -count=1 ./internal/storage ./internal/storage/sqlite` -> PASS.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/postgres` -> PASS (skipped, no DSN).", "`cd nore && GOWORK=off go test -count=1 ./internal/execution ./internal/instance ./cmd/nore` -> PASS.", "`cd nore && GOWORK=off go build ./...` -> PASS; `go test -run '^$' ./...` -> PASS.", "`gofmt -l` on changed files -> clean.", "Commit 8a01be9.", "Critical reviewer finding: `PutTimer` returns success without writing when `RowsAffected == 0` and a separate pooled-connection SELECT observes no live lease (`sqlite.go:498-516`, `postgres.go:498-512`).", "Architect requires per-claim owner/fencing semantics, empty-owner behavior, fail-closed `PutTimer`, and documentation before sign-off."]
+    reports: []
+    open_risks: ["Postgres parity unverified without DSN.", "Critical `PutTimer` fail-open race must be fixed before T-037 can be done.", "Empty-owner behavior diverges between memory/SQL and must be specified.", "Reviewer/architect/security sign-offs pending.", "ADR will need a one-line status update after signoff."]
+
+  - id: T-038
+    objective: "Harden timer migrations for legacy rows and concurrent startup"
+    scope:
+      - "nore/internal/storage/migrate/**"
+      - "nore/internal/storage/sqlite/**"
+      - "nore/internal/storage/postgres/**"
+      - "nore/internal/storage/**/*_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-022]
+    acceptance:
+      - "Legacy timer rows with waitUntil are backfilled to due_at where parseable, or explicitly quarantined with a recorded reason; no silent permanent invisibility"
+      - "Migration v3 is safe against concurrent startup on PostgreSQL and SQLite (advisory/exclusive lock or idempotent DDL)"
+      - "Populated-v2 migration test and concurrent-migration test pass"
+      - "Postgres migration tests are DSN-gated and recorded honestly"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/storage/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/storage/postgres/... (or record DSN unavailable)"
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/storage/migrate/**"], task: T-038 }
     commit: null
+    evidence: ["Security review of 23aca93: legacy timer rows get due_at NULL and are excluded by DueTimers/ClaimTimer; migration ADD COLUMN is not idempotent and concurrent startup can fail.", "Working tree contains migration hardening: per-step SQLite transaction, PostgreSQL advisory lock, duplicate-tolerant ADD COLUMN, legacy due_at backfill/quarantine, populated-v2 and concurrent-startup tests.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` -> ok."]
+    reports: []
+    open_risks: ["Uncommitted. Modifying migration v3 does not backfill databases already recorded at v3; architect must decide v3 versus a new v4 migration.", "PostgreSQL backfill tries a `?` statement before `$1`; on PostgreSQL the first failure aborts the transaction, so the fallback cannot succeed.", "Security/architect sign-off for T-022 is conditional on this hardening or an approved exception."]
 
   - id: T-024
     objective: "Implement durable wait state, scheduler-owned wait transitions, recovery, deadlines, and snapshot v3"
