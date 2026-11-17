@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 )
@@ -59,6 +60,14 @@ type Config struct {
 }
 
 // Migrate ensures the schema is up to date.
+//
+// Concurrent startup is serialized per driver: PostgreSQL holds a session
+// advisory lock for the duration of the run while applying each migration in
+// its own transaction (preserving per-step atomicity); SQLite performs each
+// migration step inside a BEGIN IMMEDIATE transaction so concurrent starters
+// block until the step commits. Migration steps and their ADD COLUMN operations
+// are idempotent/duplicate-tolerant so a raced or partially-applied step can be
+// retried safely.
 func Migrate(ctx context.Context, cfg Config) error {
 	if cfg.DB == nil {
 		return fmt.Errorf("migrate: db is required")
@@ -71,11 +80,55 @@ func Migrate(ctx context.Context, cfg Config) error {
 		table = "schema_migrations"
 	}
 
-	if err := ensureMigrationsTable(ctx, cfg.DB, cfg.Driver, table); err != nil {
+	migs := make([]Migration, len(cfg.Migrations))
+	copy(migs, cfg.Migrations)
+	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
+
+	switch cfg.Driver {
+	case DriverPostgres:
+		return migratePostgres(ctx, cfg, table, migs)
+	case DriverSQLite:
+		return migrateSQLite(ctx, cfg, table, migs)
+	default:
+		// Best-effort fallback: no driver-specific lock, but idempotent steps.
+		return migrateSQLite(ctx, cfg, table, migs)
+	}
+}
+
+const migrationAdvisoryLockKey int64 = 8291047130942213611
+
+func migrationLockID(table string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("neuron/storage/migrate:" + table))
+	v := int64(h.Sum64())
+	if v == 0 {
+		return migrationAdvisoryLockKey
+	}
+	return v
+}
+
+func migratePostgres(ctx context.Context, cfg Config, table string, migs []Migration) error {
+	conn, err := cfg.DB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: acquire connection: %w", err)
+	}
+	defer conn.Close()
+
+	lockID := migrationLockID(table)
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, lockID); err != nil {
+		return fmt.Errorf("migrate: acquire advisory lock: %w", err)
+	}
+	defer func() {
+		// Always release on the same session/connection; use a background context
+		// so shutdown/cancellation cannot leak the session lock.
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, lockID)
+	}()
+
+	if err := ensureMigrationsTable(ctx, conn, cfg.Driver, table); err != nil {
 		return err
 	}
 
-	current, dirty, err := getCurrentVersion(ctx, cfg.DB, cfg.Driver, table)
+	current, dirty, err := getCurrentVersion(ctx, conn, cfg.Driver, table)
 	if err != nil {
 		return err
 	}
@@ -86,22 +139,106 @@ func Migrate(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("%w: db version %d > supported max %d", ErrNewerSchema, current, cfg.MaxVersion)
 	}
 
-	migs := make([]Migration, len(cfg.Migrations))
-	copy(migs, cfg.Migrations)
-	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
-
+	target := cfg.MaxVersion
 	for _, m := range migs {
+		if target >= 0 && m.Version > target {
+			continue
+		}
 		if m.Version <= current {
 			continue
 		}
-		if err := applyMigration(ctx, cfg.DB, cfg.Driver, table, m); err != nil {
+		if err := applyMigration(ctx, conn, cfg.Driver, table, m); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ensureMigrationsTable(ctx context.Context, db *sql.DB, drv Driver, table string) error {
+func migrateSQLite(ctx context.Context, cfg Config, table string, migs []Migration) error {
+	// Each step runs in its own BEGIN IMMEDIATE transaction so concurrent
+	// starters serialize on the database write lock and per-step commits remain
+	// durable independently.
+	for {
+		applied, err := migrateSQLiteStep(ctx, cfg, table, migs)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return nil
+		}
+	}
+}
+
+func migrateSQLiteStep(ctx context.Context, cfg Config, table string, migs []Migration) (bool, error) {
+	tx, err := cfg.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("migrate: begin step: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := ensureMigrationsTableTx(ctx, tx, cfg.Driver, table); err != nil {
+		return false, err
+	}
+
+	current, dirty, err := getCurrentVersionTx(ctx, tx, cfg.Driver, table)
+	if err != nil {
+		return false, err
+	}
+	if dirty {
+		return false, ErrDirty
+	}
+	if cfg.MaxVersion >= 0 && current > cfg.MaxVersion {
+		return false, fmt.Errorf("%w: db version %d > supported max %d", ErrNewerSchema, current, cfg.MaxVersion)
+	}
+
+	target := cfg.MaxVersion
+	for _, m := range migs {
+		if target >= 0 && m.Version > target {
+			continue
+		}
+		if m.Version <= current {
+			continue
+		}
+		if err := m.Up(ctx, tx); err != nil {
+			return false, fmt.Errorf("migrate: up v%d (%s): %w", m.Version, m.Description, err)
+		}
+		if err := recordMigration(ctx, tx, cfg.Driver, table, m); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("migrate: commit v%d: %w", m.Version, err)
+		}
+		committed = true
+		return true, nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("migrate: commit step: %w", err)
+	}
+	committed = true
+	return false, nil
+}
+
+type dbExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type txBeginner interface {
+	dbExecer
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func ensureMigrationsTable(ctx context.Context, db dbExecer, drv Driver, table string) error {
+	return ensureMigrationsTableTx(ctx, db, drv, table)
+}
+
+func ensureMigrationsTableTx(ctx context.Context, db dbExecer, drv Driver, table string) error {
 	var q string
 	if drv == DriverPostgres {
 		q = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -124,7 +261,11 @@ func ensureMigrationsTable(ctx context.Context, db *sql.DB, drv Driver, table st
 	return nil
 }
 
-func getCurrentVersion(ctx context.Context, db *sql.DB, drv Driver, table string) (int64, bool, error) {
+func getCurrentVersion(ctx context.Context, db dbExecer, drv Driver, table string) (int64, bool, error) {
+	return getCurrentVersionTx(ctx, db, drv, table)
+}
+
+func getCurrentVersionTx(ctx context.Context, db dbExecer, drv Driver, table string) (int64, bool, error) {
 	q := fmt.Sprintf(`SELECT version, dirty FROM %s ORDER BY version DESC LIMIT 1`, table)
 	var v int64
 	var dirtyVal interface{}
@@ -147,7 +288,7 @@ func getCurrentVersion(ctx context.Context, db *sql.DB, drv Driver, table string
 	}
 }
 
-func applyMigration(ctx context.Context, db *sql.DB, drv Driver, table string, m Migration) error {
+func applyMigration(ctx context.Context, db txBeginner, drv Driver, table string, m Migration) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("migrate: begin tx for v%d: %w", m.Version, err)
@@ -171,7 +312,7 @@ func applyMigration(ctx context.Context, db *sql.DB, drv Driver, table string, m
 	return nil
 }
 
-func recordMigration(ctx context.Context, tx *sql.Tx, drv Driver, table string, m Migration) error {
+func recordMigration(ctx context.Context, tx dbExecer, drv Driver, table string, m Migration) error {
 	var q string
 	if drv == DriverPostgres {
 		q = fmt.Sprintf(`INSERT INTO %s (version, description, dirty) VALUES ($1, $2, FALSE)`, table)
