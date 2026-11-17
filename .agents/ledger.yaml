@@ -405,9 +405,9 @@ tasks:
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recovery'"
     status: in_progress
     lease: { owner: coder, paths: ["nore/internal/execution/execution.go", "nore/internal/execution/snapshot.go", "nore/internal/execution/accessors.go", "nore/internal/execution/wait.go", "nore/internal/execution/store.go", "nore/internal/execution/dispatch_intent*.go", "nore/internal/execution/recovery*.go", "nore/internal/execution/scheduler/**", "nore/internal/execution/*_test.go", "nore/internal/instance/**", "nore/internal/contracts/**", "nore/internal/event/**"], task: T-024 }
-    evidence: []
-    reports: []
-    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin."]
+    evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs."]
+    reports: ["T-024"]
+    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c/T-024d remain: scheduler poller/recovery/reconciler and instance/event integration are not implemented."]
 
   - id: T-025
     objective: "Wire engine suspend consumption, durable retry, cancellation/deadline enforcement, and dispatch reconciliation"
