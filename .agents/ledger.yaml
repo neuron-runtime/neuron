@@ -405,9 +405,9 @@ tasks:
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recovery'"
     status: in_progress
     lease: { owner: coder, paths: ["nore/internal/execution/execution.go", "nore/internal/execution/snapshot.go", "nore/internal/execution/accessors.go", "nore/internal/execution/wait.go", "nore/internal/execution/store.go", "nore/internal/execution/dispatch_intent*.go", "nore/internal/execution/recovery*.go", "nore/internal/execution/scheduler/**", "nore/internal/execution/*_test.go", "nore/internal/instance/**", "nore/internal/contracts/**", "nore/internal/event/**"], task: T-024 }
-    evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "T-024c1a `059cae7`: scheduler wait entry/resolution, due-timer poller, fresh per-claim owners, fenced timer deletion, replay reload, publish-after-commit, and `WaitStore`/poll config; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass; `-race -count=20 -run 'Wait|Timer'` pass; focused scheduler wait/timer tests pass; build/vet/gofmt/diff-check clean.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs."]
-    reports: ["T-024", "T-024c1a"]
-    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c1b/T-024c2/T-024d remain: cancellation/retry/max-lifetime, recovery/reconciler, and instance/event integration are not implemented.", "Due-timer poller leaves a claimed timer in place when execution state is terminal, missing, not waiting, or snapshot deadline is future; handle with cancellation/failure cleanup without deleting a still-needed timer.", "Recovery currently skips durable `StatusWaiting` executions; tracked as T-040."]
+    evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "T-024c1a `059cae7`: scheduler wait entry/resolution, due-timer poller, fresh per-claim owners, fenced timer deletion, replay reload, publish-after-commit, and `WaitStore`/poll config; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass; `-race -count=20 -run 'Wait|Timer'` pass; focused scheduler wait/timer tests pass; build/vet/gofmt/diff-check clean.", "T-024c1b1 `ffa4d57`: durable cancellation removes all execution-owned timers in one transition, retains wait metadata, discards join buffers; poller discards stale claimed timers under fence and preserves retry/future-deadline timers. `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, focused `Cancel|Wait|Timer|Retry|Dispatch`, `-race -count=20`, build, gofmt, diff-check all pass.", "T-040a `e7ab02e`: recovery accepts durable StatusWaiting, re-derives status, guards the no-work branch with authoritative waiting counts; execution/scheduler recovery tests pass under `-race` and `-count=20`.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs."]
+    reports: ["T-024", "T-024c1a", "T-024c1b1", "T-040a"]
+    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c1b2/T-024c2/T-024d remain: durable retry/max-lifetime, dispatch reconciler, and instance/event integration are not implemented.", "T-041: shared mutable Execution TOCTOU between ResolveSignal, PollDueTimers, and recovery can permit duplicate publish/commit. Must be serialized before T-025/T-027 production wiring.", "T-043: minor poller tests and timer-prefix authority cleanup remain."]
 
   - id: T-040
     objective: "Recover fully waiting executions without failing healthy waits or losing elapsed timers"
@@ -425,15 +425,109 @@ tasks:
       - "Elapsed timer/deadline/retry waits resume exactly once after recovery"
       - "Non-due signal waits survive recovery as waiting without dispatch or failure"
       - "Recovery does not fail a healthy execution merely because it has no runnable work while legitimately waiting"
-      - "Regression tests exercise execution-level and Scheduler.RecoverExecution paths"
+      - "Regression tests exercise execution-level, Scheduler.RecoverExecution, and instance recovery paths"
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Recover|Wait|Retry|Timer'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... -run 'Recover|Wait|Retry|Timer'"
+    status: in_progress
+    lease: null
+    evidence: ["Read-only verification `T-024c-recovery-check` confirmed `RecoverableDispatch` returns nil unless status is Running (execution.go:442-447) and `Scheduler.RecoverExecution` returns early for non-Running statuses (scheduler.go:139-141). At HEAD `039a782` the path was latent because wait mutators have no production callers yet.", "T-040a `e7ab02e`: execution/scheduler recovery fixed and tested; `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, `-race -count=20 -run 'Recover|Wait|Retry|Timer'`, build, gofmt, and diff-check pass.", "ADR 0003 architecture design approved with conditions; implementation sign-off pending."]
+    reports: ["T-040a"]
+    open_risks: ["T-040b instance recovery boundary remains.", "Reviewer/architect sign-off for e7ab02e remains.", "Concurrent recovery is subject to T-041 serialization.", "Recovery must not normalize a healthy non-due signal wait into a failure path."]
+
+  - id: T-040b
+    objective: "Prove durable StatusWaiting recovery at the instance boundary"
+    scope:
+      - "nore/internal/instance/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: [T-040a]
+    acceptance:
+      - "Instance recovery loads a durable StatusWaiting execution and leaves a non-due signal wait waiting, not failed or running"
+      - "A subsequent elapsed timer/resume dispatches exactly once through the instance boundary"
+      - "Instance does not acquire a second wait/recovery implementation"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recover|Wait|Timer'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/instance/..."
     status: not_started
     lease: null
-    evidence: ["Read-only verification `T-024c-recovery-check` confirmed `RecoverableDispatch` returns nil unless status is Running (execution.go:442-447) and `Scheduler.RecoverExecution` returns early for non-Running statuses (scheduler.go:139-141). At HEAD `039a782` the path is latent because wait mutators have no production callers yet."]
+    evidence: []
     reports: []
-    open_risks: ["Status semantics decision: whether a recovered non-due wait is visibly StatusWaiting or transiently Running needs architect sign-off.", "Recovery must not normalize a healthy non-due signal wait into a failure path."]
+    open_risks: ["Must use the existing scheduler recovery path, not duplicate it in instance."]
+
+  - id: T-041
+    objective: "Serialize shared in-memory wait transitions across signal, timer, and recovery drivers"
+    scope:
+      - "nore/internal/execution/execution.go"
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/scheduler/**"
+      - "nore/internal/execution/*_test.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-040a]
+    acceptance:
+      - "ResolveSignal, PollDueTimers, and recovery cannot both pass a waiting precheck and commit/publish from one shared mutable snapshot"
+      - "State mutation and commit are serialized per execution, or a durable re-read/CAS rejects the loser before publication"
+      - "A concurrent signal-vs-poller regression test proves one transition and no duplicate CapabilityReady"
+      - "No nested transaction and no publish inside a transaction"
+      - "Failure rollback cannot restore a stale revision over a committed peer"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'Concurrent|Signal|Timer|Recover'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
+    status: not_started
+    lease: null
+    evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race."]
+    reports: []
+    open_risks: ["Architecture decision needed on per-execution serialization vs durable re-read before commit.", "Must coordinate with T-025/T-027 production wiring."]
+
+  - id: T-042
+    objective: "Remove pre-existing flaky scheduler/acceptance test failures"
+    scope:
+      - "nore/internal/execution/scheduler/**"
+      - "application/internal/acceptance/**"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [reviewer]
+    dependencies: []
+    acceptance:
+      - "TestStoppedCapabilityPublishesCancellationNotFailure no longer times out"
+      - "TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery no longer reports multiple winners"
+      - "Flakes are fixed at the source, not retried or skipped"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'StoppedCapability|ConcurrentClaim'"
+      - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance -run 'R4_24'"
+    status: not_started
+    lease: null
+    evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation."]
+    reports: []
+    open_risks: ["May be timing/synchronization defects rather than test defects."]
+
+  - id: T-043
+    objective: "Close wait-cancellation test and timer-prefix authority gaps"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/storage/key.go"
+      - "nore/internal/execution/scheduler/wait.go"
+      - "nore/internal/execution/scheduler/timer_poller_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: [T-041]
+    acceptance:
+      - "Poller test proves CapabilityRetryWait leaves its timer intact"
+      - "Poller test proves a nil-WaitUntil stale timer is fenced-deleted"
+      - "Execution-wide timer prefix has one storage authority, not a duplicated 'timers' literal"
+      - "WaitTimerKeys doc matches actual poller/cancellation use"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/scheduler -run 'Retry|NilWait|WaitTimerKeys'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/storage/..."
+    status: not_started
+    lease: null
+    evidence: ["Reviewer T-024c1b1-review minor findings: retry branch untested, nil-deadline-with-timer untested, duplicated timers namespace literal, overstated WaitTimerKeys comment."]
+    reports: []
+    open_risks: []
 
   - id: T-025
     objective: "Wire engine suspend consumption, durable retry, cancellation/deadline enforcement, and dispatch reconciliation"
