@@ -41,6 +41,14 @@
 - **Legacy rows:** timer rows without `due_at` are **inert by decision**. Optional backfill may parse `waitUntil` where such rows exist, but it is **not silently assumed**.
 - **Not claimed by `23aca93`:** lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (tracked as `T-037`/`T-038`), not delivered by this commit. The storage-vs-scheduler boundary is unchanged: the timer store is an indexed lease/index mechanism; the execution snapshot remains authoritative.
 
+**Implementation update — lease fencing and migration hardening (commits `f82ffa6`, `a78a366`, 2026-11-17)**
+
+- **T-037 (`f82ffa6`) — lease renewal/ownership fencing landed.** `RenewTimer` extends only a live lease owned by the caller; `DeleteTimerOwned` deletes only on owner match; `PutTimer` rejects overwriting a live lease with `ErrTimerLeased` (fail-closed). Owner is a required per-claim fencing token. This closes the follow-up left open by `23aca93` (D1/D2 above); reviewer/security approved (ledger T-037).
+- **T-038 (`a78a366`) — migration hardening landed; architecture sign-off granted in ADR 0002.** Migration **v3 remains immutable DDL-only** (`due_at`, `owner`, `lease_expires_at`, `idx_timer_store_due_key`). New **v4** backfills parseable legacy `waitUntil`/`wait_until`/`dueAt`/`due_at` values into `due_at` and leaves unparseable rows explicitly quarantined as `due_at IS NULL` (non-schedulable). The quarantine reason is recorded by repository policy (this ADR D2 + ADR 0002) and the `due_at IS NULL` invariant; no per-row reason column was added. v4 is idempotent (`WHERE due_at IS NULL`) and repairs databases already recorded at v3.
+- **SQLite startup serialization is a documented, test-guarded DSN contract:** `_txlock=immediate` + `_busy_timeout` + `SetMaxOpenConns(1)` as in production (`nore/internal/storage/sqlite/sqlite.go:52,57`). Deferred/plain DSNs are unsupported for concurrent-startup safety and fail explicitly (bounded busy/exhaustion) rather than silently corrupting. See the ADR 0002 re-review of `a78a366`.
+- **The earlier "inert by decision / optional backfill" legacy-row wording above describes the `23aca93` state only.** Current authoritative behavior is v4 backfill/quarantine as recorded in ADR 0002.
+- **Postgres migration parity is environment-gated and remains UNVERIFIED without a DSN.** Real DSN-gated migration tests exist (`nore/internal/storage/migrate/postgres_migrate_test.go`) for v2→v4, v3→v4 repair, 6-way concurrent startup/advisory-lock contention, and idempotent rerun, isolated per test by a unique schema pinned via `search_path`; they skip with an explicit reason only when `NEURON_TEST_POSTGRES_DSN` is empty. No DSN was available in the review environment, so none executed. No Postgres migration/runtime parity is claimed.
+
 **API, protocol, and SDKs**
 
 - The only signal route is instance-scoped: `POST /v1/instances/{id}/executions/{execID}/signals/{signalName}` (`shared/types/protocol/endpoints.go:31`), registered at `nore/internal/api/routes/routes.go:56`.
@@ -73,11 +81,11 @@ Consequence: one `WithTimer` transaction can atomically write an execution snaps
 
 `TimerTx` remains internal to the storage boundary. It must not be passed into scheduler/engine code directly; the transition committer owns the transaction.
 
-Lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (`T-037`/`T-038`) and are not claimed by `23aca93`.
+Lease renewal/ownership fencing and migration/concurrency hardening were **follow-up hardening** (`T-037`/`T-038`) not claimed by `23aca93`; both have since landed (`f82ffa6`/`a78a366`) — see the implementation update above.
 
 ### D2 — Due-timer substrate (adopted; substrate implemented in `23aca93`)
 
-Migration **v3** adds `due_at`, `owner`, `lease_expires_at`, and index `idx_timer_store_due_key (due_at, key)` to `timer_store` for SQLite and PostgreSQL (`nore/internal/storage/migrate/registry.go`, commit `23aca93`). The bounded storage primitive and record are implemented in the storage contract (`nore/internal/storage/provider.go`, `23aca93`):
+Migration **v3** adds `due_at`, `owner`, `lease_expires_at`, and index `idx_timer_store_due_key (due_at, key)` to `timer_store` for SQLite and PostgreSQL (`nore/internal/storage/migrate/registry.go`, commit `23aca93`) and is **immutable DDL-only**; migration **v4** (`a78a366`) performs legacy backfill/quarantine (see ADR 0002). The bounded storage primitive and record are implemented in the storage contract (`nore/internal/storage/provider.go`, `23aca93`):
 
 ```go
 type Timer struct {
@@ -98,10 +106,10 @@ DueTimers(ctx context.Context, now time.Time, limit int) ([]Timer, error)
 - `DueTimers` must never return a timer with a live lease.
 - The poller interval defaults to 1s and is configurable. Batch size defaults to 256 and is configurable. (Scheduler/poller consumption remains governed by later Phase 5 execution work; this ADR preserves the storage-vs-scheduler boundary.)
 - No full-table scan is permitted for due discovery. Prefix listing remains for cleanup/listing only.
-- **Legacy rows:** pre-existing timer rows without `due_at` are **inert by decision**. If any exist, a one-time backfill may parse the JSON `waitUntil`; this is **optional and not silently assumed**.
+- **Legacy rows:** pre-existing timer rows without `due_at` were **inert by decision** in `23aca93`; current behavior is v4 backfill of parseable `waitUntil`/`wait_until`/`dueAt`/`due_at` and explicit quarantine (`due_at IS NULL`) of unparseable rows, per ADR 0002 and the implementation update above.
 - `MemoryStore` implements the same substrate semantics (implemented in `23aca93`).
 
-**Parity/verification:** SQLite and PostgreSQL implement the substrate in code with migration v3 and the due-key index; Memory implements parity semantics. PostgreSQL contract/parity execution is environment-gated by DSN availability and remains **unverified without a DSN** (see T-022 evidence). **Not claimed by `23aca93`:** lease renewal/ownership fencing and migration/concurrency hardening are **follow-up hardening** (`T-037`/`T-038`).
+**Parity/verification:** SQLite and PostgreSQL implement the substrate in code with migration v3 and the due-key index; Memory implements parity semantics. PostgreSQL contract/parity execution is environment-gated by DSN availability and remains **unverified without a DSN** (see T-022 evidence), including the v2→v4/v3→v4 migration and concurrent-startup tests added in `a78a366` (none executed without a DSN). **Not claimed by `23aca93`:** lease renewal/ownership fencing and migration/concurrency hardening were **follow-up hardening** (`T-037`/`T-038`); both subsequently landed (`f82ffa6`/`a78a366`).
 
 ### D3 — Capability suspend protocol (adopted)
 

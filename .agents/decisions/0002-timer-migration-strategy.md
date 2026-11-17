@@ -1,7 +1,8 @@
 # 0002 — Timer migration hardening: immutability, v4 backfill, and startup serialization
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-17
+- Accepted commit: a78a366 (T-038 migration hardening). Supersedes the refusals of d295bdf and ab23e5a recorded below.
 - Owners: architect
 - Related tasks: T-038 (primary), T-022 (23aca93), T-036 (ce13556), T-037 (disjoint), T-024 (out of scope)
 - Supersedes: none (amends interpretation of ADR 0001 §D2 as applied to committed migration history; ADR 0001 must be updated for consistency after implementation)
@@ -190,13 +191,96 @@ cd nore && NEURON_TEST_POSTGRES_DSN="$NEURON_TEST_POSTGRES_DSN" GOWORK=off go te
 
 ## Sign-off
 
-**status: needs_review (architecture decision issued; implementation/refusal pending coder work).**
+**status at time of original decision: needs_review (implementation/refusal pending). SUPERSEDED — see "T-038 architecture re-review — a78a366" below, where architecture sign-off is granted.**
 
 - I **approve the design direction** specified above for T-038: **(b) new v4 backfill/quarantine + restore immutable v3**, driver-dispatched parameterization (no PG `?` probe in tx), explicit quarantine-by-policy+NULL, PostgreSQL session-lock preservation, and explicit SQLite write-serialization.
 - I **refuse to sign off** the current d295bdf state as correct/complete because: v3 was mutated post-commit (`registry.go:43-131` vs 23aca93 contract), DBs already at v3 will not be repaired, PostgreSQL backfill fallback is transaction-unsafe (`registry.go:186-189`), SQLite immediate-lock guarantee is not established by runner code (`migrate.go:173`), and `execAddColumnSQLite` suppression is overly broad (`registry.go:144-146`).
 - **Implementation sign-off** (architect/security, per ownership/ledger) may be granted only after the ordered changes and acceptance tests above land and evidence is recorded, with the Postgres DSN limitation stated explicitly if unrun.
 
+## T-038 architecture review — `ab23e5a` (2026-11-17)
+
+- verdict: **needs_review (architecture sign-off refused)**
+- scope reviewed (read-only): `nore/internal/storage/migrate/registry.go`, `nore/internal/storage/migrate/migrate.go`, `nore/internal/storage/migrate/migrate_test.go`, `nore/internal/storage/sqlite/sqlite.go:52`, `.agents/decisions/0001-phase5-signals-timers.md`, `.agents/decisions/0002-timer-migration-strategy.md`, commit `ab23e5a`.
+- evidence: migrate tests pass (`cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` 0.112s; `-race` 1.571s), storage/build reported passing by task context. **Postgres runtime behavior not executed (no `NEURON_TEST_POSTGRES_DSN`).**
+
+### Decision on required questions
+
+1. **v3 duplicate-column tolerance vs exact plain `ALTER TABLE` from `23aca93` (`registry.go:49-60`, helper `:139-151`; Postgres `:112-123` uses `IF NOT EXISTS`) — acceptable, not an immutability violation.** v3 remains DDL-only and preserves the committed substrate contract (same columns/index, no data mutation/backfill, legacy handling deferred to v4 `:62-67,126-131`). Narrow duplicate-column suppression is limited to `"duplicate column name"` (`:147`) and `execAddColumnSQLite_DoesNotSuppressUnrelatedErrors` guards unrelated failures (`migrate_test.go:173-191`), so partial/retried DDL converges without masking real errors. Immutability applies to migration *semantic identity/effect*, which is preserved.
+2. **SQLite serialization (`migrate.go:68-70,158-186,193-246`) — bounded `SQLITE_BUSY` retry + production `_txlock=immediate` is a sufficient *DSN-contract* mechanism for current production code, but insufficient as a runner-enforced guarantee.** `nore/internal/storage/sqlite/sqlite.go:52` opens with `_txlock=immediate` and `db.SetMaxOpenConns(1)` (`:57`), and `TestMigrateConcurrentStartupSQLite` proves convergence under the same mode (`migrate_test.go:127-171`, DSN at `:142`). However, the runner itself still uses `BeginTx(ctx, nil)` (`migrate.go:194`) and does not force `BEGIN IMMEDIATE` on a pinned connection; with a deferred-tx DSN concurrent starters can observe read-read/write conflict behavior that is only probabilistically mitigated by retry. **Required change (blocking):** either (a) enforce write reservation in code for SQLite migrations (e.g. pin a connection and issue/guarantee `BEGIN IMMEDIATE`/equivalent supported by `modernc.org/sqlite` before migration work, or otherwise make step transactions immediate independent of caller DSN), or (b) make the `_txlock=immediate` (+ bounded busy/retry) contract explicit and test-guarded by adding a runner-level test that proves deterministic behavior under the declared production DSN contract and documenting that non-immediate DSNs are unsupported for migration/startup safety. Option (a) is preferred for infrastructure correctness.
+3. **`TestMigratePostgresDSNGated` (`migrate_test.go:193-199`) — blocks sign-off.** When DSN is absent it skips correctly, but when a DSN is set it still skips (`"DSN-gated migration cases require a dedicated test database; not implemented in this lease"`), so it never executes any Postgres case. ADR 0002 required DSN-gated v2→v4 backfill/quarantine, DB-already-at-v3→v4 repair, concurrent startup/advisory-lock serialization, and idempotent rerun, all skipped with an explicit reason when unset and reported as unverified. **Minimum acceptable implementation:** real DSN-gated tests covering (i) populated v2 → v4 backfill/quarantine + schedulability, (ii) schema-at-v3 with legacy `due_at IS NULL` rows → v4 repair, (iii) concurrent `Migrate` starters converge at v4 without dirty/newer-schema errors, (iv) idempotent rerun at v4; use a dedicated isolated schema/database per test (or unique table-prefix/lock namespace) so tests do not collide with shared state; `t.Skip` with explicit reason only when `NEURON_TEST_POSTGRES_DSN` is empty. Until executed, results must be recorded as "Postgres migration behavior: not executed (DSN unavailable)".
+4. **v4 full scan/load of `due_at IS NULL` rows (`registry.go:164-203`) — acceptable for a one-time, idempotent migration, with noted residual risk.** It selects only quarantined legacy candidates (not all timers), parses in Go, and issues targeted per-row updates `WHERE ... due_at IS NULL` inside the migration transaction/step, which is rollback-safe per step and bounded by the legacy-null population. No streaming/batching is required for sign-off, but **required documentation/test follow-up (non-blocking to architecture if recorded):** note that memory scales with null-due rows and consider batching if a deployment can have an extreme legacy backlog; correctness is preserved because rerun is idempotent.
+5. **PostgreSQL advisory-lock/runner shape (`migrate.go:101-156,291-334`) — design acceptable; runtime unverified.** Dedicated `*sql.Conn` pinned (`:112-116`), `pg_advisory_lock` on that session (`:118-120`), deferred `pg_advisory_unlock` on the same conn with `context.Background()` (`:121-126`), and migrations/`schema_migrations` reads applied through that same locked connection/tx path (`:128-155`, `applyMigration` `:312-334`, `txBeginner` `*sql.Conn` satisfies `BeginTx`). Driver-dispatched `$1/$2` backfill avoids the prior transaction-aborting `?` probe (`registry.go:191-198`). `MaxVersion`/`ErrNewerSchema`/dirty refusal semantics preserved (`migrate.go:132-149,209-218,269-289,315-326`). **Explicit limitation:** not executed against Postgres in this environment.
+6. **Quarantine reason policy (`registry.go:153-163,185-189`, ADR 0002 §2/`registry.go:47-48,110-111`) — consistent and acceptable.** Quarantine state is `due_at IS NULL` (non-schedulable/excluded from due discovery by substrate contract); the reason is durably recorded by repository policy (ADR 0001 D2 + ADR 0002, v4 description "backfill/quarantine legacy timer rows with null due_at", and code comments stating unparseable rows remain explicitly quarantined/non-schedulable). No extra schema column required.
+
+### Per-step SQLite commit/retry correctness
+- Per migration step: read state, validate, apply one migration `Up` and record version in the same tx, then commit (`migrate.go:193-246`) — correct step atomicity. Busy contention is retried boundedly (`:163-186`, `isSQLiteBusy` `:188-191`) and `ctx` is honored. `applied==true` resets the retry budget (`:170`) which is reasonable for forward progress but should remain bounded overall by migration count/ctx in implementation; not a current correctness defect. No `ErrDirty`/partial version record is written on failure because step tx rolls back on error (`:199-203,228-236`).
+
+### Ordered required changes (blocking)
+
+1. **SQLite migration serialization must be deterministic, not best-effort retry-only:** enforce immediate/write-reserved migration transactions in runner code for SQLite (preferred) or codify+test the exact production DSN contract so non-immediate configurations cannot silently rely on contention luck. Update `migrate.go` and/or storage DSN construction/docs/tests accordingly.
+2. **Implement real DSN-gated PostgreSQL migration tests** (replacing the unconditional skip in `migrate_test.go:193-199`) for v2→v4, v3→v4 repair, concurrent startup/advisory-lock convergence, and idempotent rerun; isolate state per test; skip with explicit reason only when DSN is absent. Record executed/not-executed status as evidence.
+3. **After (1)-(2), re-run and record:** `cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...`, `-race` as applicable, SQLite storage/migrate suites, and Postgres DSN-gated suites (or explicit "DSN unavailable, not executed" limitation). Update ADR 0002 status to `accepted` only with that evidence.
+4. **If sign-off is later granted:** update ADR 0001 D2/implementation notes to state v3 immutable DDL-only, v4 legacy backfill/quarantine landed (commit), T-037 lease renewal/fencing landed, and Postgres migration/runtime parity unverified without DSN (consistency with T-036/T-037/T-038). *(Not performed now because sign-off is refused.)*
+
+### Explicit Postgres limitation statement
+**PostgreSQL migration behavior (advisory lock, `$n` backfill, v2→v4, v3→v4 repair, concurrent startup, idempotence) was NOT executed in this review environment because `NEURON_TEST_POSTGRES_DSN` is unavailable; parity/correctness on PostgreSQL remains unverified.**
+
+## T-038 architecture re-review — `a78a366` (2026-11-17)
+
+- verdict: **approved — architecture sign-off granted for `a78a366`** (supersedes the `ab23e5a` refusal). This is architecture sign-off only; reviewer/security sign-off and ledger state remain coordinator-owned, and Postgres runtime remains unexecuted (see limitation).
+- scope reviewed (read-only): commit `a78a366` diff vs `ab23e5a`; `nore/internal/storage/migrate/migrate.go`, `registry.go`, `migrate_test.go`, `postgres_migrate_test.go`; production DSN `nore/internal/storage/sqlite/sqlite.go:52,57`; `nore/go.mod:8`. No source edits made by this review.
+- diff is confined to `nore/internal/storage/migrate/**` (4 files; +745/−78). No new dependency (`math` is stdlib; `github.com/lib/pq v1.10.9` at `nore/go.mod:8` was already present). No new boundary edge: the change stays inside the storage persistence boundary; no compiler/execution/API/CLI/SDK surface changed. No competing representation or duplicated migration logic was introduced.
+
+### Blocker 1 — SQLite deterministic serialization: RESOLVED via option (b), explicit + test-guarded DSN contract
+
+- `migrate.go:59-67` documents the exact `Config` requirement: `_txlock=immediate` + bounded `_busy_timeout` + `SetMaxOpenConns(1)`, and explains why the runner cannot force transaction mode (`Migration.Up` receives `*sql.Tx` whose `BEGIN` is issued by `database/sql` at `BeginTx`; only the opening DSN controls it).
+- `migrate.go:76-93` documents the concurrency contract and failure behavior: deterministic serialization is a caller DSN contract; deferred/plain DSNs are explicitly unsupported and "must never be treated as serialized"; concurrent starters either converge or return an explicit busy/exhaustion error.
+- The declared-contract test `TestMigrateConcurrentStartupSQLite` (`migrate_test.go:165-213`) runs 8 concurrent starters using the exact production DSN string (`sqliteProductionDSN` at `:24`) plus `SetMaxOpenConns(1)` (`:189`) and requires every starter to succeed, then asserts a usable schema. The production DSN is verified at `sqlite.go:52` (`_txlock=immediate`, `_busy_timeout=5000`) and `:57` (`SetMaxOpenConns(1)`) — the test constant matches it verbatim.
+- The test that omits the contract exists: `TestMigrateConcurrentStartupSQLiteDeferredDSN` (`migrate_test.go:215-265`) runs 6 starters on a plain/deferred DSN, requires that any failure is a bounded busy/exhaustion/deadline error (not silent corruption), and asserts `PRAGMA integrity_check`, no dirty rows, and a recorded version in range (`:541-576`).
+- `errSQLiteBusyExhausted` (`migrate.go:26-29`) is now reachable at `migrate.go:212-214` (previously dead code) and proven by the `exhaustion is reachable` subtest (`migrate_test.go:450-462`). Retry logic was extracted into `migrateSQLiteWithRetry` (`migrate.go:194-222`) with an injected delay, enabling deliberate unit coverage of busy-then-success, non-busy passthrough, exhaustion, cancellation, and per-step budget reset (`migrate_test.go:414-502`). Busy classification is expanded at `migrate.go:224-239` and table-tested at `migrate_test.go:390-412`.
+- This satisfies ADR 0002 §7 and the `ab23e5a` required change (1) option (b): the contract is explicit, documented, and test-guarded, and non-immediate DSNs have defined, non-corrupting failure behavior.
+
+### Blocker 2 — Real DSN-gated Postgres tests: RESOLVED
+
+- The unconditional-skip placeholder is gone. `setupPostgresMigrationTest` (`postgres_migrate_test.go:26-71`) skips **only** when `NEURON_TEST_POSTGRES_DSN` is empty (`:31-34`); a supplied DSN that fails to connect/setup is fatal (`:42-69`), so "executed" status can now be recorded when a DSN exists.
+- All four ADR-required cases exist: `TestMigratePostgresPopulatedV2ToV4` (`:111-132`), `TestMigratePostgresV3ToV4Repair` (`:137-159`), `TestMigratePostgresConcurrentStartup` (6-way; `:164-211`), `TestMigratePostgresIdempotent` (`:215-234`).
+- Isolation is per test: a unique schema `neuron_migrate_test_<pid>_<nanos>` is created (`:37-49`), validated by `isSafeSQLIdentifier` (`:95-106`), dropped on cleanup (`:50-59`), and pinned on every connection through `search_path` in the DSN by `withSearchPath` (`:61,73-93`) — including connections opened during `Migrate` and advisory-lock handling. This prevents collision with shared/public schema state.
+- Postgres `$n`-only placeholder dispatch is additionally guarded by `TestLegacyBackfillUpdateSQLUsesDriverPlaceholders` (`migrate_test.go:379-388`).
+- Observed skip behavior (DSN unset): all four Postgres tests SKIP with the explicit reason `not run — NEURON_TEST_POSTGRES_DSN unavailable` (verbose run output). This is the required honest "unavailable" state.
+
+### Other acceptance criteria — assessed
+
+- **v3 immutability (DDL-only):** `registry.go:44-62` (SQLite) and `:107-126` (Postgres) add only the three columns plus `idx_timer_store_due_key`; no data mutation. Regression guard added in `TestMigratePopulatedV2BackfillsOrQuarantinesLegacyTimers` (`migrate_test.go:93-134`): migrate to v3, assert version 3 and all legacy rows still `due_at IS NULL` (`:108-115`), then v4 repairs/quarantines (`:121-133`). The prior reviewer finding "no v3 guard" is closed.
+- **Backfill correctness:** driver-dispatched SQL via `legacyBackfillUpdateSQL` (`registry.go:206-214`) — no PG `?` probe in a transaction. `parseLegacyTimerDueAt` (`registry.go:216-254`) now rejects non-finite and int64-overflowing epochs (`:241`) and normalizes to UTC (`:246,249`); 21 table cases at `migrate_test.go:332-377` cover RFC3339/Nano, seconds/fraction/ms, all four field names, and invalid/huge/zero/negative values. Non-NULL `due_at` preservation is proven at `migrate_test.go:117-126`. The time-dependent fixture was made relative (`migrate_test.go:26-31`), closing the prior minor finding.
+- **Advisory lock:** unchanged from the reviewed `ab23e5a` shape (`migrate.go:133-178`): pinned `*sql.Conn`, `pg_advisory_lock` on that session, background-context deferred unlock on the same conn, per-migration tx on the locked connection. Design acceptable; execution still gated on DSN (below).
+- **Idempotence:** SQLite rerun at v4 (`migrate_test.go:128-133`) and Postgres rerun (`postgres_migrate_test.go:127-131,220-233`) prove no-op behavior and non-overwrite of an existing non-NULL `due_at`.
+- **Duplicate-column narrowing:** `isSQLiteDuplicateColumnError` (`registry.go:148-157`) tolerates only `"duplicate column name"`; both branches are now genuinely tested — tolerated duplicate (`migrate_test.go:267-283`) and surfaced unrelated `already exists` (`:285-307`) — plus a direct classification table (`:309-330`). This closes the prior finding that the old test would pass against the old matcher.
+- **Retry exhaustion reachability:** fixed (`migrate.go:212-214`), no dead code.
+
+### New architectural defects introduced by `a78a366`
+
+- None found. The changes are localized hardening plus extraction of testable helpers (`migrateSQLiteWithRetry`, `isSQLiteDuplicateColumnError`, `legacyBackfillUpdateSQL`); no new public surface, no interface change, no boundary crossing, no speculative abstraction, and no folder/layout change. The chosen option (b) is the ADR-sanctioned alternative, not new drift.
+
+### Postgres execution limitation (explicit)
+
+**PostgreSQL migration behavior (advisory lock, `$n` backfill, v2→v4, v3→v4 repair, 6-way concurrent startup, idempotence) was NOT executed in this review environment because `NEURON_TEST_POSTGRES_DSN` is unavailable.** The tests are real and will execute when a DSN is supplied; they are not a placeholder. Structural correctness only is claimed for Postgres. This is an accepted verification limitation, not an architecture blocker; full parity must be executed in a DSN-enabled environment before release.
+
+### Evidence recorded
+
+- `cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` → ok, 0.160s.
+- `cd nore && GOWORK=off go test -race -count=1 ./internal/storage/migrate/...` → ok, 1.649s.
+- Verbose targeted run: SQLite v3-immutability, deferred-DSN concurrency, duplicate-column, 21 parser cases, and 5 retry subtests PASS; 4 Postgres tests SKIP with explicit reason (DSN unset).
+- Coordinator-reported (not re-run here): `-count=10` concurrency ok, `./internal/storage/...` ok, `go build ./...` ok.
+- Production DSN contract verified at `sqlite.go:52,57`; dependency verified at `nore/go.mod:8`.
+
+### Residual risks (non-blocking, recorded)
+
+- SQLite serialization is a DSN contract (option b), not runner-enforced; any non-production SQLite opener must set `_txlock=immediate` + `_busy_timeout` + `SetMaxOpenConns(1)` or accept explicit busy/exhaustion failure. Documented at `migrate.go:59-93`.
+- Worst-case startup latency under sustained contention (50 retries × up to 5s busy timeout) is not measured; bounded, no infinite loop.
+- v4 loads all `due_at IS NULL` rows into memory and issues one `UPDATE` per row in a single migration transaction; no batching. Acceptable for a one-time idempotent migration; batch only if a deployment has an extreme legacy backlog (ADR 0002 §7 already records this).
+- Advisory lock key derives from the table name (`migrate.go:121-131`), so concurrent tests in different isolated schemas share one lock key; this serializes rather than collisions — acceptable.
+
 ## Open questions
 
-- None blocking this decision. Implementation must choose the concrete `modernc.org/sqlite` mechanism to guarantee `BEGIN IMMEDIATE`/equivalent in `migrateSQLiteStep` consistent with deployed DSN policy (code-enforced preferred over convention) and document it in tests/comments.
-- Coordinator follow-up: update ADR 0001 for consistency (step 11) and record T-038 evidence/commits in ledger once implemented.
+- No blocking architecture questions remain. ADR 0001 has been updated for consistency (v3 immutable DDL-only, v4 backfill/quarantine, T-037 fencing, Postgres unverified).
+- Coordinator follow-ups (not architecture decisions): record commit `a78a366` and the accepted sign-off in ledger T-038; obtain reviewer/security sign-off; execute the DSN-gated Postgres tests in a DSN-enabled environment and record the result; run the full validation gate before closing T-038.
