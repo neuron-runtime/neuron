@@ -314,6 +314,14 @@ func (s *Scheduler) onCapabilityDetached(ctx context.Context, received event.Eve
 // early once an execution is terminal, so no further capability is scheduled and
 // no new binding is evaluated.
 //
+// In durable mode the terminal snapshot and the deletion of every wait timer the
+// execution owns are committed as one transaction. A cancelled wait can never
+// become due, so its timer must not remain independently claimable as live work;
+// making that cleanup an effect of the same transition guarantees there is no
+// window where the execution is terminal durably but a timer can still wake it.
+// Wait metadata is retained on the capability for diagnostics; only the timers
+// are removed.
+//
 // It reports whether this call cancelled the execution. A false return means the
 // execution was already terminal or unknown, and the caller must not claim it
 // cancelled something that had already finished.
@@ -325,6 +333,22 @@ func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, re
 	if err != nil {
 		return false, fmt.Errorf("load execution %s: %w", executionID, err)
 	}
+
+	// Discover the timer cleanup before mutating anything. If discovery fails,
+	// the execution is left untouched rather than terminal in memory with live
+	// timers it can no longer use.
+	durable := s.waitStore != nil
+	var effects executionmodel.WaitEffects
+	if durable {
+		keys, err := s.waitStore.WaitTimerKeys(ctx, executionID, "")
+		if err != nil {
+			return false, fmt.Errorf("list wait timers for execution %s: %w", executionID, err)
+		}
+		for _, key := range keys {
+			effects.DeleteTimers = append(effects.DeleteTimers, executionmodel.WaitTimerDelete{Key: key})
+		}
+	}
+
 	// Stop the work even when the state transition loses the race below: a
 	// capability must not keep running just because the execution completed in
 	// the same instant the cancellation arrived.
@@ -333,9 +357,21 @@ func (s *Scheduler) CancelExecution(ctx context.Context, executionID core.ID, re
 		return false, nil
 	}
 	s.scopes.Release(executionID)
+
 	// Commit the cancellation before announcing it: a client that observes the
 	// terminal event must be able to find the cancellation in durable storage.
-	if err := s.commit(ctx, execution, nil); err != nil {
+	// Timer deletes are intentionally unfenced: cancellation invalidates every
+	// timer for the execution, including one a poller currently holds under a
+	// lease, and a poller that lost its lease afterwards aborts safely at its
+	// fenced commit.
+	if durable {
+		if _, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
+			Execution: execution,
+			Effects:   effects,
+		}); err != nil {
+			return true, fmt.Errorf("persist cancelled execution %s: %w", execution.ID, err)
+		}
+	} else if err := s.commit(ctx, execution, nil); err != nil {
 		return true, fmt.Errorf("persist cancelled execution %s: %w", execution.ID, err)
 	}
 	_ = s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{

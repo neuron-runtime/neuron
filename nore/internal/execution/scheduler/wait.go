@@ -78,6 +78,11 @@ func (c TimerPollConfig) validated() (TimerPollConfig, error) {
 type WaitStore interface {
 	contracts.WaitCommitter
 	DueWaitTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error)
+	// WaitTimerKeys lists timer keys scoped to one execution, optionally narrowed
+	// to one capability (empty capabilityID means the whole execution). It lets
+	// cancellation remove every timer it owns and the poller prove whether a
+	// conflicting future deadline still has a dedicated timer.
+	WaitTimerKeys(ctx context.Context, executionID core.ID, capabilityID core.ID) ([]string, error)
 	GetSignalDelivery(ctx context.Context, executionID core.ID, deliveryID string) (*executionmodel.SignalDelivery, error)
 	Reload(ctx context.Context, executionID core.ID) (*executionmodel.Execution, error)
 }

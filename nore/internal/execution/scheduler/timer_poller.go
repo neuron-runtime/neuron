@@ -95,23 +95,56 @@ func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (i
 
 	execution, err := s.executions.Get(ctx, payload.ExecutionID)
 	if errors.Is(err, storage.ErrNotFound) {
-		return 0, nil
+		// The execution is gone, so this timer can never resume anything. Discard
+		// it under the claim fence; losing the lease here is a safe abort because
+		// the new owner will reach the same conclusion.
+		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("load execution %s: %w", payload.ExecutionID, err)
 	}
 	if execution.IsTerminal() {
-		return 0, nil
+		// A terminal execution's timers belong to its own transition, so one that
+		// is still claimable is stale. Clean it up without writing another snapshot.
+		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
 	}
 
 	state := execution.CapabilityState(payload.CapabilityID)
-	if state.Status != executionmodel.CapabilityWaiting {
+	switch state.Status {
+	case executionmodel.CapabilityWaiting:
+		// Handled below.
+	case executionmodel.CapabilityRetryWait:
+		// Retry resumption is a separate transition and is not driven by this
+		// poller. Such a timer cannot be consumed here and its deadline may still
+		// be needed, so leave it intact and report the condition.
+		slog.Warn("due wait timer belongs to a retry wait; leaving timer intact",
+			slog.String("execution_id", string(payload.ExecutionID)),
+			slog.String("capability_id", string(payload.CapabilityID)),
+			slog.String("timer", timer.Key),
+		)
 		return 0, nil
+	default:
+		// The capability is no longer waiting, so this timer can never wake it.
+		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
 	}
-	// The snapshot is authoritative. A timer whose state says the deadline is
-	// still in the future, or that no longer has one, is stale and is left
-	// alone so it cannot wake work prematurely.
-	if state.WaitUntil == nil || state.WaitUntil.After(now) {
+
+	// The snapshot is authoritative about whether a timer is still needed.
+	if state.WaitUntil == nil {
+		// The wait has no deadline, so no timer should exist; this one is stale.
+		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
+	}
+	if state.WaitUntil.After(now) {
+		// The snapshot still needs a timer for a future deadline, and this entry
+		// cannot be proven to be a different, stale one. Deleting it would strip
+		// the wait of the timer it still needs, so leave it in place and report
+		// the mismatch for reconciliation instead.
+		slog.Warn("due wait timer conflicts with a future snapshot deadline; leaving timer intact",
+			slog.String("execution_id", string(payload.ExecutionID)),
+			slog.String("capability_id", string(payload.CapabilityID)),
+			slog.String("timer", timer.Key),
+			slog.Time("timer_due", timer.DueAt),
+			slog.Time("snapshot_wait_until", *state.WaitUntil),
+		)
 		return 0, nil
 	}
 
@@ -192,7 +225,7 @@ func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (i
 			)
 		}
 		if errors.Is(err, executionmodel.ErrWaitTimerLeaseLost) {
-			return 0, nil
+			return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
 		}
 		return 0, fmt.Errorf("commit due wait timer %s: %w", timer.Key, err)
 	}
@@ -203,4 +236,17 @@ func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (i
 		return 1, err
 	}
 	return 1, nil
+}
+
+// discardClaimedTimer removes a timer the poller claimed but can no longer use:
+// its execution is missing or terminal, or its capability stopped waiting. The
+// delete is fenced by the claim owner so a delayed claimant cannot remove a timer
+// another owner has since taken over. Losing that fence is a safe abort — the
+// new owner reaches its own decision about the timer — and is not reported as an
+// error.
+func (s *Scheduler) discardClaimedTimer(ctx context.Context, key, owner string) error {
+	if _, err := s.waitStore.DeleteWaitTimerOwned(ctx, key, owner); err != nil {
+		return fmt.Errorf("discard claimed wait timer %s: %w", key, err)
+	}
+	return nil
 }

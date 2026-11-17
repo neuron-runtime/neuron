@@ -3,12 +3,14 @@ package scheduler
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 func enterDueWait(t *testing.T, h *waitHarness, sched *Scheduler, waitType executionmodel.WaitType, policy executionmodel.WaitDeadlinePolicy, due time.Time) {
@@ -337,5 +339,158 @@ func TestPollDueTimersRejectsMalformedPayload(t *testing.T) {
 	}
 	if len(recorder.owners) != 0 {
 		t.Fatal("a malformed timer was claimed")
+	}
+}
+
+// A due timer whose execution no longer exists can never resume anything. The
+// poller must discard it under its claim fence instead of leaving a timer it
+// will reclaim on every pass.
+func TestPollDueTimersDiscardsTimerForMissingExecution(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	missingID := core.ID("exec_missing")
+	due := time.Now().UTC().Add(-time.Minute)
+	key, err := executionmodel.WaitTimerKey(missingID, "cap", "attempt_1")
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+	data, err := executionmodel.EncodeWaitTimer(executionmodel.WaitTimerPayload{
+		ExecutionID: missingID, CapabilityID: "cap", WaitType: executionmodel.WaitTypeTimer,
+	})
+	if err != nil {
+		t.Fatalf("EncodeWaitTimer: %v", err)
+	}
+	if err := h.raw.PutTimer(h.ctx, key, due, data); err != nil {
+		t.Fatalf("PutTimer: %v", err)
+	}
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("timer for a missing execution survived the poll")
+	}
+}
+
+// A terminal execution's timers belong to its own terminal transition. One that
+// is still claimable is stale and must be cleaned up without a second snapshot.
+func TestPollDueTimersDiscardsTimerForTerminalExecution(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	if !h.exec.MarkCancelled(errors.New("operator stop")) {
+		t.Fatal("MarkCancelled = false, want true")
+	}
+	due := time.Now().UTC().Add(-time.Minute)
+	key := putWaitTimer(t, h, "cap", string(h.exec.AttemptID), due)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("timer for a terminal execution survived the poll")
+	}
+}
+
+// A timer is only useful while its capability is waiting. Once the wait has
+// resolved, a leftover timer must be removed rather than reclaimed forever.
+func TestPollDueTimersDiscardsTimerForCapabilityNoLongerWaiting(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	if err := sched.EnterWait(h.ctx, WaitEntryRequest{
+		Execution: h.exec, CapabilityID: "cap",
+		Spec: executionmodel.WaitSpec{Type: executionmodel.WaitTypeSignal, ExpectedSignal: "approved"},
+	}); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	if _, err := sched.ResolveSignal(h.ctx, signalRequest(h.exec, "del_1", map[string]any{"ok": true})); err != nil {
+		t.Fatalf("ResolveSignal: %v", err)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityReady {
+		t.Fatalf("test setup: capability status = %s, want ready", state.Status)
+	}
+
+	// A leftover timer from a superseded attempt of the now-resolved capability.
+	due := time.Now().UTC().Add(-time.Minute)
+	key := putWaitTimer(t, h, "cap", "stale_attempt", due)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("timer for a no-longer-waiting capability survived the poll")
+	}
+}
+
+// staleCleanupLeaseLossStore models losing the claim between the poller's claim
+// and the fenced stale-timer delete: another owner now holds the timer, so the
+// delete reports no removal without an error.
+type staleCleanupLeaseLossStore struct {
+	*executionmodel.ExecutionStore
+	deletes int
+}
+
+func (s *staleCleanupLeaseLossStore) DeleteWaitTimerOwned(_ context.Context, _, _ string) (bool, error) {
+	s.deletes++
+	return false, nil
+}
+
+// Losing the fence during stale cleanup is a safe abort: the new owner reaches
+// its own decision about the timer. It is not a poll error and must not mutate
+// the execution.
+func TestPollDueTimersStaleCleanupLeaseLossIsSafeNoOp(t *testing.T) {
+	h := newWaitHarness(t)
+	loss := &staleCleanupLeaseLossStore{ExecutionStore: h.store}
+	h.waitStore = loss
+	sched := h.scheduler(t)
+
+	// A capability that is not waiting makes the timer stale, so cleanup reaches
+	// the fenced delete.
+	due := time.Now().UTC().Add(-time.Minute)
+	putWaitTimer(t, h, "cap", "stale_attempt", due)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil) after lease loss", count, err)
+	}
+	if loss.deletes != 1 {
+		t.Fatalf("fenced deletes = %d, want 1", loss.deletes)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityRunning {
+		t.Fatalf("capability status = %s, want unchanged running", state.Status)
+	}
+}
+
+// A due timer that conflicts with a future snapshot deadline may be the only
+// timer the wait still has. The poller must leave it intact rather than strip
+// the wait of its deadline.
+func TestPollDueTimersKeepsTimerForFutureSnapshotDeadline(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	due := time.Now().UTC().Add(-time.Minute)
+	enterDueWait(t, h, sched, executionmodel.WaitTypeTimer, "", due)
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+
+	snapshot := h.exec.Snapshot()
+	future := time.Now().UTC().Add(time.Hour)
+	state := snapshot.States["cap"]
+	state.WaitUntil = &future
+	snapshot.States["cap"] = state
+	h.exec.Restore(snapshot)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err != nil {
+		t.Fatalf("timer required by a future snapshot deadline was removed: %v", err)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityWaiting {
+		t.Fatalf("capability status = %s, want waiting", state.Status)
 	}
 }
