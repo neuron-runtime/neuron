@@ -27,6 +27,7 @@ type ExecutionSnapshot struct {
 	InFlight          int                                  `json:"in_flight"`
 	StartedAt         *time.Time                           `json:"started_at,omitempty"`
 	CompletedAt       *time.Time                           `json:"completed_at,omitempty"`
+	ExecutionDeadline *time.Time                           `json:"execution_deadline,omitempty"`
 	Error             string                               `json:"error,omitempty"`
 	AssemblyID        string                               `json:"assembly_id,omitempty"`
 	Version           string                               `json:"version,omitempty"`
@@ -66,7 +67,7 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 	}
 
 	return &ExecutionSnapshot{
-		SchemaVersion:        "2",
+		SchemaVersion:        "3",
 		ID:                   e.ID,
 		CorrelationID:        e.CorrelationID,
 		InstanceID:           e.InstanceID,
@@ -82,6 +83,7 @@ func (e *Execution) snapshotLocked(revision uint64) *ExecutionSnapshot {
 		InFlight:             e.inFlight,
 		StartedAt:            e.startedAt,
 		CompletedAt:          e.completedAt,
+		ExecutionDeadline:    e.executionDeadline,
 		Error:                e.executionError,
 		AssemblyID:           e.AssemblyID,
 		Version:              e.Version,
@@ -105,6 +107,7 @@ func (e *Execution) Restore(snapshot *ExecutionSnapshot) {
 	e.inFlight = snapshot.InFlight
 	e.startedAt = snapshot.StartedAt
 	e.completedAt = snapshot.CompletedAt
+	e.executionDeadline = snapshot.ExecutionDeadline
 	e.executionError = snapshot.Error
 	if snapshot.LogicalOperationID != "" {
 		e.LogicalOperationID = snapshot.LogicalOperationID
@@ -151,16 +154,14 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 	}
 
 	// Schema version migration. An empty version means the snapshot predates
-	// version tracking and is treated as v1. Unknown newer versions are
-	// rejected rather than silently reinterpreted.
+	// version tracking and is treated as v1. v1 and v2 predate the top-level
+	// execution deadline; it decodes to nil, which means no limit is set. v3
+	// adds that deadline. No other structural transformation is required, and
+	// unknown newer versions are rejected rather than silently reinterpreted.
 	switch snap.SchemaVersion {
-	case "":
-		// v1 → v2: no structural transformation is required; the new
-		// fields are absent and decode to their zero values.
-		snap.SchemaVersion = "2"
-	case "1":
-		snap.SchemaVersion = "2"
-	case "2":
+	case "", "1", "2":
+		snap.SchemaVersion = "3"
+	case "3":
 		// Current version.
 	default:
 		return nil, fmt.Errorf("unsupported execution snapshot schema version %q", snap.SchemaVersion)
@@ -182,6 +183,7 @@ func UnmarshalExecution(data []byte) (*Execution, error) {
 		inFlight:             snap.InFlight,
 		startedAt:            snap.StartedAt,
 		completedAt:          snap.CompletedAt,
+		executionDeadline:    snap.ExecutionDeadline,
 		executionError:       snap.Error,
 		done:                 make(chan struct{}),
 	}

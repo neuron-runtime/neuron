@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"sort"
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/data"
@@ -66,6 +67,40 @@ func (e *Execution) InFlight() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.inFlight
+}
+
+// ExecutionDeadline returns the maximum-lifetime deadline for this execution,
+// or nil when no limit is set. The returned pointer is a copy.
+func (e *Execution) ExecutionDeadline() *time.Time {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.executionDeadline == nil {
+		return nil
+	}
+	deadline := e.executionDeadline.UTC()
+	return &deadline
+}
+
+// IsWaiting reports whether the execution is in the derived waiting state: it
+// has waiting capabilities and no runnable work remains.
+func (e *Execution) IsWaiting() bool {
+	return e.Status() == StatusWaiting
+}
+
+// WaitingCapabilities returns the IDs of capabilities currently in a wait,
+// including retry waits, in deterministic order. These capabilities occupy no
+// worker and are not included in InFlight.
+func (e *Execution) WaitingCapabilities() []core.ID {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	ids := make([]core.ID, 0)
+	for id, state := range e.states {
+		if state.Status == CapabilityWaiting || state.Status == CapabilityRetryWait {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 // Error returns the execution-level failure reason, empty when the execution

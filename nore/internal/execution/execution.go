@@ -80,17 +80,32 @@ type CapabilityExecutionState struct {
 	// received signal/timer to the original wait request.
 	CorrelationKey string
 
-	// WaitType classifies the kind of wait. One of: "signal", "timer",
-	// "deadline". Determines which resume mechanism is used.
-	WaitType string
+	// WaitType classifies the kind of wait and determines which resume
+	// mechanism applies. See WaitType for the recognized values.
+	WaitType WaitType
 
 	// ExpectedSignal is the name of the signal this capability is
-	// waiting for. Relevant when WaitType is "signal".
+	// waiting for. Relevant when WaitType is WaitTypeSignal.
 	ExpectedSignal string
 
 	// PayloadSchema is a JSON schema that describes the expected
 	// signal payload structure. Used for validating signal deliveries.
 	PayloadSchema string
+
+	// WaitDeadlinePolicy is the action applied when WaitUntil passes for a
+	// wait that is not inherently time-triggered. Empty means the default,
+	// WaitDeadlinePolicyFail, preserving the Phase 5 design.
+	WaitDeadlinePolicy WaitDeadlinePolicy
+
+	// WaitDeadlineReason records why a wait ended by its deadline. It is
+	// retained for diagnostics when the capability fails or the execution is
+	// cancelled as a result of deadline expiry.
+	WaitDeadlineReason WaitDeadlineReason
+
+	// DeliveredPayload is the payload that resolved the wait. It becomes the
+	// capability's resume input when it is dispatched again and is nil until a
+	// signal or timer delivery is accepted.
+	DeliveredPayload map[string]any
 
 	// DispatchState tracks whether the capability has been dispatched
 	// and prevents duplicate dispatch. Values: "dispatched", "pending".
@@ -129,6 +144,12 @@ type Execution struct {
 	startedAt      *time.Time
 	completedAt    *time.Time
 	executionError string
+
+	// executionDeadline is the wall-clock deadline derived from the
+	// execution's maximum lifetime. It is independent of any capability
+	// timeout or wait deadline, is serialized in snapshots from schema v3,
+	// and is nil when no maximum lifetime is configured.
+	executionDeadline *time.Time
 
 	// done is closed exactly once when the execution reaches a terminal
 	// state; Wait and Done poll it. It is a runtime-only device and is not
@@ -255,38 +276,11 @@ func (e *Execution) MarkCapabilityReady(capabilityID shared.ID, input map[string
 	return nil
 }
 
-// Signal transitions a capability from CapabilityWaiting to CapabilityReady,
-// clearing the wait metadata and incrementing the in-flight counter. This is
-// used by the signal API to resume capabilities that are waiting for an
-// external signal.
-//
-// The caller must hold e.mu or ensure external synchronization.
+// Signal resolves a wait without a delivered payload. It is retained for the
+// existing instance-scoped signal handler and behaves exactly like ResolveWait
+// called with a nil payload.
 func (e *Execution) Signal(capabilityID shared.ID) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.status != StatusRunning {
-		return fmt.Errorf("execution %s is not running", e.ID)
-	}
-	state, exists := e.states[capabilityID]
-	if !exists {
-		return fmt.Errorf("capability %s is not in the blueprint", capabilityID)
-	}
-	if state.Status != CapabilityWaiting {
-		return fmt.Errorf("capability %s is not waiting, status is %s", capabilityID, state.Status)
-	}
-	// Clear the wait metadata
-	state.WaitUntil = nil
-	state.WaitReason = ""
-	state.CorrelationKey = ""
-	state.WaitType = ""
-	state.ExpectedSignal = ""
-	state.PayloadSchema = ""
-	// Mark the capability as ready
-	state.Status = CapabilityReady
-	e.states[capabilityID] = state
-	// Increment in-flight counter
-	e.inFlight++
-	return nil
+	return e.ResolveWait(capabilityID, nil)
 }
 
 func (e *Execution) MarkCapabilityRunning(capabilityID shared.ID) error {
@@ -433,9 +427,14 @@ func (e *Execution) SeedInitialParams(params map[string]any) {
 //
 // Pending entry capabilities and joins whose predecessor bindings are all
 // recorded are also made ready; both cover snapshots written before the current
-// atomic transition boundary. A future retry wait is left in place because
-// durable timers belong to Phase 5; a capability already waiting is likewise
-// left untouched.
+// atomic transition boundary.
+//
+// Only elapsed time-based waits resume here. A capability in RetryWait resumes
+// when its NextAttemptAt has elapsed. A capability in Waiting resumes only when
+// it is a timer or deadline wait with a non-nil, elapsed WaitUntil; a nil
+// WaitUntil never means "due" and a signal wait never resumes from recovery
+// alone. Waits that do not resume stay waiting and are not counted as in-flight
+// work, because they occupy no worker.
 //
 // The returned IDs are sorted so replay is deterministic. The in-flight count is
 // rebuilt from the recovered states rather than trusted blindly, because it is
@@ -461,31 +460,21 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 			dispatch = append(dispatch, capabilityID)
 			active++
 		case CapabilityRetryWait:
-			if state.NextAttemptAt == nil || !state.NextAttemptAt.After(now) {
+			if state.NextAttemptAt != nil && !state.NextAttemptAt.After(now) {
 				state.Status = CapabilityReady
+				state.NextAttemptAt = nil
 				e.states[capabilityID] = state
 				dispatch = append(dispatch, capabilityID)
+				active++
 			}
-			active++
 		case CapabilityWaiting:
-			// Resume waiting capability if WaitUntil has elapsed.
-			// If WaitType is "timer" or "deadline", the wait was time-based
-			// and should fire when WaitUntil has passed. If WaitType is "signal",
-			// the wait requires an external signal delivery; we only resume here
-			// if the WaitUntil time has passed as a fallback mechanism.
-			if state.WaitUntil == nil || !state.WaitUntil.After(now) {
-				// Clear the wait state upon resumption
-				state.WaitUntil = nil
-				state.WaitReason = ""
-				state.CorrelationKey = ""
-				state.WaitType = ""
-				state.ExpectedSignal = ""
-				state.PayloadSchema = ""
+			if isElapsedTimerWait(state, now) {
+				e.clearWaitMetadataLocked(&state)
 				state.Status = CapabilityReady
 				e.states[capabilityID] = state
 				dispatch = append(dispatch, capabilityID)
+				active++
 			}
-			active++
 		case CapabilityPending:
 			if e.recoverPendingLocked(capabilityID, &state) {
 				dispatch = append(dispatch, capabilityID)
@@ -496,6 +485,16 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 	sort.Slice(dispatch, func(i, j int) bool { return dispatch[i] < dispatch[j] })
 	e.inFlight = active
 	return dispatch
+}
+
+// isElapsedTimerWait reports whether a waiting capability is a time-based wait
+// whose deadline has passed. A nil WaitUntil is never due, and a signal wait is
+// never resumed by the elapsed-time path alone.
+func isElapsedTimerWait(state CapabilityExecutionState, now time.Time) bool {
+	if state.WaitType != WaitTypeTimer && state.WaitType != WaitTypeDeadline {
+		return false
+	}
+	return state.WaitUntil != nil && !state.WaitUntil.After(now)
 }
 
 // recoverPendingLocked makes a pending capability ready when its recorded
