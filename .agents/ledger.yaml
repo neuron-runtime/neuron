@@ -315,7 +315,7 @@ tasks:
       - "nore/internal/execution/store_failure_test.go"
       - "nore/internal/instance/metadata_store_test.go"
       - "nore/cmd/nore/main_test.go"
-    owner: coder
+    owner: bugfixer
     reviewer: reviewer
     signoff: [architect, security]
     dependencies: [T-022]
@@ -323,6 +323,8 @@ tasks:
       - "RenewTimer extends only a live lease owned by the caller"
       - "DeleteTimerOwned deletes only when the owner matches"
       - "PutTimer rejects overwriting a live lease with ErrTimerLeased and allows unleased/expired re-put"
+      - "PutTimer never reports success when the SQL write was skipped"
+      - "Owner is a required per-claim fencing token with documented empty-owner behavior"
       - "Memory/SQLite/PostgreSQL implement the primitives and shared contract tests cover them"
       - "Memory passes under -race; no full-table scan introduced"
     verification:
@@ -330,12 +332,12 @@ tasks:
       - "cd nore && GOWORK=off go build ./..."
       - "cd nore && GOWORK=off go test -run '^$' ./..."
       - "gofmt -l on changed Go files"
-    status: needs_review
+    status: done
     lease: null
-    commit: 8a01be9
-    evidence: ["`cd nore && GOWORK=off go test -race -count=1 ./internal/storage ./internal/storage/sqlite` -> PASS.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/postgres` -> PASS (skipped, no DSN).", "`cd nore && GOWORK=off go test -count=1 ./internal/execution ./internal/instance ./cmd/nore` -> PASS.", "`cd nore && GOWORK=off go build ./...` -> PASS; `go test -run '^$' ./...` -> PASS.", "`gofmt -l` on changed files -> clean.", "Commit 8a01be9.", "Critical reviewer finding: `PutTimer` returns success without writing when `RowsAffected == 0` and a separate pooled-connection SELECT observes no live lease (`sqlite.go:498-516`, `postgres.go:498-512`).", "Architect requires per-claim owner/fencing semantics, empty-owner behavior, fail-closed `PutTimer`, and documentation before sign-off."]
-    reports: []
-    open_risks: ["Postgres parity unverified without DSN.", "Critical `PutTimer` fail-open race must be fixed before T-037 can be done.", "Empty-owner behavior diverges between memory/SQL and must be specified.", "Reviewer/architect/security sign-offs pending.", "ADR will need a one-line status update after signoff."]
+    commit: f82ffa6
+    evidence: ["`cd nore && GOWORK=off go test -race -count=1 ./internal/storage ./internal/storage/sqlite ./internal/storage/postgres` -> PASS (1.884s, 2.662s, 1.028s).", "`cd nore && GOWORK=off go test -count=1 ./internal/execution ./internal/instance ./cmd/nore` -> PASS.", "`cd nore && GOWORK=off go build ./...` -> PASS; `go test -run '^$' ./...` -> PASS.", "`gofmt -l` on changed files -> clean; `git diff --check` -> clean.", "Commit f82ffa6.", "Reviewer approved: critical PutTimer fail-open race corrected; empty-owner behavior consistent; stale-owner fencing and TimerTx paths covered; contract tests meaningful.", "Security approved with T-024 conditions: unique per-claim fencing token, treat RenewTimer false as lease loss, validate lease duration/clock margin. Postgres runtime parity remains unverified without DSN."]
+    reports: ["T-037-review", "T-037-security"]
+    open_risks: ["Postgres parity unverified without DSN.", "T-024 must generate a unique per-claim fencing token rather than reusing worker IDs.", "T-024 must treat RenewTimer==false as lease loss and validate non-positive/absurd lease durations.", "Storage test fake still does not model ErrTimerOwnerEmpty (test-only).", "Local wall-clock lease decisions remain a clock-skew risk.", "ADR 0001 needs a one-line status update now that T-037 landed."]
 
   - id: T-038
     objective: "Harden timer migrations for legacy rows and concurrent startup"
@@ -350,19 +352,19 @@ tasks:
     dependencies: [T-022]
     acceptance:
       - "Legacy timer rows with waitUntil are backfilled to due_at where parseable, or explicitly quarantined with a recorded reason; no silent permanent invisibility"
-      - "Migration v3 is safe against concurrent startup on PostgreSQL and SQLite (advisory/exclusive lock or idempotent DDL)"
-      - "Populated-v2 migration test and concurrent-migration test pass"
-      - "Postgres migration tests are DSN-gated and recorded honestly"
+      - "Migration v3 remains immutable DDL-only; v4 performs legacy repair and is safe against concurrent startup on PostgreSQL and SQLite"
+      - "Populated-v2, v3-to-v4, fresh-to-latest, idempotent, and concurrent-migration tests pass"
+      - "Postgres migration tests are DSN-gated and record unavailable/executed status honestly"
     verification:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/storage/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/storage/postgres/... (or record DSN unavailable)"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/storage/migrate/**"], task: T-038 }
-    commit: null
-    evidence: ["Security review of 23aca93: legacy timer rows get due_at NULL and are excluded by DueTimers/ClaimTimer; migration ADD COLUMN is not idempotent and concurrent startup can fail.", "Working tree contains migration hardening: per-step SQLite transaction, PostgreSQL advisory lock, duplicate-tolerant ADD COLUMN, legacy due_at backfill/quarantine, populated-v2 and concurrent-startup tests.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` -> ok."]
+    status: needs_review
+    lease: null
+    commit: ab23e5a
+    evidence: ["Architect decision 0002: restore v3 DDL-only and add v4 for legacy repair; current d295bdf not signed off.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/migrate/...` -> ok, 0.112s.", "`cd nore && GOWORK=off go test -race -count=1 ./internal/storage/migrate/...` -> ok, 1.571s.", "`cd nore && GOWORK=off go test -count=1 ./internal/storage/...` -> all packages ok; Postgres contract tests skipped without DSN.", "`cd nore && GOWORK=off go build ./...` -> PASS; `gofmt -l` clean; `git diff --check` clean.", "Commit ab23e5a: v3 restored to DDL-only; v4 backfill/quarantine; driver-dispatched SQL; bounded SQLITE_BUSY retry; narrow duplicate-column suppression; v2/v3-to-v4 and concurrency tests pass."]
     reports: []
-    open_risks: ["Uncommitted. Modifying migration v3 does not backfill databases already recorded at v3; architect must decide v3 versus a new v4 migration.", "PostgreSQL backfill tries a `?` statement before `$1`; on PostgreSQL the first failure aborts the transaction, so the fallback cannot succeed.", "Security/architect sign-off for T-022 is conditional on this hardening or an approved exception."]
+    open_risks: ["Architect/security sign-off pending for ab23e5a.", "PostgreSQL migration behavior remains unverified without NEURON_TEST_POSTGRES_DSN; the added DSN-gated test is a skip placeholder and does not execute Postgres repair/concurrency cases even when a DSN is present.", "SQLite runner relies on bounded retry plus the production DSN's `_txlock=immediate`; it does not force BEGIN IMMEDIATE through a driver-specific API.", "ADR 0001 needs a one-line status update for T-037 and the v4 migration strategy."]
 
   - id: T-024
     objective: "Implement durable wait state, scheduler-owned wait transitions, recovery, deadlines, and snapshot v3"
