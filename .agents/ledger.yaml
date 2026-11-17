@@ -403,11 +403,11 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... -run 'Wait|Signal|Cancel|Recover|Retry|Timer|Dispatch'"
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recovery'"
-    status: not_started
-    lease: null
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/execution/execution.go", "nore/internal/execution/snapshot.go", "nore/internal/execution/accessors.go", "nore/internal/execution/wait.go", "nore/internal/execution/store.go", "nore/internal/execution/dispatch_intent*.go", "nore/internal/execution/recovery*.go", "nore/internal/execution/scheduler/**", "nore/internal/execution/*_test.go", "nore/internal/instance/**", "nore/internal/contracts/**", "nore/internal/event/**"], task: T-024 }
     evidence: []
     reports: []
-    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed."]
+    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin."]
 
   - id: T-025
     objective: "Wire engine suspend consumption, durable retry, cancellation/deadline enforcement, and dispatch reconciliation"
@@ -604,3 +604,24 @@ tasks:
     evidence: []
     reports: []
     open_risks: ["Gate is non-mutating; project changes are committed by their owners before the gate."]
+
+  - id: T-039
+    objective: "Mark only verified completed Phase 5 todo items in todos/TODO.md"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-022, T-023]
+    acceptance:
+      - "Only items whose closing tasks are all complete and verified are checked"
+      - "R5-11 timer index/claim is checked with T-022 evidence"
+      - "Items depending on T-024 or later remain unchecked"
+      - "Evidence/limitations are accurate; no speculative closure"
+    verification:
+      - "Cross-check every changed checkbox against .agents/ledger.yaml and code/tests"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["`todos/TODO.md:747-751`: R5-11 checked with T-022 evidence and PostgreSQL DSN limitation.", "T-022 marked done; plan maps R5-11 solely to T-022.", "All items depending on T-024 or later left unchecked; pre-existing Phase 4 checkboxes left for T-031 final synchronization.", "`git diff -- todos/TODO.md` single hunk; `git diff --check` clean."]
+    reports: ["T-039"]
+    open_risks: ["T-031 will perform the final full TODO synchronization and decide whether pre-existing checked Phase 4 items need correction."]

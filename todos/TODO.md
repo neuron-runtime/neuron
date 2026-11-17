@@ -744,8 +744,11 @@ Exit criteria:
 - [ ] **R5-10** Persist scheduled work with a due time (`next_attempt_at`, wake-at) rather than
       sleeping a goroutine. Retry backoff becomes durable scheduling, replacing the in-memory
       sleep at `nore/internal/execution/engine/invocation.go:232-244` for durable executions.
-- [ ] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
-      future timers efficiently and claim them safely.
+- [x] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
+      future timers efficiently and claim them safely. Closed by T-022: `due_at` column and
+      `idx_timer_store_due_key` index (migration v3) plus bounded `DueTimers`, lease-aware
+      `ClaimTimer`/`RenewTimer`/`DeleteTimerOwned` on Memory/SQLite/PostgreSQL; shared contract
+      tests pass under `-race`. PostgreSQL parity remains DSN-gated/unverified.
 - [ ] **R5-12** Implement a timer poller that claims due timers and resumes the associated
       executions. Define the polling interval and its interaction with latency.
 - [ ] **R5-13** Handle clock changes and missed timers: a timer whose due time passed while the
