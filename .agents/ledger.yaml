@@ -717,9 +717,10 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/engine/... ./internal/plugin/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Suspend|LifecycleUnavailable'"
       - "gofmt -l <changed Go files>; git diff --check"
-    status: needs_review
+    status: done
     lease: null
-    evidence: ["Coder migrated the contract and all leased callers/test doubles; coordinator inspected the actual diff. `CapabilityRuntime.Execute` now returns `(CapabilityOutcome, error)`; new `contracts/capability-outcome.go` reuses `execution.WaitType`; engine publishes `ErrSuspendLifecycleUnavailable`; invoke uses pure `outcomeResponse` guard.", "Verification passed: `cd nore && GOWORK=off go build ./...`; `GOWORK=off go test -run '^$' ./...`; focused contracts/engine/plugin/builtins/registry/invoke/scheduler/mechanism tests; `GOWORK=off go test -race -count=1 ./internal/execution/engine/... ./internal/plugin/...`; focused `Suspend|LifecycleUnavailable` tests. All exit 0.", "Independent reviewer PASS on all six criteria with `file:line` evidence; architect APPROVE WITH NON-BLOCKING NOTES; security APPROVE. Reviewer re-ran module-wide compile-only tests and targeted race/build/vet checks with `-mod=readonly`, all exit 0.", "Full integration gate `scripts/script.sh` passed after T-048/T-049 integration: all Go modules and TypeScript packages built and tested successfully.", "Changed paths are within the T-048 lease. No commit made by coder; coordinator integration pending."]
+    evidence: ["Coder migrated the contract and all leased callers/test doubles; coordinator inspected the actual diff. `CapabilityRuntime.Execute` now returns `(CapabilityOutcome, error)`; new `contracts/capability-outcome.go` reuses `execution.WaitType`; engine publishes `ErrSuspendLifecycleUnavailable`; invoke uses pure `outcomeResponse` guard.", "Verification passed: `cd nore && GOWORK=off go build ./...`; `GOWORK=off go test -run '^$' ./...`; focused contracts/engine/plugin/builtins/registry/invoke/scheduler/mechanism tests; `GOWORK=off go test -race -count=1 ./internal/execution/engine/... ./internal/plugin/...`; focused `Suspend|LifecycleUnavailable` tests. All exit 0.", "Independent reviewer PASS on all six criteria with `file:line` evidence; architect APPROVE WITH NON-BLOCKING NOTES; security APPROVE. Reviewer re-ran module-wide compile-only tests and targeted race/build/vet checks with `-mod=readonly`, all exit 0.", "Full integration gate `scripts/script.sh` passed after T-048/T-049 integration: all Go modules and TypeScript packages built and tested successfully.", "Changed paths are within the T-048 lease. No commit made by coder; coordinator integration complete."]
+    commit: cf06d0b
     reports: [".agents/reports/T-048.md", ".agents/reports/T-048-049-signoffs.md"]
     open_risks: ["Fail-closed behavior is intentionally temporary until T-025/T-026.", "Untrusted suspend metadata is not consumed by T-048; transport validation belongs to T-026."]
 
@@ -745,10 +746,11 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=20 ./internal/execution -run 'Claim|Dispatch'"
       - "cd nore && GOWORK=off go build ./... && GOWORK=off go vet ./internal/execution/..."
       - "gofmt -l <changed Go files>; git diff --check"
-    status: needs_review
+    status: done
     lease: null
     evidence: ["Coder changed only `nore/internal/execution/store.go`, `dispatch_intent_test.go`, and `store_failure_test.go`; coordinator inspected the diff. `ClaimReadyDispatchIntents` now validates positive limit, slices candidate keys to limit, and releases all won claims on partial failure with a bounded detached cleanup context.", "Verification passed: `go test -count=1 ./internal/execution -run 'DispatchIntent|ClaimReady'`; `go test -race -count=1 ./internal/execution/... ./internal/contracts/...`; `go test -race -count=20 ./internal/execution -run 'Claim|Dispatch'`; `go build ./...`; `go vet ./internal/execution/...`; gofmt and diff-check clean.", "Reviewer found one vacuous assertion in the partial-release test; coder follow-up replaced the counter with meaningful `releasePutCalls` and `successfulReleases` assertions. Focused tests, race test, vet, gofmt, and diff-check passed after the follow-up.", "Independent reviewer PASS on all five criteria after follow-up; architect APPROVE WITH NON-BLOCKING NOTES; security APPROVE. Reviewer re-ran module-wide compile-only tests and targeted race/build/vet checks with `-mod=readonly`, all exit 0.", "Full integration gate `scripts/script.sh` passed after T-048/T-049 integration: all Go modules and TypeScript packages built and tested successfully.", "No PostgreSQL DSN available; parity not claimed. Unbounded `KV.List` discovery remains a recorded T-050 precondition."]
     reports: [".agents/reports/T-049.md", ".agents/reports/T-048-049-signoffs.md"]
+    commit: cf06d0b
     open_risks: ["`KV.List` still materializes all matching keys; T-050 must satisfy the D4 bounded-discovery precondition before enabling a periodic reconciler.", "No PostgreSQL DSN is available; parity cannot be claimed."]
 
   - id: T-050
