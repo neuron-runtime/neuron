@@ -109,133 +109,159 @@ func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (i
 		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
 	}
 
-	state := execution.CapabilityState(payload.CapabilityID)
-	switch state.Status {
-	case executionmodel.CapabilityWaiting:
-		// Handled below.
-	case executionmodel.CapabilityRetryWait:
-		// Retry resumption is a separate transition and is not driven by this
-		// poller. Such a timer cannot be consumed here and its deadline may still
-		// be needed, so leave it intact and report the condition.
-		slog.Warn("due wait timer belongs to a retry wait; leaving timer intact",
-			slog.String("execution_id", string(payload.ExecutionID)),
-			slog.String("capability_id", string(payload.CapabilityID)),
-			slog.String("timer", timer.Key),
-		)
-		return 0, nil
-	default:
-		// The capability is no longer waiting, so this timer can never wake it.
-		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
+	// One composite transition covers the authoritative state check, mutation,
+	// and commit. The event is collected and published only after the guard is
+	// released, so a losing driver cannot publish a duplicate.
+	type dueTimerOutcome struct {
+		processed int
+		publish   func() error
 	}
-
-	// The snapshot is authoritative about whether a timer is still needed.
-	if state.WaitUntil == nil {
-		// The wait has no deadline, so no timer should exist; this one is stale.
-		return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
-	}
-	if state.WaitUntil.After(now) {
-		// The snapshot still needs a timer for a future deadline, and this entry
-		// cannot be proven to be a different, stale one. Deleting it would strip
-		// the wait of the timer it still needs, so leave it in place and report
-		// the mismatch for reconciliation instead.
-		slog.Warn("due wait timer conflicts with a future snapshot deadline; leaving timer intact",
-			slog.String("execution_id", string(payload.ExecutionID)),
-			slog.String("capability_id", string(payload.CapabilityID)),
-			slog.String("timer", timer.Key),
-			slog.Time("timer_due", timer.DueAt),
-			slog.Time("snapshot_wait_until", *state.WaitUntil),
-		)
-		return 0, nil
-	}
-
-	before := execution.Snapshot()
-	var publish func() error
-	needsIntent := false
-	switch state.WaitType {
-	case executionmodel.WaitTypeTimer, executionmodel.WaitTypeDeadline:
-		if err := execution.ResolveWait(payload.CapabilityID, nil); err != nil {
-			return 0, err
+	var outcome dueTimerOutcome
+	err = execution.RunTransition(func() error {
+		state := execution.CapabilityState(payload.CapabilityID)
+		switch state.Status {
+		case executionmodel.CapabilityWaiting:
+			// Handled below.
+		case executionmodel.CapabilityRetryWait:
+			// Retry resumption is a separate transition and is not driven by this
+			// poller. Such a timer cannot be consumed here and its deadline may
+			// still be needed, so leave it intact and report the condition.
+			slog.Warn("due wait timer belongs to a retry wait; leaving timer intact",
+				slog.String("execution_id", string(payload.ExecutionID)),
+				slog.String("capability_id", string(payload.CapabilityID)),
+				slog.String("timer", timer.Key),
+			)
+			return nil
+		default:
+			// The capability is no longer waiting, so this timer can never wake it.
+			return s.discardClaimedTimer(ctx, timer.Key, owner)
 		}
-		publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
-		needsIntent = true
-	case executionmodel.WaitTypeSignal:
-		policy, err := execution.ExpireWait(payload.CapabilityID, now)
-		if err != nil {
-			return 0, err
+
+		// The snapshot is authoritative about whether a timer is still needed.
+		if state.WaitUntil == nil {
+			// The wait has no deadline, so no timer should exist; this one is stale.
+			return s.discardClaimedTimer(ctx, timer.Key, owner)
 		}
-		switch policy {
-		case executionmodel.WaitDeadlinePolicyContinue:
+		if state.WaitUntil.After(now) {
+			// The snapshot still needs a timer for a future deadline, and this
+			// entry cannot be proven to be a different, stale one. Deleting it
+			// would strip the wait of the timer it still needs, so leave it in
+			// place and report the mismatch for reconciliation instead.
+			slog.Warn("due wait timer conflicts with a future snapshot deadline; leaving timer intact",
+				slog.String("execution_id", string(payload.ExecutionID)),
+				slog.String("capability_id", string(payload.CapabilityID)),
+				slog.String("timer", timer.Key),
+				slog.Time("timer_due", timer.DueAt),
+				slog.Time("snapshot_wait_until", *state.WaitUntil),
+			)
+			return nil
+		}
+
+		before := execution.Snapshot()
+		var publish func() error
+		needsIntent := false
+		switch state.WaitType {
+		case executionmodel.WaitTypeTimer, executionmodel.WaitTypeDeadline:
+			if err := execution.ResolveWait(payload.CapabilityID, nil); err != nil {
+				return err
+			}
 			publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
 			needsIntent = true
-		case executionmodel.WaitDeadlinePolicyFail:
-			reason := fmt.Errorf("wait deadline exceeded for capability %s", payload.CapabilityID)
-			execution.MarkFailed(reason)
-			publish = func() error {
-				return s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{
-					Message: reason.Error(),
-				}))
+		case executionmodel.WaitTypeSignal:
+			policy, err := execution.ExpireWait(payload.CapabilityID, now)
+			if err != nil {
+				return err
 			}
-		case executionmodel.WaitDeadlinePolicyCancel:
-			reason := fmt.Errorf("wait deadline cancelled for capability %s", payload.CapabilityID)
-			execution.MarkCancelled(reason)
-			s.scopes.Release(execution.ID)
-			publish = func() error {
-				return s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
-					Message: reason.Error(),
-				}))
+			switch policy {
+			case executionmodel.WaitDeadlinePolicyContinue:
+				publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
+				needsIntent = true
+			case executionmodel.WaitDeadlinePolicyFail:
+				reason := fmt.Errorf("wait deadline exceeded for capability %s", payload.CapabilityID)
+				execution.MarkFailed(reason)
+				publish = func() error {
+					return s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{
+						Message: reason.Error(),
+					}))
+				}
+			case executionmodel.WaitDeadlinePolicyCancel:
+				reason := fmt.Errorf("wait deadline cancelled for capability %s", payload.CapabilityID)
+				execution.MarkCancelled(reason)
+				s.scopes.Release(execution.ID)
+				publish = func() error {
+					return s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
+						Message: reason.Error(),
+					}))
+				}
+			default:
+				return fmt.Errorf("unknown wait deadline policy %q", policy)
 			}
 		default:
-			return 0, fmt.Errorf("unknown wait deadline policy %q", policy)
+			return fmt.Errorf("wait timer %s has unknown wait type %q", timer.Key, state.WaitType)
 		}
-	default:
-		return 0, fmt.Errorf("wait timer %s has unknown wait type %q", timer.Key, state.WaitType)
-	}
 
-	// The fenced delete is an effect of SaveWaitTransition, so it runs inside
-	// the same timer transaction as the snapshot write: either both commit or
-	// neither does. An unfenced DeleteWaitTimerOwned call here could remove a
-	// timer that another claimant had already taken over.
-	effects := executionmodel.WaitEffects{
-		DeleteTimers: []executionmodel.WaitTimerDelete{{Key: timer.Key, Owner: owner}},
-	}
-	if needsIntent {
-		attemptID := payload.AttemptID
-		if attemptID == "" {
-			attemptID = execution.AttemptID
+		// The fenced delete is an effect of SaveWaitTransition, so it runs inside
+		// the same timer transaction as the snapshot write: either both commit or
+		// neither does. An unfenced DeleteWaitTimerOwned call here could remove a
+		// timer that another claimant had already taken over.
+		effects := executionmodel.WaitEffects{
+			DeleteTimers: []executionmodel.WaitTimerDelete{{Key: timer.Key, Owner: owner}},
 		}
-		effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(execution.ID, payload.CapabilityID, attemptID))
-	}
+		if needsIntent {
+			attemptID := payload.AttemptID
+			if attemptID == "" {
+				attemptID = execution.AttemptID
+			}
+			effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(execution.ID, payload.CapabilityID, attemptID))
+		}
 
-	result, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
-		Execution: execution,
-		Effects:   effects,
+		result, commitErr := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
+			Execution: execution,
+			Effects:   effects,
+		})
+		if commitErr != nil {
+			if isDurableRace(commitErr) {
+				// The peer that won holds the newer durable state; never replace
+				// it with our pre-mutation snapshot.
+				if reloadErr := s.reloadInto(ctx, execution); reloadErr != nil {
+					return errors.Join(commitErr, reloadErr)
+				}
+			} else if !execution.IsTerminal() {
+				// A terminal transition has already signalled Done; restoring it
+				// would leave a closed completion channel on a non-terminal
+				// snapshot. Keep the truthful outcome and log the durability gap.
+				execution.Restore(before)
+			} else {
+				slog.Warn("wait deadline transition was not durably committed",
+					slog.String("execution_id", string(execution.ID)),
+					slog.String("timer", timer.Key),
+					slog.String("error", commitErr.Error()),
+				)
+			}
+			if errors.Is(commitErr, executionmodel.ErrWaitTimerLeaseLost) {
+				return s.discardClaimedTimer(ctx, timer.Key, owner)
+			}
+			return fmt.Errorf("commit due wait timer %s: %w", timer.Key, commitErr)
+		}
+		if result.Replay {
+			if err := s.reloadInto(ctx, execution); err != nil {
+				return err
+			}
+			return fmt.Errorf("due wait timer %s produced an unexpected delivery replay", timer.Key)
+		}
+		outcome.processed = 1
+		outcome.publish = publish
+		return nil
 	})
 	if err != nil {
-		// A terminal transition has already signalled Done; restoring it would
-		// leave a closed completion channel on a non-terminal snapshot. Follow
-		// the existing failure-transition pattern and keep the truthful in-memory
-		// outcome while logging that it is not durable.
-		if !execution.IsTerminal() {
-			execution.Restore(before)
-		} else {
-			slog.Warn("wait deadline transition was not durably committed",
-				slog.String("execution_id", string(execution.ID)),
-				slog.String("timer", timer.Key),
-				slog.String("error", err.Error()),
-			)
+		return 0, err
+	}
+	if outcome.publish != nil {
+		if err := outcome.publish(); err != nil {
+			return outcome.processed, err
 		}
-		if errors.Is(err, executionmodel.ErrWaitTimerLeaseLost) {
-			return 0, s.discardClaimedTimer(ctx, timer.Key, owner)
-		}
-		return 0, fmt.Errorf("commit due wait timer %s: %w", timer.Key, err)
 	}
-	if result.Replay {
-		return 0, fmt.Errorf("due wait timer %s produced an unexpected delivery replay", timer.Key)
-	}
-	if err := publish(); err != nil {
-		return 1, err
-	}
-	return 1, nil
+	return outcome.processed, nil
 }
 
 // discardClaimedTimer removes a timer the poller claimed but can no longer use:

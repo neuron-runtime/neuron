@@ -476,11 +476,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'Concurrent|Signal|Timer|Recover'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
-    status: not_started
+    status: done
     lease: null
-    evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race.", "ADR 0004 accepted Option A: add `Execution.RunTransition` serialization on the live object, retain CAS as cross-value backstop, wrap all five wait drivers plus the four Run-loop entry points, and keep publish outside the guard.", "Architect T-041-design-close resolved the Run-loop scope question: no residual second regime; helpers stay guard-oblivious and one Run-loop-vs-wait-driver regression is required.", "T-041 verification remains blocked by the reproduced T-042 dispatch-claim flake; scoped verification is required if T-042 is not fixed first."]
-    reports: ["0004-wait-transition-serialization"]
-    open_risks: ["Implementation must wrap all nine committers without nested guards.", "Must coordinate with T-025/T-027 production wiring.", "T-042 flake can obscure the prescribed race pattern."]
+    evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race.", "ADR 0004 accepted Option A; architect T-041-design-close required all nine committers guarded with no residual second regime.", "T-041 implementation added `Execution.RunTransition`, wrapped all nine committers, kept helpers guard-oblivious, reloaded on conflict/replay, and moved publishes after guard release.", "Regression tests cover guard non-overlap/revision, stale rollback, signal-vs-poller exactly-one publish, fail-policy and different-capability variants, recovery-vs-signal, Run-loop-vs-signal, and nil-wait-store conflict behavior.", "Verification: `go test -race -count=50 ./internal/execution/scheduler -run 'Concurrent|Signal|Timer|Recover|RunLoop|Guard'`, `go test -race -count=1 ./internal/execution/... ./internal/instance/...`, plain tests, `go build ./...`, `gofmt -l`, and `git diff --check` pass; full `scripts/script.sh` passes.", "Reviewer T-041-review approved with follow-ups; architect T-041-architect approved; security T-041-security approved."]
+    reports: ["0004-wait-transition-serialization", "T-041-progress", "T-041", "T-041-review"]
+    open_risks: ["RecoverableDispatch re-dispatch of an already-ready capability remains an ADR 0004 open question; recovery is startup-only.", "Security low residual: narrow terminal+race path can leave a closed `done` with a non-terminal reloaded snapshot; no false event is published.", "T-042's separate stopped-capability flake remains uncharacterized and is not caused by T-041."]
 
   - id: T-042
     objective: "Remove pre-existing flaky scheduler/acceptance test failures"

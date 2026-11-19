@@ -208,6 +208,38 @@ func TestCancelExecutionStillWorksWithoutWaitStore(t *testing.T) {
 	}
 }
 
+// A non-durable scheduler has no wait store to reload from after a commit
+// conflict. Cancellation must report the conflict instead of dereferencing the
+// missing wait store.
+func TestCancelExecutionConflictWithoutWaitStoreDoesNotPanic(t *testing.T) {
+	h := newWaitHarness(t)
+	committer := &fakeCommitter{failWhen: func(*executionmodel.Execution) error {
+		return storage.ErrConflict
+	}}
+	sched, err := New(h.bus, h.store, h.scopes, WithTransitionCommitter(committer))
+	if err != nil {
+		t.Fatalf("New scheduler: %v", err)
+	}
+	sub, err := h.bus.SubscribeExecution(h.exec.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	cancelled, err := sched.CancelExecution(h.ctx, h.exec.ID, errors.New("stop"))
+	if !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("CancelExecution error = %v, want %v", err, storage.ErrConflict)
+	}
+	if !cancelled {
+		t.Fatal("cancellation reported false after a commit conflict")
+	}
+	select {
+	case evt := <-sub.Events():
+		t.Fatalf("event %s was published for a conflicted cancellation", evt.Type)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // A prefix listing must stay inside one execution and, when requested, one
 // capability. It is the bounded primitive cancellation uses instead of scanning
 // the whole timer space.

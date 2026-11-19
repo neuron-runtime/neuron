@@ -180,20 +180,30 @@ func (s *Scheduler) EnterWait(ctx context.Context, req WaitEntryRequest) error {
 		})
 	}
 
-	// Build all effects before mutating so an invalid key or payload cannot
-	// leave the live execution waiting without a durable record.
-	before := req.Execution.Snapshot()
-	if err := req.Execution.EnterWait(req.CapabilityID, req.Spec); err != nil {
-		return err
-	}
-	if _, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
-		Execution: req.Execution,
-		Effects:   effects,
-	}); err != nil {
-		req.Execution.Restore(before)
-		return fmt.Errorf("persist wait for capability %s: %w", req.CapabilityID, err)
-	}
-	return nil
+	// The domain mutation, its `before` snapshot, and the commit share one
+	// transition guard so no other driver can commit between them.
+	return req.Execution.RunTransition(func() error {
+		// Build no effects here; an invalid key or payload must not leave the
+		// live execution waiting without a durable record.
+		before := req.Execution.Snapshot()
+		if err := req.Execution.EnterWait(req.CapabilityID, req.Spec); err != nil {
+			return err
+		}
+		if _, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
+			Execution: req.Execution,
+			Effects:   effects,
+		}); err != nil {
+			if isDurableRace(err) {
+				if reloadErr := s.reloadInto(ctx, req.Execution); reloadErr != nil {
+					return errors.Join(err, reloadErr)
+				}
+				return fmt.Errorf("persist wait for capability %s: %w", req.CapabilityID, err)
+			}
+			req.Execution.Restore(before)
+			return fmt.Errorf("persist wait for capability %s: %w", req.CapabilityID, err)
+		}
+		return nil
+	})
 }
 
 // ResolveSignal accepts one signal delivery for a waiting capability. The
@@ -217,72 +227,101 @@ func (s *Scheduler) ResolveSignal(ctx context.Context, req SignalResolutionReque
 		return nil, err
 	}
 
-	existing, err := s.waitStore.GetSignalDelivery(ctx, req.Execution.ID, req.DeliveryID)
-	if err == nil {
-		if existing.PayloadHash != delivery.PayloadHash {
-			return nil, executionmodel.ErrSignalDeliveryConflict
+	var resolution *SignalResolution
+	err = req.Execution.RunTransition(func() error {
+		existing, err := s.waitStore.GetSignalDelivery(ctx, req.Execution.ID, req.DeliveryID)
+		if err == nil {
+			if existing.PayloadHash != delivery.PayloadHash {
+				return executionmodel.ErrSignalDeliveryConflict
+			}
+			if err := s.reloadInto(ctx, req.Execution); err != nil {
+				return err
+			}
+			resolution = &SignalResolution{Replay: true, Delivery: existing}
+			return nil
 		}
-		if err := s.reloadInto(ctx, req.Execution); err != nil {
-			return nil, err
+		if !errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("read signal delivery %s: %w", req.DeliveryID, err)
 		}
-		return &SignalResolution{Replay: true, Delivery: existing}, nil
-	}
-	if !errors.Is(err, storage.ErrNotFound) {
-		return nil, fmt.Errorf("read signal delivery %s: %w", req.DeliveryID, err)
-	}
 
-	state := req.Execution.CapabilityState(req.CapabilityID)
-	if state.Status != executionmodel.CapabilityWaiting {
-		return nil, fmt.Errorf("capability %s is not waiting, status is %s", req.CapabilityID, state.Status)
-	}
-	if state.WaitType != executionmodel.WaitTypeSignal {
-		return nil, fmt.Errorf("capability %s is waiting for %s, not a signal", req.CapabilityID, state.WaitType)
-	}
-	if state.ExpectedSignal != req.SignalName {
-		return nil, fmt.Errorf("capability %s expects signal %q, received %q", req.CapabilityID, state.ExpectedSignal, req.SignalName)
-	}
+		state := req.Execution.CapabilityState(req.CapabilityID)
+		if state.Status != executionmodel.CapabilityWaiting {
+			return fmt.Errorf("capability %s is not waiting, status is %s", req.CapabilityID, state.Status)
+		}
+		if state.WaitType != executionmodel.WaitTypeSignal {
+			return fmt.Errorf("capability %s is waiting for %s, not a signal", req.CapabilityID, state.WaitType)
+		}
+		if state.ExpectedSignal != req.SignalName {
+			return fmt.Errorf("capability %s expects signal %q, received %q", req.CapabilityID, state.ExpectedSignal, req.SignalName)
+		}
 
-	before := req.Execution.Snapshot()
-	if err := req.Execution.ResolveWait(req.CapabilityID, req.Payload); err != nil {
-		return nil, err
-	}
-	attemptID := req.AttemptID
-	if attemptID == "" {
-		attemptID = req.Execution.AttemptID
-	}
-	effects := executionmodel.WaitEffects{Delivery: delivery}
-	if attemptID != "" {
-		key, err := executionmodel.WaitTimerKey(req.Execution.ID, req.CapabilityID, attemptID)
-		if err != nil {
+		before := req.Execution.Snapshot()
+		if err := req.Execution.ResolveWait(req.CapabilityID, req.Payload); err != nil {
+			return err
+		}
+		attemptID := req.AttemptID
+		if attemptID == "" {
+			attemptID = req.Execution.AttemptID
+		}
+		effects := executionmodel.WaitEffects{Delivery: delivery}
+		if attemptID != "" {
+			key, err := executionmodel.WaitTimerKey(req.Execution.ID, req.CapabilityID, attemptID)
+			if err != nil {
+				req.Execution.Restore(before)
+				return err
+			}
+			// Best-effort cleanup of a signal wait's optional deadline timer. The
+			// store's unfenced delete is still part of this same transaction.
+			effects.DeleteTimers = append(effects.DeleteTimers, executionmodel.WaitTimerDelete{Key: key})
+		}
+		effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(req.Execution.ID, req.CapabilityID, attemptID))
+
+		result, commitErr := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
+			Execution: req.Execution,
+			Effects:   effects,
+		})
+		if commitErr != nil {
+			if isDurableRace(commitErr) {
+				// A peer may have committed a newer revision; restore durable
+				// state instead of rolling it back to our stale `before`.
+				if reloadErr := s.reloadInto(ctx, req.Execution); reloadErr != nil {
+					return errors.Join(commitErr, reloadErr)
+				}
+				return commitErr
+			}
 			req.Execution.Restore(before)
-			return nil, err
+			return commitErr
 		}
-		// Best-effort cleanup of a signal wait's optional deadline timer. The
-		// store's unfenced delete is still part of this same transaction.
-		effects.DeleteTimers = append(effects.DeleteTimers, executionmodel.WaitTimerDelete{Key: key})
-	}
-	effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(req.Execution.ID, req.CapabilityID, attemptID))
-
-	result, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
-		Execution: req.Execution,
-		Effects:   effects,
+		if result.Replay {
+			// A duplicate won inside SaveWaitTransition: our mutation wrote
+			// nothing, so adopt the durable state rather than keeping it.
+			if err := s.reloadInto(ctx, req.Execution); err != nil {
+				return err
+			}
+			resolution = &SignalResolution{Replay: true, Delivery: result.Delivery}
+			return nil
+		}
+		resolution = &SignalResolution{Delivery: result.Delivery}
+		return nil
 	})
 	if err != nil {
-		req.Execution.Restore(before)
 		return nil, err
 	}
-	if result.Replay {
-		// A concurrent duplicate won the race inside SaveWaitTransition. The
-		// delivery is already durable; our mutation wrote nothing.
-		if err := s.reloadInto(ctx, req.Execution); err != nil {
+	if !resolution.Replay {
+		if err := s.publishReady(ctx, req.Execution, req.CapabilityID); err != nil {
 			return nil, err
 		}
-		return &SignalResolution{Replay: true, Delivery: result.Delivery}, nil
 	}
-	if err := s.publishReady(ctx, req.Execution, req.CapabilityID); err != nil {
-		return nil, err
-	}
-	return &SignalResolution{Delivery: result.Delivery}, nil
+	return resolution, nil
+}
+
+// isDurableRace reports whether a failed commit may mean a peer already wrote a
+// newer revision. Those errors require reloading durable state; restoring the
+// caller's pre-mutation snapshot would roll a committed peer backwards.
+func isDurableRace(err error) bool {
+	return errors.Is(err, storage.ErrConflict) ||
+		errors.Is(err, executionmodel.ErrSignalDeliveryConflict) ||
+		errors.Is(err, executionmodel.ErrWaitTimerLeaseLost)
 }
 
 // reloadInto replaces the caller's state with the durable snapshot after a

@@ -35,10 +35,13 @@ var (
 //
 // Concurrency contract: Save serializes writes for one Execution value with a
 // per-execution mutex, then compares the snapshot revision with the stored
-// revision inside one transaction. Two writers sharing the same Execution value
-// therefore cannot conflict with one another; a conflict means another store or
-// process holds a stale copy. That distinction is why the revision guard is
-// meaningful instead of merely rejecting ordinary same-process races.
+// revision inside one transaction. Composite transitions on a shared Execution
+// value are serialized by Execution.RunTransition, so same-value writers cannot
+// race between reading state and committing it, nor produce a false conflict.
+// The revision compare-and-swap is the backstop for a distinct stale copy: a
+// conflict means another store or process holds an older copy. That distinction
+// is why the revision guard is meaningful instead of merely rejecting ordinary
+// same-process races.
 type ExecutionStore struct {
 	mem   *MemoryStore
 	store storage.Store

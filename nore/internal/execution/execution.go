@@ -160,9 +160,16 @@ type Execution struct {
 	// serialized in snapshots and incremented only after a successful save.
 	revision uint64
 
-	// saveMu serializes saves of this Execution value. Two writers sharing the
-	// same value cannot produce a false conflict; only a distinct copy with an
-	// older revision triggers storage.ErrConflict.
+	// transitionMu serializes composite state transitions on this Execution
+	// value through RunTransition. saveMu is the narrower commit lock and is
+	// taken only by store methods; it cannot serialize the read-validate-mutate
+	// window that precedes a commit. Lock order is transitionMu -> saveMu -> mu.
+	transitionMu sync.Mutex
+
+	// saveMu serializes saves of this Execution value. Writers sharing the value
+	// are additionally serialized by RunTransition, so they cannot produce a
+	// false conflict; the revision compare-and-swap is the cross-value backstop
+	// that rejects a distinct copy with an older revision (storage.ErrConflict).
 	saveMu sync.Mutex
 
 	// joinState tracks completion of predecessor bindings for join targets.
@@ -238,6 +245,24 @@ func (e *Execution) signalTerminal() {
 	default:
 		close(e.done)
 	}
+}
+
+// RunTransition serializes one composite state transition on this Execution
+// value. fn must validate, mutate, and commit exactly once. It must not publish
+// events or wait on another driver of the same execution, because the guard is
+// held for the whole callback. Publish only after RunTransition returns.
+//
+// RunTransition is non-reentrant: fn must not call RunTransition again on this
+// Execution, or it will deadlock.
+//
+// Lock order is transitionMu -> store saveMu -> e.mu. Store commit methods take
+// saveMu and domain mutators take e.mu; neither takes transitionMu, so a caller
+// must never hold saveMu or e.mu when entering RunTransition. The store's
+// revision compare-and-swap remains the backstop for a distinct stale copy.
+func (e *Execution) RunTransition(fn func() error) error {
+	e.transitionMu.Lock()
+	defer e.transitionMu.Unlock()
+	return fn()
 }
 
 func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount int) error {
