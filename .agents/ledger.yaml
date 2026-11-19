@@ -1,7 +1,7 @@
 version: 1
 project: neuron
 updated: 2026-11-19
-branch: fix/phase5-wait-followups
+branch: feature/phase5-engine-wiring
 
 # Authoritative execution ledger. Schema and state rules: .agents/README.md
 # The product backlog lives in todos/; this file tracks active work only.
@@ -399,16 +399,16 @@ tasks:
       - "Durable retry writes CapabilityRetryWait/NextAttemptAt and releases the worker; non-durable behavior is unchanged"
       - "Snapshot schema v3 adds execution deadline; v1/v2/v3 decode correctly"
       - "Recovery restores retry timers and suspended waits; completed capabilities are never rerun; join state is restored"
-      - "A dispatch reconciler republishes ready intents after commit/publish failure"
+      - "The bounded dispatch-intent claim primitive and production reconciler are owned by T-049 and T-050; the core state machine does not own them"
     verification:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... -run 'Wait|Signal|Cancel|Recover|Retry|Timer|Dispatch'"
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recovery'"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/execution/execution.go", "nore/internal/execution/snapshot.go", "nore/internal/execution/accessors.go", "nore/internal/execution/wait.go", "nore/internal/execution/store.go", "nore/internal/execution/dispatch_intent*.go", "nore/internal/execution/recovery*.go", "nore/internal/execution/scheduler/**", "nore/internal/execution/*_test.go", "nore/internal/instance/**", "nore/internal/contracts/**", "nore/internal/event/**"], task: T-024 }
-    evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "T-024c1a `059cae7`: scheduler wait entry/resolution, due-timer poller, fresh per-claim owners, fenced timer deletion, replay reload, publish-after-commit, and `WaitStore`/poll config; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass; `-race -count=20 -run 'Wait|Timer'` pass; focused scheduler wait/timer tests pass; build/vet/gofmt/diff-check clean.", "T-024c1b1 `ffa4d57`: durable cancellation removes all execution-owned timers in one transition, retains wait metadata, discards join buffers; poller discards stale claimed timers under fence and preserves retry/future-deadline timers. `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, focused `Cancel|Wait|Timer|Retry|Dispatch`, `-race -count=20`, build, gofmt, diff-check all pass.", "T-040a `e7ab02e`: recovery accepts durable StatusWaiting, re-derives status, guards the no-work branch with authoritative waiting counts; execution/scheduler recovery tests pass under `-race` and `-count=20`.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs."]
-    reports: ["T-024", "T-024c1a", "T-024c1b1", "T-040a"]
-    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c1b2/T-024c2/T-024d remain: durable retry/max-lifetime, dispatch reconciler, and instance/event integration are not implemented."]
+    status: done
+    lease: null
+    evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "T-024c1a `059cae7`: scheduler wait entry/resolution, due-timer poller, fresh per-claim owners, fenced timer deletion, replay reload, publish-after-commit, and `WaitStore`/poll config; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass; `-race -count=20 -run 'Wait|Timer'` pass; focused scheduler wait/timer tests pass; build/vet/gofmt/diff-check clean.", "T-024c1b1 `ffa4d57`: durable cancellation removes all execution-owned timers in one transition, retains wait metadata, discards join buffers; poller discards stale claimed timers under fence and preserves retry/future-deadline timers. `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, focused `Cancel|Wait|Timer|Retry|Dispatch`, `-race -count=20`, build, gofmt, diff-check all pass.", "T-040a `e7ab02e`: recovery accepts durable StatusWaiting, re-derives status, guards the no-work branch with authoritative waiting counts; execution/scheduler recovery tests pass under `-race` and `-count=20`.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs.", "ADR 0005/0006 split the original final reconciler criterion into T-049 (bounded claim primitive) and T-050 (production reconciler/host wiring); T-024 core state-machine work is complete and its broad lease is retired."]
+    reports: ["T-024", "T-024c1a", "T-024c1b1", "T-040a", "0005-t025-wiring-boundaries", "0006-typed-outcomes-and-dispatch-claims"]
+    open_risks: ["Join durability is covered by T-024-era tests but not by production signal delivery until T-027/T-050.", "T-037/T-038 fencing conditions were consumed by the implemented timer operations; new code must not bypass owner tokens or lease validation.", "T-049/T-050 remain required before a production dispatch reconciler exists; T-025/T-026/T-028 remain required before engine/transport/config behavior is complete."]
 
   - id: T-040
     objective: "Recover fully waiting executions without failing healthy waits or losing elapsed timers"
@@ -456,6 +456,107 @@ tasks:
     evidence: ["1a8051d added instance-boundary recovery tests; `cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recover|Wait|Timer'`, `-race -count=1 ./internal/instance/...`, `go build ./...`, `gofmt -l`, and `git diff --check` pass.", "Reviewer T-040b-review approved with non-blocking follow-ups; architect T-041-design-close granted ADR 0003 D5.3 sign-off.", "Full `scripts/script.sh` passed after integration."]
     reports: ["T-040b", "T-040b-review"]
     open_risks: ["Non-due test does not yet distinguish a no-op recovery; reviewer suggested seeding a stale dispatch intent that recovery must clear.", "Live signal-delivery resume sequence remains gated on T-027.", "Concurrent recovery is T-041 scope."]
+
+  - id: T-045
+    objective: "Research T-025 engine wiring points without modifying the repository"
+    scope: ["nore/internal/execution/engine/**", "nore/internal/execution/scheduler/**", "nore/internal/execution/dispatch_intent*.go"]
+    owner: explore
+    reviewer: null
+    signoff: []
+    dependencies: [T-041, T-043]
+    acceptance:
+      - "Map engine completion/failure/retry paths to scheduler WaitCommitter and dispatch reconciler contracts with file:line evidence"
+      - "Identify exact files, symbols, tests, and invariants for T-025"
+      - "Distinguish implemented prerequisites from missing production wiring and record risks"
+    verification:
+      - "Read-only inspection with file:line citations"
+      - "No commands that mutate the working tree"
+    status: done
+    lease: null
+    evidence: ["Read-only research mapped engine `Run` (`executor_engine.go:105-132`), completion/failure paths (`:134-264`, `:359-410`), dispatch claim (`:278-303`), and retry sleep (`invocation.go:104-141,229-244`).", "Found no engine wait dependency or suspend result in `contracts.CapabilityRuntime.Execute` (`capabilityruntime.go:95-97`); process worker rejects suspend (`worker.go:624-630`).", "Identified store bulk claim (`store.go:792-824`) and contract gap (`transition-committer.go:25-43`); no production wait store, poller, or reconciler wiring (`instance.go:196-206,286-341`).", "No files were written; findings returned in chat."]
+    reports: []
+    open_risks: []
+
+  - id: T-046
+    objective: "Research T-025 cancellation, deadline, and dispatch reconciliation prerequisites"
+    scope: ["nore/internal/execution/**", "nore/internal/runtimeconfig/**", "nore/cmd/**"]
+    owner: explore
+    reviewer: null
+    signoff: []
+    dependencies: [T-041, T-043]
+    acceptance:
+      - "Map cancellation/deadline/max-lifetime state transitions and dispatch-intent reconciliation APIs with file:line evidence"
+      - "Identify configuration dependency boundaries with T-028 and exact tests needed for T-025"
+      - "Record unresolved questions and avoided duplication risks"
+    verification:
+      - "Read-only inspection with file:line citations"
+      - "No commands that mutate the working tree"
+    status: done
+    lease: null
+    evidence: ["Read-only research mapped wait/deadline policy (`execution/wait.go:79-120,321-376`), retry wait APIs (`:243-292`), cancellation (`execution.go:687-727`), scheduler cancellation (`scheduler.go:355-443`), and timer expiry (`timer_poller.go:28-265`).", "Found dispatch-intent primitives (`store.go:544-556,576-711,713-790,792-824`) but no production reconciler; `ClaimReadyDispatchIntents` appears only in store and tests.", "Confirmed no production `WithWaitStore`, `PollDueTimers`, `SetExecutionDeadline`, or scheduler `EnterWait` caller; max-lifetime config belongs to T-028.", "No files were written; findings returned in chat."]
+    reports: []
+    open_risks: []
+
+  - id: T-047
+    objective: "Decide the architecture-correct split and ownership for T-025's engine and production wiring work"
+    scope: [".agents/decisions/0005-t025-wiring-boundaries.md"]
+    owner: architect
+    reviewer: null
+    signoff: []
+    dependencies: [T-045, T-046]
+    acceptance:
+      - "Recommend a coherent scope split that avoids engine duplication of scheduler/store/instance/config responsibilities"
+      - "Identify exact tasks, leases, dependencies, and minimal contract changes"
+      - "Preserve T-026/T-028 boundaries and distinguish blocked criteria"
+    verification:
+      - "Read-only architecture review with file:line evidence"
+    status: done
+    lease: null
+    evidence: ["Architect T-047 recommended Option B: complete bounded T-024 storage primitive, add typed capability outcome task, amend T-026, reduce T-025 to engine-only, keep T-028 config boundary, and add host lifecycle wiring task.", "ADR 0005 written and adopted; no source files changed."]
+    reports: ["0005-t025-wiring-boundaries"]
+    open_risks: []
+
+  - id: T-051
+    objective: "Add coordination-only paths to .gitignore without untracking already-versioned files"
+    scope: [".gitignore"]
+    owner: coder
+    reviewer: reviewer
+    signoff: []
+    dependencies: []
+    acceptance:
+      - ".gitignore contains `.agents/` and `AGENTS.md`"
+      - "No tracked file is removed from the index"
+      - "No other file is changed"
+    verification:
+      - "git check-ignore -v .agents/ledger.yaml AGENTS.md"
+      - "git status --short --branch"
+    status: done
+    lease: null
+    evidence: ["`.gitignore:81-86` adds `.agents/` and `AGENTS.md` while preserving existing content.", "`git ls-files` confirms `AGENTS.md` and `.agents/ledger.yaml` remain tracked and no tracked file was deleted; `git check-ignore -v --no-index` matches both new rules. Reviewer T-051/T-052-review passed.", "`.gitignore` self-ignores at line 77 and remained untracked at task completion, so the coordinator must explicitly add it if the rule is to be versioned."]
+    reports: ["T-051"]
+    open_risks: ["AGENTS.md and existing .agents files are already tracked; adding ignore rules does not untrack them."]
+
+  - id: T-052
+    objective: "Mark every verified completed backlog item in todos/TODO.md as completed"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-041, T-043, T-044]
+    acceptance:
+      - "Only items whose closing tasks are done and verified are checked"
+      - "R5-12/R5-13 and F5-3 are checked only if timer poller/recovery wiring is complete and validated; otherwise left open with evidence"
+      - "F5-10 remains open because T-042 is blocked"
+      - "No unverified item is checked"
+      - "Verified completed items outside Phase 5 are also checked only with recorded evidence"
+    verification:
+      - "git diff -- todos/TODO.md"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["Full audit of all 240 TODO checkboxes found no unverified item newly closable; every item whose closing task is done and verified was already checked. `git diff -- todos/TODO.md` is empty and `git diff --check` passes.", "R5-12/R5-13/F5-3 remain open because production poller/recovery wiring is absent; F5-10 remains open because T-042 is blocked. Reviewer T-051/T-052-review passed."]
+    reports: ["T-052"]
+    open_risks: ["R2-10..R2-14 and some stale Phase 3 items may be partially implemented but lack recorded closing evidence; route through T-031 or a dedicated closure task."]
 
   - id: T-041
     objective: "Serialize shared in-memory wait transitions across signal, timer, and recovery drivers"
@@ -508,6 +609,7 @@ tasks:
     open_risks: ["BLOCKER: the original `TestStoppedCapabilityPublishesCancellationNotFailure` 5s timeout cannot be reproduced locally and its verbatim failure output is unavailable; T-042 cannot be marked done until that failure is characterized or the user approves a documented exception.", "Resume condition: provide the original failure output or a reliable reproduction, then repair the source-level cause without retries/skips.", "The changed test no longer exercises real wall-clock expiry itself; that path remains covered by TestClaimDispatchIntentAfterLeaseExpiry."]
 
   - id: T-043
+    commit: b4d55eb
     objective: "Close wait-cancellation test and timer-prefix authority gaps"
     scope:
       - "nore/internal/execution/store.go"
@@ -552,46 +654,182 @@ tasks:
     reports: ["T-044"]
     open_risks: []
 
+  - id: T-053
+    objective: "Decide typed capability outcome and bounded dispatch claim boundaries"
+    scope: [".agents/decisions/0006-typed-outcomes-and-dispatch-claims.md"]
+    owner: architect
+    reviewer: null
+    signoff: []
+    dependencies: [T-045, T-046, T-047]
+    acceptance:
+      - "Define one authoritative capability outcome type and one execution path"
+      - "Define fail-closed interim behavior and exact compiling leases for T-048/T-049"
+      - "Define bounded claim semantics, interface placement, and revised dependencies for T-025/T-026/T-050"
+    verification:
+      - "Read-only architecture review with file:line evidence"
+    status: done
+    lease: null
+    evidence: ["Architect T-053 wrote ADR 0006 at `.agents/decisions/0006-typed-outcomes-and-dispatch-claims.md`.", "Coordinator adopted ADR 0006: `CapabilityRuntime.Execute` returns a single `CapabilityOutcome`; T-048 fails closed for suspend; T-049 adds a bounded `limit` and all-or-nothing claim ownership; T-025 owns `WaitLifecycle`; T-026 owns transport mapping; T-050 owns host wiring and inherits the bounded-discovery precondition."]
+    reports: ["0006-typed-outcomes-and-dispatch-claims"]
+    open_risks: ["One-shot `InvokeResponse` suspend representation remains a future product decision.", "Storage-level bounded discovery is deferred to a T-050 precondition."]
+
+  - id: T-048
+    objective: "Introduce one typed capability outcome contract and fail closed where suspend cannot be represented"
+    scope:
+      - "nore/internal/contracts/capability-outcome.go"
+      - "nore/internal/contracts/capabilityruntime.go"
+      - "nore/internal/plugin/plugin.go"
+      - "nore/internal/builtins/set/set.go"
+      - "nore/internal/builtins/http/http.go"
+      - "nore/internal/builtins/command/command.go"
+      - "nore/internal/builtins/filesystem/filesystem.go"
+      - "nore/internal/execution/engine/executor_engine.go"
+      - "nore/internal/invoke/invoke.go"
+      - "nore/internal/execution/engine/dispatch_claim_test.go"
+      - "nore/internal/execution/engine/config_params_test.go"
+      - "nore/internal/execution/engine/timeout_test.go"
+      - "nore/internal/execution/engine/executor_engine_test.go"
+      - "nore/internal/execution/scheduler/detach_test.go"
+      - "nore/internal/execution/scheduler/cancel_test.go"
+      - "nore/internal/execution/scheduler/sibling_test.go"
+      - "nore/internal/builtins/set/set_test.go"
+      - "nore/internal/builtins/http/http_test.go"
+      - "nore/internal/builtins/http/network_test.go"
+      - "nore/internal/builtins/command/command_test.go"
+      - "nore/internal/builtins/command/process_unix_test.go"
+      - "nore/internal/builtins/filesystem/filesystem_test.go"
+      - "nore/internal/invoke/invoke_test.go"
+      - "nore/internal/plugin/*_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-045, T-047, T-053]
+    acceptance:
+      - "`contracts.CapabilityRuntime.Execute` returns `(CapabilityOutcome, error)` and has exactly one execution path; suspend is an outcome, never an error"
+      - "`CapabilityOutcome.Suspend` reuses `execution.WaitType` and carries correlation key, expected signal, `WaitUntil`, and payload schema without a new wait vocabulary"
+      - "Engine returns `ErrSuspendLifecycleUnavailable` and publishes failure when a suspend arrives before T-025; it never completes with an empty result"
+      - "One-shot invoke returns an explicit `unsupported_suspend_outcome` error and never an empty success"
+      - "No protocol regeneration, SDK change, shared wire-field change, transport guard change, instance wiring, or `WaitLifecycle` interface is introduced"
+      - "All internal implementers, callers, test doubles, and test result indexing compile and pass"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/contracts/... ./internal/execution/engine/... ./internal/plugin/... ./internal/builtins/... ./internal/registry/... ./internal/invoke/... ./internal/execution/scheduler/... ./internal/mechanism/..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/engine/... ./internal/plugin/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Suspend|LifecycleUnavailable'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Wide mechanical lease; compile-all gate is mandatory.", "Fail-closed behavior is intentionally temporary until T-025/T-026."]
+
+  - id: T-049
+    objective: "Replace the unbounded dispatch-intent batch claim with a bounded, all-or-nothing primitive"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/dispatch_intent_test.go"
+      - "nore/internal/execution/store_failure_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-046, T-047, T-053]
+    acceptance:
+      - "`ClaimReadyDispatchIntents(ctx, owner, lease, limit)` rejects non-positive limits and never returns more than `limit` intents"
+      - "Candidate iteration is bounded by `limit`; partial claim errors release all already-won claims or return an error naming both the original failure and any release failure"
+      - "Engine single-intent claim, release, and complete methods and `contracts.TransitionCommitter` are unchanged"
+      - "Tests cover limit validation, bound, under-filled batches, identity/lease semantics, partial-error release, and release failure"
+      - "No storage interface or backend-specific discovery primitive is introduced; the deferred full-prefix scan risk is recorded for T-050"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution -run 'DispatchIntent|ClaimReady'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/contracts/..."
+      - "cd nore && GOWORK=off go test -race -count=20 ./internal/execution -run 'Claim|Dispatch'"
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go vet ./internal/execution/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["`KV.List` still materializes all matching keys; T-050 must satisfy the D4 bounded-discovery precondition before enabling a periodic reconciler.", "No PostgreSQL DSN is available; parity cannot be claimed."]
+
+  - id: T-050
+    objective: "Wire production wait lifecycle, timer polling, and bounded dispatch reconciliation into the host"
+    scope:
+      - "nore/internal/execution/reconciler/**"
+      - "nore/internal/execution/scheduler/**"
+      - "nore/internal/instance/**"
+      - "nore/cmd/nore/main.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-024, T-025, T-026, T-028, T-049]
+    acceptance:
+      - "Durable instances wire `WithWaitStore`, engine `WithWaitLifecycle`, and execution maximum lifetime without duplicating state-machine logic"
+      - "A timer polling loop starts and stops with the host and polls only when durable wait storage is configured"
+      - "A consumer-local reconciler port claims bounded batches, uses fresh owner tokens, releases each claim before publishing, leaves failed publishes claimable, and never completes intents"
+      - "The D4 discovery precondition is satisfied by a bounded store primitive with backend tests or a recorded measurement proving the ready-intent keyspace is bounded by in-flight executions"
+      - "Batch size, lease bounds, and poll interval come from T-028 configuration and are not hard-coded"
+      - "Cancellation/deadline enforcement and publish-after-commit behavior are covered by scheduler/host integration tests"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
+      - "git diff --check"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: ["Must not proceed to a periodic production reconciler until the D4 bounded-discovery precondition is satisfied.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
+
   - id: T-025
-    objective: "Wire engine suspend consumption, durable retry, cancellation/deadline enforcement, and dispatch reconciliation"
+    objective: "Wire engine-only consumption of typed suspend outcomes and durable retry waits"
     scope: ["nore/internal/execution/engine/**"]
     owner: coder
     reviewer: reviewer
     signoff: [architect, security]
-    dependencies: [T-024]
+    dependencies: [T-024, T-048]
     acceptance:
-      - "Capability suspend outcome maps to the scheduler wait transition instead of completion/failure"
-      - "Durable retry does not sleep in the engine invocation; it persists retry wait and returns the worker"
-      - "Non-durable retry keeps current behavior"
-      - "Cancellation and deadlines apply to suspended/retry work through the execution state machine"
-      - "Dispatch reconciler claims ready intents and republishes them with bounded leases"
+      - "Consumes `contracts.CapabilityOutcome.Suspend` through a consumer-local `engine.WaitLifecycle.EnterWait`; it never calls `MarkCapabilityCompleted` for a suspend"
+      - "The suspend-to-`WaitSpec` mapping rejects executor-supplied `WaitTypeDeadline` and leaves `execution.EnterWait` as authoritative domain validator"
+      - "The T-048 fail-closed sentinel is replaced only when a lifecycle is configured; non-durable mode keeps fail-closed behavior"
+      - "Durable retry calls `engine.WaitLifecycle.BeginRetryWait`, releases the worker, and no longer sleeps in `invocation.go`; non-durable retry keeps current behavior"
+      - "No `nore/internal/execution/engine/**` source imports scheduler, wait-store, timer, deadline-policy, execution-store, or runtime-config packages"
     verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/engine/..."
-      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Retry|Suspend|Cancel|Deadline|Claim'"
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Retry|Suspend|Wait|Lifecycle'"
+      - "grep -R -n -E 'scheduler|waitstore|runtimeconfig|internal/execution\"' nore/internal/execution/engine --include='*.go'"
     status: not_started
     lease: null
     evidence: []
     reports: []
-    open_risks: []
+    open_risks: ["Real suspend/resume remains unavailable until T-026 maps transports.", "Host lifecycle is not wired until T-050."]
 
   - id: T-026
-    objective: "Map the process adapter to the suspend/resume protocol and prove conformance"
-    scope: ["nore/internal/mechanism/process/**"]
+    objective: "Map suspend and resume through process and WASM capability runtimes with feature negotiation"
+    scope:
+      - "nore/internal/mechanism/process/**"
+      - "nore/internal/mechanism/wasm/**"
+      - "shared/types/capabilityruntime/**"
     owner: coder
     reviewer: reviewer
-    signoff: [architect, security]
-    dependencies: [T-023, T-024]
+    signoff: [architect, security, documenter]
+    dependencies: [T-023, T-024, T-048]
     acceptance:
-      - "Process transport carries suspend outcomes and resume inputs"
-      - "Feature negotiation and old-runtime behavior are enforced"
-      - "Conformance covers signal/timer resume and duplicate delivery"
+      - "Process transport maps proto `SuspendOutcome` to `contracts.CapabilitySuspend`, converting `deadline_unix_ms` to `WaitUntil` and rejecting invalid wait types/output combinations"
+      - "WASM transport carries suspend outcomes and resume inputs through the additive JSON envelope"
+      - "Suspend is accepted only when the handshake negotiated the `suspend` feature; old runtimes and unnegotiated suspend remain explicit errors"
+      - "Conformance covers signal/timer resume, duplicate delivery, malformed untrusted suspend metadata, and old-runtime behavior"
+      - "Any shared JSON wire change is documented as additive and preserves absent-field behavior"
     verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/..."
+      - "cd shared && GOWORK=off go test -count=1 ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/... -run 'Suspend|Resume|Feature|Negotiat'"
     status: not_started
     lease: null
     evidence: []
     reports: []
-    open_risks: []
+    open_risks: ["One-shot `InvokeResponse` still cannot represent suspend; the future wire/product decision remains open.", "Public/additive JSON wire change requires documenter sign-off."]
 
   - id: T-027
     objective: "Implement execution-scoped signal delivery, authorization, idempotency, payload validation, and suspended-execution query"
