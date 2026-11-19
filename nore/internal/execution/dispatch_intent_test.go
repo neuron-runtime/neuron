@@ -223,8 +223,12 @@ func TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery(t *testing.T) {
 		t.Fatalf("enqueue dispatch intent: %v", err)
 	}
 
-	// Use a short lease so the test completes in reasonable time.
-	lease := 5 * time.Millisecond
+	// The lease must outlive the whole concurrent phase. With a short lease the
+	// winner's claim can expire while the two goroutines are being scheduled, so
+	// the loser sees an expired claim, wins its own compare-and-swap, and both
+	// callers report a win. A long lease keeps the loser's check deterministic;
+	// expiry is modelled explicitly below instead of racing the wall clock.
+	lease := time.Minute
 
 	type claimResult struct {
 		owner  string
@@ -307,9 +311,23 @@ func TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery(t *testing.T) {
 		t.Fatalf("stored owner = %q, want %q", stored.Owner, winnerResult.owner)
 	}
 
-	// Wait for the winner's lease to expire, then verify the loser can claim.
-	// The lease was 5ms; 20ms gives plenty of margin.
-	time.Sleep(20 * time.Millisecond)
+	// Model the lease expiring explicitly: move the stored expiry into the past
+	// and prove the loser can then claim through the same public API. Waiting on
+	// a short wall-clock lease here would reintroduce the timing dependence that
+	// made the concurrent phase flaky.
+	key, err := dispatchIntentKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+	if err != nil {
+		t.Fatalf("dispatch intent key: %v", err)
+	}
+	expired := time.Now().UTC().Add(-time.Second)
+	stored.LeaseExpiresAt = &expired
+	encoded, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("marshal expired dispatch intent: %v", err)
+	}
+	if err := store.Put(ctx, key, encoded); err != nil {
+		t.Fatalf("expire dispatch intent lease: %v", err)
+	}
 
 	claimed, won, err := s.ClaimDispatchIntent(ctx, intent, loserResult.owner, lease)
 	if err != nil {
