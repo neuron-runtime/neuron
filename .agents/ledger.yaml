@@ -688,7 +688,7 @@ tasks:
       - "nore/internal/execution/engine/dispatch_claim_test.go"
       - "nore/internal/execution/engine/config_params_test.go"
       - "nore/internal/execution/engine/timeout_test.go"
-      - "nore/internal/execution/engine/executor_engine_test.go"
+      - "nore/internal/execution/engine/suspend_test.go"
       - "nore/internal/execution/scheduler/detach_test.go"
       - "nore/internal/execution/scheduler/cancel_test.go"
       - "nore/internal/execution/scheduler/sibling_test.go"
@@ -1008,3 +1008,24 @@ tasks:
     evidence: ["`todos/TODO.md:747-751`: R5-11 checked with T-022 evidence and PostgreSQL DSN limitation.", "T-022 marked done; plan maps R5-11 solely to T-022.", "All items depending on T-024 or later left unchecked; pre-existing Phase 4 checkboxes left for T-031 final synchronization.", "`git diff -- todos/TODO.md` single hunk; `git diff --check` clean."]
     reports: ["T-039"]
     open_risks: ["T-031 will perform the final full TODO synchronization and decide whether pre-existing checked Phase 4 items need correction."]
+
+  - id: T-054
+    objective: "Correct inaccurate Phase 5 TODO closure state after T-048/T-049 without promoting unverified items"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-039, T-048, T-049]
+    acceptance:
+      - "No unchecked checkbox is promoted to checked unless its plan-mapped closing tasks are all done with verified boundary evidence"
+      - "R5-20 is reopened because its SDK README obligation is unmet while T-026 and T-031 remain not_started"
+      - "F4-11, F5-3, and F5-6 text is corrected to describe the actual implemented substrate and the remaining host/configuration/test gaps, while remaining unchecked"
+      - "No other checkbox is changed and no acceptance criterion is weakened"
+    verification:
+      - "Cross-check every changed TODO line against .agents/ledger.yaml, .agents/reports/phase5-implementation-plan.md, and cited code/tests"
+      - "git diff -- todos/TODO.md && git diff --check"
+    status: needs_review
+    lease: null
+    evidence: ["TODO-AUDIT found no unchecked entry with full closure evidence after T-048/T-049 and found R5-20 checked without its required SDK README updates.", "CLOSURE-001 architect decision: keep R5-13 and R4-14 open pending T-030; reword F4-11/F5-3/F5-6 and keep them unchecked; reopen R5-20 pending T-026/T-031.", "Documenter changed only `todos/TODO.md`: F4-11 at line 699, R5-20 at lines 789-793, F5-3 at line 815, and F5-6 at line 818. No other checkbox changed.", "Independent reviewer PASS on all four acceptance criteria after verifying every cited source/test path and all task statuses; `git diff --check` clean.", "Full integration gate `scripts/script.sh` passed after T-054: all Go modules and TypeScript packages built and tested successfully.", "T-048 ledger scope corrected from nonexistent `executor_engine_test.go` to actual `suspend_test.go` during integration."]
+    reports: [".agents/reports/T-054.md"]
+    open_risks: ["Reviewer minor: F4-11 citation `execution.go:445-474` covers the doc comment/signature while implementation is at `:494-509`; behavior is still supported by the doc comment. Resolve precision in T-031.", "Reviewer minor: CLOSURE-001 rationale is recorded as ledger evidence but has no standalone ADR/report; add traceability in T-031.", "T-052 previously asserted R5-20 was correctly checked; T-054 supersedes that claim.", "PostgreSQL parity remains DSN-gated and cannot support any closure claim."]
