@@ -81,7 +81,7 @@ func newGatedRuntime() *gatedRuntime {
 	return &gatedRuntime{started: make(chan struct{}, 8), release: make(chan struct{})}
 }
 
-func (r *gatedRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (map[string]any, error) {
+func (r *gatedRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()
@@ -91,9 +91,9 @@ func (r *gatedRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext
 	}
 	select {
 	case <-r.release:
-		return map[string]any{}, nil
+		return contracts.CapabilityOutcome{Result: map[string]any{}}, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return contracts.CapabilityOutcome{}, ctx.Err()
 	}
 }
 

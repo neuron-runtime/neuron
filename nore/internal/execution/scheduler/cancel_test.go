@@ -33,14 +33,14 @@ func newBlockingRuntime() *blockingRuntime {
 	}
 }
 
-func (r *blockingRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (map[string]any, error) {
+func (r *blockingRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	r.once.Do(func() { close(r.started) })
 	<-ctx.Done()
 	select {
 	case r.cancelled <- struct{}{}:
 	default:
 	}
-	return nil, ctx.Err()
+	return contracts.CapabilityOutcome{}, ctx.Err()
 }
 
 // awaitStart waits until the runtime is actually inside Execute. Asserting on a

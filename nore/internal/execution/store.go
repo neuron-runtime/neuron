@@ -789,17 +789,36 @@ func (s *ExecutionStore) CompleteDispatchIntent(ctx context.Context, executionID
 	return nil
 }
 
-// ClaimReadyDispatchIntents claims every ready, claimable intent for owner and
-// returns only the intents this call won. It is the startup reconciliation
-// primitive: leases that outlived a crashed owner become claimable once they
-// expire, while intents under a live lease are left untouched. Intents are
-// claimed individually, so a concurrent reconciler may win some of them.
-func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner string, lease time.Duration) ([]*DispatchIntent, error) {
+// dispatchClaimReleaseTimeout bounds the detached cleanup that releases a
+// partially won batch after a claim fails. Cleanup must outlive the caller's
+// context, or a cancelled reconciler would strand the claims it already owns
+// until their leases expire.
+const dispatchClaimReleaseTimeout = 5 * time.Second
+
+// ClaimReadyDispatchIntents claims at most limit ready, claimable intents for
+// owner under lease. A batch may be under-filled when candidates are unready or
+// held by a live lease; the caller must treat a returned batch as fully owned.
+// Leases that outlived a crashed owner become claimable once they expire, while
+// intents under a live lease are left untouched.
+//
+// limit must be positive and is validated before any discovery. Discovery lists
+// the dispatch-intent prefix, so only the first limit keys are examined; the
+// store imposes no upper bound, leaving batch sizing to deployment policy.
+//
+// Ownership is all-or-nothing. If any claim fails, every intent already won in
+// this call is released with an owner-fenced write on a bounded detached context
+// and the method returns (nil, err). If a release also fails, the returned error
+// names both the original failure and the leaked claims; those claims remain
+// lease-bounded and become claimable again when their leases expire.
+func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner string, lease time.Duration, limit int) ([]*DispatchIntent, error) {
 	if owner == "" {
 		return nil, fmt.Errorf("dispatch intent owner is required")
 	}
 	if lease <= 0 {
 		return nil, fmt.Errorf("dispatch intent lease must be positive")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("dispatch intent claim limit must be positive")
 	}
 	prefix, err := storage.Prefix("dispatch_intents")
 	if err != nil {
@@ -809,18 +828,42 @@ func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner st
 	if err != nil {
 		return nil, fmt.Errorf("list dispatch intents: %w", err)
 	}
+	if len(keys) > limit {
+		keys = keys[:limit]
+	}
 
 	claimed := make([]*DispatchIntent, 0, len(keys))
 	for _, key := range keys {
 		intent, won, err := s.claimDispatchIntent(ctx, key, owner, lease)
 		if err != nil {
-			return claimed, fmt.Errorf("claim dispatch intents: %w", err)
+			if releaseErr := s.releaseClaimedDispatchIntents(ctx, claimed, owner); releaseErr != nil {
+				return nil, fmt.Errorf("claim dispatch intents: %w; release cleanup failed for %d claimed intents, which remain leased until expiry: %w",
+					err, len(claimed), releaseErr)
+			}
+			return nil, fmt.Errorf("claim dispatch intents: %w", err)
 		}
 		if won {
 			claimed = append(claimed, intent)
 		}
 	}
 	return claimed, nil
+}
+
+// releaseClaimedDispatchIntents releases every intent in claimed behind owner's
+// fence. It detaches from ctx and bounds the work so a failed claim cannot leave
+// owned intents behind when the caller's context is cancelled. Every release is
+// attempted so one failure cannot hide another leaked claim.
+func (s *ExecutionStore) releaseClaimedDispatchIntents(ctx context.Context, claimed []*DispatchIntent, owner string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dispatchClaimReleaseTimeout)
+	defer cancel()
+
+	var releaseErrs []error
+	for _, intent := range claimed {
+		if err := s.ReleaseDispatchIntent(cleanupCtx, intent.ExecutionID, intent.CapabilityID, intent.AttemptID, owner); err != nil {
+			releaseErrs = append(releaseErrs, err)
+		}
+	}
+	return errors.Join(releaseErrs...)
 }
 
 // SignalDeliveryStatus is the outcome returned to the original sender and

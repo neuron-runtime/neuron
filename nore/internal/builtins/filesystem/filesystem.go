@@ -37,8 +37,18 @@ type Filesystem struct {
 // result says so.
 var errListingComplete = errors.New("the listing reached its limit")
 
-// Execute performs the operation named by the capability's input.
-func (f Filesystem) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+// Execute performs the operation named by the capability's input. Filesystem
+// never suspends, so its outcome always carries a result.
+func (f Filesystem) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
+	result, err := f.execute(ctx, execution)
+	if err != nil {
+		return contracts.CapabilityOutcome{}, err
+	}
+	return contracts.CapabilityOutcome{Result: result}, nil
+}
+
+// execute performs the operation and returns its result.
+func (f Filesystem) execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
 	// The policy is resolved here rather than trusted, because a runtime may
 	// also be constructed outside the registry. The resolution only narrows,
 	// so a policy that has already been resolved is unchanged.

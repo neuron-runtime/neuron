@@ -205,7 +205,11 @@ type instanceAdapter struct {
 }
 
 // Execute runs one execution through the runtime-backed instance.
-func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+//
+// The transport has no typed suspend mapping yet; T-026 owns translating a
+// runtime's suspend response into the outcome. This adapter therefore returns
+// only a result or an error.
+func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	// Store attempt_id and logical_operation_id in the context so the
 	// worker can populate them on the gRPC ExecuteRequest.
 	ctx = context.WithValue(ctx, "neuron:attempt_id", execution.AttemptID)
@@ -214,12 +218,12 @@ func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.Execu
 	req := &capabilityrt.Request{Params: execution.Params}
 	resp, err := a.instance.Execute(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("capability runtime %s: %w", a.typ, err)
+		return contracts.CapabilityOutcome{}, fmt.Errorf("capability runtime %s: %w", a.typ, err)
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("capability runtime %s: %s", a.typ, resp.Error)
+		return contracts.CapabilityOutcome{}, fmt.Errorf("capability runtime %s: %s", a.typ, resp.Error)
 	}
-	return resp.Result, nil
+	return contracts.CapabilityOutcome{Result: resp.Result}, nil
 }
 
 // Close releases the runtime-backed instance.

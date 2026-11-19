@@ -36,7 +36,11 @@ func project(t *testing.T) (string, Filesystem) {
 // execute performs an operation against the runtime.
 func execute(t *testing.T, runtime Filesystem, params map[string]any) (map[string]any, error) {
 	t.Helper()
-	return runtime.Execute(context.Background(), contracts.ExecutionContext{Params: params})
+	outcome, err := runtime.Execute(context.Background(), contracts.ExecutionContext{Params: params})
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Result, nil
 }
 
 func TestFilesystemReadsAFile(t *testing.T) {

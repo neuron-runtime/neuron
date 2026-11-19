@@ -33,10 +33,10 @@ func newBlockingCapabilityRuntime() *blockingCapabilityRuntime {
 	return &blockingCapabilityRuntime{started: make(chan struct{}, 4)}
 }
 
-func (r *blockingCapabilityRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (map[string]any, error) {
+func (r *blockingCapabilityRuntime) Execute(ctx context.Context, _ contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	r.once.Do(func() { close(r.started) })
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return contracts.CapabilityOutcome{}, ctx.Err()
 }
 
 func (r *blockingCapabilityRuntime) awaitStart(t *testing.T) {
@@ -62,9 +62,9 @@ func newSelfTimingOutRuntime() *selfTimingOutRuntime {
 	return &selfTimingOutRuntime{started: make(chan struct{}, 4)}
 }
 
-func (r *selfTimingOutRuntime) Execute(_ context.Context, _ contracts.ExecutionContext) (map[string]any, error) {
+func (r *selfTimingOutRuntime) Execute(_ context.Context, _ contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	r.once.Do(func() { close(r.started) })
-	return nil, context.DeadlineExceeded
+	return contracts.CapabilityOutcome{}, context.DeadlineExceeded
 }
 
 func (r *selfTimingOutRuntime) awaitStart(t *testing.T) {

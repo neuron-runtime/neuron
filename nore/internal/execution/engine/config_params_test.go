@@ -29,13 +29,13 @@ func newConfigCapturingRuntime() *configCapturingRuntime {
 	return &configCapturingRuntime{started: make(chan struct{}, 4), executions: make(chan contracts.ExecutionContext, 4)}
 }
 
-func (r *configCapturingRuntime) Execute(_ context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+func (r *configCapturingRuntime) Execute(_ context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	r.mu.Lock()
 	r.config = execution.CapabilityConfigurations
 	r.mu.Unlock()
 	r.startOnce.Do(func() { close(r.started) })
 	r.executions <- execution
-	return map[string]any{"done": true}, nil
+	return contracts.CapabilityOutcome{Result: map[string]any{"done": true}}, nil
 }
 
 func (r *configCapturingRuntime) awaitStart(t *testing.T) {

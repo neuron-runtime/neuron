@@ -26,13 +26,13 @@ func TestCommandStopsTheWholeProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["timed_out"] != true {
-		t.Errorf("timed_out = %v, want true", result["timed_out"])
+	if result.Result["timed_out"] != true {
+		t.Errorf("timed_out = %v, want true", result.Result["timed_out"])
 	}
 
 	// The helper reports the pid of the child it started before it went on
 	// to wait, so the test can check that the child is gone.
-	pid, err := strconv.Atoi(strings.TrimSpace(result["stdout"].(string)))
+	pid, err := strconv.Atoi(strings.TrimSpace(result.Result["stdout"].(string)))
 	if err != nil {
 		t.Fatalf("read the child's pid: %v", err)
 	}

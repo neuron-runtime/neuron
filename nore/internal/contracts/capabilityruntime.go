@@ -93,7 +93,7 @@ type ExecutionContext struct {
 }
 
 type CapabilityRuntime interface {
-	Execute(ctx context.Context, execution ExecutionContext) (map[string]any, error)
+	Execute(ctx context.Context, execution ExecutionContext) (CapabilityOutcome, error)
 }
 
 // CapabilityRuntimeCloser is implemented by runtimes that own runtime

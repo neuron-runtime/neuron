@@ -33,12 +33,12 @@ type runtimeCall struct {
 	capability core.ID
 }
 
-func (r *recordingRuntime) Execute(_ context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+func (r *recordingRuntime) Execute(_ context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	call := runtimeCall{execution: execution.ExecutionID, capability: execution.Capability.Metadata.ID}
 	r.mu.Lock()
 	r.calls = append(r.calls, call)
 	r.mu.Unlock()
-	return map[string]any{"ran": string(call.capability)}, nil
+	return contracts.CapabilityOutcome{Result: map[string]any{"ran": string(call.capability)}}, nil
 }
 
 func (r *recordingRuntime) count(executionID, capabilityID core.ID) int {
@@ -254,11 +254,11 @@ func newReleasableRuntime(blockFor core.ID) *releasableRuntime {
 	}
 }
 
-func (r *releasableRuntime) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+func (r *releasableRuntime) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	id := execution.ExecutionID
 	capability := execution.Capability.Metadata.ID
 	if capability != r.blockFor {
-		return map[string]any{"ok": true}, nil
+		return contracts.CapabilityOutcome{Result: map[string]any{"ok": true}}, nil
 	}
 	select {
 	case r.started <- id:
@@ -267,10 +267,10 @@ func (r *releasableRuntime) Execute(ctx context.Context, execution contracts.Exe
 	select {
 	case <-r.release:
 		r.record(id, outcomeCompleted)
-		return map[string]any{"ok": true}, nil
+		return contracts.CapabilityOutcome{Result: map[string]any{"ok": true}}, nil
 	case <-ctx.Done():
 		r.record(id, outcomeCancelled)
-		return nil, ctx.Err()
+		return contracts.CapabilityOutcome{}, ctx.Err()
 	}
 }
 

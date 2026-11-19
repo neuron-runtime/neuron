@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -364,7 +365,7 @@ func TestClaimReadyDispatchIntents(t *testing.T) {
 		t.Fatalf("claim live intent = won %v, err %v; want success", won, err)
 	}
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
 	if err != nil {
 		t.Fatalf("claim ready dispatch intents: %v", err)
 	}
@@ -403,6 +404,209 @@ func TestClaimReadyDispatchIntents(t *testing.T) {
 	}
 	if stored.Owner != "" {
 		t.Fatalf("unready intent was claimed by %q", stored.Owner)
+	}
+}
+
+func TestClaimReadyDispatchIntentsRejectsNonPositiveLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit int
+	}{
+		{name: "zero", limit: 0},
+		{name: "negative", limit: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listed := false
+			store := &faultStore{list: func(string) ([]string, error) {
+				listed = true
+				return nil, errInjected
+			}}
+			s := NewExecutionStore(store)
+
+			claimed, err := s.ClaimReadyDispatchIntents(context.Background(), "reconciler", time.Minute, tc.limit)
+			if claimed != nil {
+				t.Fatalf("claimed = %v, want nil", claimed)
+			}
+			if err == nil || err.Error() != "dispatch intent claim limit must be positive" {
+				t.Fatalf("error = %v, want the limit validation error", err)
+			}
+			if listed {
+				t.Fatal("dispatch intents were listed before the limit was validated")
+			}
+		})
+	}
+}
+
+func TestClaimReadyDispatchIntentsRespectsLimit(t *testing.T) {
+	store := openTestStore(t)
+	s := NewExecutionStore(store)
+	ctx := context.Background()
+
+	intents := make([]*DispatchIntent, 5)
+	for i := range intents {
+		intents[i] = newDispatchIntent()
+		if err := s.EnqueueDispatchIntent(ctx, intents[i]); err != nil {
+			t.Fatalf("enqueue dispatch intent %d: %v", i, err)
+		}
+	}
+
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 2)
+	if err != nil {
+		t.Fatalf("claim ready dispatch intents: %v", err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("claimed %d intents with limit 2, want 2", len(claimed))
+	}
+	for _, intent := range claimed {
+		if intent.ExecutionID == "" || intent.CapabilityID == "" || intent.AttemptID == "" {
+			t.Fatalf("claimed intent has incomplete identity: %+v", intent)
+		}
+		if intent.Owner != "reconciler" {
+			t.Fatalf("claimed owner = %q, want reconciler", intent.Owner)
+		}
+		if intent.LeaseExpiresAt == nil || !intent.LeaseExpiresAt.After(time.Now()) {
+			t.Fatalf("claimed lease = %v, want a live lease", intent.LeaseExpiresAt)
+		}
+	}
+
+	// The keys the bounded batch never examined must stay claimable.
+	remaining, err := s.ClaimReadyDispatchIntents(ctx, "reconciler-2", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("claim remaining dispatch intents: %v", err)
+	}
+	if len(remaining) != 3 {
+		t.Fatalf("claimed %d remaining intents, want 3", len(remaining))
+	}
+}
+
+func TestClaimReadyDispatchIntentsUnderfilledBatch(t *testing.T) {
+	store := openTestStore(t)
+	s := NewExecutionStore(store)
+	ctx := context.Background()
+
+	ready := newDispatchIntent()
+	unready := newDispatchIntent()
+	unready.ReadyToRun = false
+	for _, intent := range []*DispatchIntent{ready, unready} {
+		if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
+			t.Fatalf("enqueue dispatch intent: %v", err)
+		}
+	}
+
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("claim ready dispatch intents: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("claimed %d intents with limit 10, want 1", len(claimed))
+	}
+	got := claimed[0]
+	if got.ExecutionID != ready.ExecutionID || got.CapabilityID != ready.CapabilityID || got.AttemptID != ready.AttemptID {
+		t.Fatalf("claimed identity = (%s, %s, %s), want the ready intent", got.ExecutionID, got.CapabilityID, got.AttemptID)
+	}
+	if got.Owner != "reconciler" {
+		t.Fatalf("claimed owner = %q, want reconciler", got.Owner)
+	}
+	if got.LeaseExpiresAt == nil || !got.LeaseExpiresAt.After(time.Now()) {
+		t.Fatalf("claimed lease = %v, want a live lease", got.LeaseExpiresAt)
+	}
+
+	stored, err := readDispatchIntent(t, store, unready)
+	if err != nil {
+		t.Fatalf("read unready intent: %v", err)
+	}
+	if stored.Owner != "" || stored.LeaseExpiresAt != nil {
+		t.Fatalf("unready intent was claimed: owner %q, lease %v", stored.Owner, stored.LeaseExpiresAt)
+	}
+}
+
+func TestClaimReadyDispatchIntentsPartialFailureReleasesClaims(t *testing.T) {
+	base := openTestStore(t)
+	store := &dispatchClaimFaultStore{Store: base, failOnAttempt: 2, claimErr: errInjected}
+	s := NewExecutionStore(store)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store.cancelOnClaimFail = cancel
+
+	intents := []*DispatchIntent{newDispatchIntent(), newDispatchIntent(), newDispatchIntent()}
+	for _, intent := range intents {
+		if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
+			t.Fatalf("enqueue dispatch intent: %v", err)
+		}
+	}
+	store.armed = true
+
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	if claimed != nil {
+		t.Fatalf("claimed = %v, want nil on partial failure", claimed)
+	}
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error = %v, want the injected claim failure", err)
+	}
+	if store.claimAttempts != 2 || store.releasePutCalls != 1 || store.successfulReleases != 1 {
+		t.Fatalf("claim attempts = %d, release puts = %d, successful releases = %d; want 2, 1, 1",
+			store.claimAttempts, store.releasePutCalls, store.successfulReleases)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("claim failure did not cancel the caller context")
+	}
+
+	// Cleanup must have detached from the cancelled caller context: every
+	// already-won claim was released and no intent remains owned.
+	for _, intent := range intents {
+		stored, err := readDispatchIntent(t, base, intent)
+		if err != nil {
+			t.Fatalf("read dispatch intent: %v", err)
+		}
+		if stored.Owner != "" || stored.LeaseExpiresAt != nil {
+			t.Fatalf("intent %s still owned after partial failure: owner %q, lease %v", intent.ExecutionID, stored.Owner, stored.LeaseExpiresAt)
+		}
+	}
+
+	reclaimed, err := NewExecutionStore(base).ClaimReadyDispatchIntents(context.Background(), "reconciler-2", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("reclaim after partial failure: %v", err)
+	}
+	if len(reclaimed) != len(intents) {
+		t.Fatalf("reclaimed %d intents, want %d", len(reclaimed), len(intents))
+	}
+}
+
+func TestClaimReadyDispatchIntentsReleaseFailureNamesLeak(t *testing.T) {
+	base := openTestStore(t)
+	releaseErr := errors.New("injected release failure")
+	store := &dispatchClaimFaultStore{
+		Store:         base,
+		failOnAttempt: 2,
+		claimErr:      errInjected,
+		failRelease:   true,
+		releaseErr:    releaseErr,
+	}
+	s := NewExecutionStore(store)
+	ctx := context.Background()
+
+	for i := 0; i < 2; i++ {
+		if err := s.EnqueueDispatchIntent(ctx, newDispatchIntent()); err != nil {
+			t.Fatalf("enqueue dispatch intent: %v", err)
+		}
+	}
+	store.armed = true
+
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	if claimed != nil {
+		t.Fatalf("claimed = %v, want nil on partial failure", claimed)
+	}
+	if !errors.Is(err, errInjected) {
+		t.Fatalf("error = %v, want the injected claim failure", err)
+	}
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("error = %v, want the injected release failure too", err)
+	}
+	if !strings.Contains(err.Error(), "remain leased until expiry") {
+		t.Fatalf("error = %q, want it to name the leaked claims", err.Error())
+	}
+	if store.releasePutCalls != 1 || store.successfulReleases != 0 {
+		t.Fatalf("release puts = %d, successful releases = %d; want 1 and 0", store.releasePutCalls, store.successfulReleases)
 	}
 }
 

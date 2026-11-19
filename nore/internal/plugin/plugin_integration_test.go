@@ -226,7 +226,7 @@ func TestProcessCapabilityRuntimeRoundTripWithEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	assertEchoOutput(t, got, "example:echo")
+	assertEchoOutput(t, got.Result, "example:echo")
 }
 
 func TestWasmCapabilityRuntimeRoundTripWithEnv(t *testing.T) {
@@ -240,7 +240,7 @@ func TestWasmCapabilityRuntimeRoundTripWithEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	assertEchoOutput(t, got, "example:echo-wasm")
+	assertEchoOutput(t, got.Result, "example:echo-wasm")
 }
 
 func TestAdaptersSurfaceControlledError(t *testing.T) {

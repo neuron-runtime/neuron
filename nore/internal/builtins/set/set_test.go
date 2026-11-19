@@ -16,11 +16,11 @@ func TestSetMergesConfigurationAndParams(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if result["region"] != "us" {
-		t.Errorf("region = %v, want the param to override the configuration", result["region"])
+	if result.Result["region"] != "us" {
+		t.Errorf("region = %v, want the param to override the configuration", result.Result["region"])
 	}
-	if result["retries"] != float64(3) {
-		t.Errorf("retries = %v, want the configuration value", result["retries"])
+	if result.Result["retries"] != float64(3) {
+		t.Errorf("retries = %v, want the configuration value", result.Result["retries"])
 	}
 }
 
@@ -33,8 +33,8 @@ func TestSetReturnsACopy(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	result["region"] = "changed"
-	result["added"] = true
+	result.Result["region"] = "changed"
+	result.Result["added"] = true
 
 	if configuration["region"] != "eu" {
 		t.Errorf("the configuration was mutated: %v", configuration)
@@ -63,11 +63,11 @@ func TestSetDoesNotReturnTheFormat(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if _, ok := result["format"]; ok {
-		t.Errorf("the result carries the format: %v", result)
+	if _, ok := result.Result["format"]; ok {
+		t.Errorf("the result carries the format: %v", result.Result)
 	}
-	if result["region"] != "us" {
-		t.Errorf("region = %v, want us", result["region"])
+	if result.Result["region"] != "us" {
+		t.Errorf("region = %v, want us", result.Result["region"])
 	}
 }
 
@@ -86,14 +86,14 @@ func TestSetRendersTheValuesAsText(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if result["name"] != "World" {
-		t.Errorf("name = %#v, want the text of the value", result["name"])
+	if result.Result["name"] != "World" {
+		t.Errorf("name = %#v, want the text of the value", result.Result["name"])
 	}
-	if result["count"] != "42" {
-		t.Errorf("count = %#v, want the text of the value", result["count"])
+	if result.Result["count"] != "42" {
+		t.Errorf("count = %#v, want the text of the value", result.Result["count"])
 	}
-	if result["ready"] != "true" {
-		t.Errorf("ready = %#v, want the text of the value", result["ready"])
+	if result.Result["ready"] != "true" {
+		t.Errorf("ready = %#v, want the text of the value", result.Result["ready"])
 	}
 }
 

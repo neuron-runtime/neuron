@@ -42,8 +42,18 @@ const maxRetryDelay = 2 * time.Second
 // defaultRetryBackoff is how long the runtime waits before the first retry.
 const defaultRetryBackoff = 100 * time.Millisecond
 
-// Execute performs the request named by the capability's input.
-func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+// Execute performs the request named by the capability's input. HTTP never
+// suspends, so its outcome always carries a result.
+func (h HTTP) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
+	result, err := h.execute(ctx, execution)
+	if err != nil {
+		return contracts.CapabilityOutcome{}, err
+	}
+	return contracts.CapabilityOutcome{Result: result}, nil
+}
+
+// execute performs the request and returns its result.
+func (h HTTP) execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
 	// The policy is resolved here rather than trusted, because a runtime may
 	// also be constructed outside the registry. The resolution only narrows,
 	// so a policy that has already been resolved is unchanged.

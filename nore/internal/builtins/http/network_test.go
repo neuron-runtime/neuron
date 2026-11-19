@@ -145,8 +145,8 @@ func TestHTTPDoesNotFollowARedirectByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["status_code"] != 302 {
-		t.Errorf("status_code = %v, want 302", result["status_code"])
+	if result.Result["status_code"] != 302 {
+		t.Errorf("status_code = %v, want 302", result.Result["status_code"])
 	}
 }
 
@@ -212,8 +212,8 @@ func TestHTTPRetriesAnIdempotentRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["status_code"] != 200 {
-		t.Errorf("status_code = %v, want 200", result["status_code"])
+	if result.Result["status_code"] != 200 {
+		t.Errorf("status_code = %v, want 200", result.Result["status_code"])
 	}
 	if got := attempts.Load(); got != 3 {
 		t.Errorf("the server was asked %d times, want 3", got)
@@ -236,8 +236,8 @@ func TestHTTPDoesNotRetryANonIdempotentRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["status_code"] != 503 {
-		t.Errorf("status_code = %v, want 503", result["status_code"])
+	if result.Result["status_code"] != 503 {
+		t.Errorf("status_code = %v, want 503", result.Result["status_code"])
 	}
 	if got := attempts.Load(); got != 1 {
 		t.Errorf("the server was asked %d times, want 1", got)

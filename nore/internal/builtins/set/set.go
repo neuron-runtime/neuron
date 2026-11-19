@@ -24,11 +24,21 @@ import (
 // wins.
 type Set struct{}
 
-// Execute returns the merged value set.
+// Execute returns the merged value set as a capability outcome. Set never
+// suspends, so its outcome always carries a result.
+func (s Set) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
+	result, err := s.execute(ctx, execution)
+	if err != nil {
+		return contracts.CapabilityOutcome{}, err
+	}
+	return contracts.CapabilityOutcome{Result: result}, nil
+}
+
+// execute returns the merged value set.
 //
 // The result carries the names of the merged set, so a capability that
 // declares a result schema declares exactly those names.
-func (Set) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+func (Set) execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

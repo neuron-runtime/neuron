@@ -122,14 +122,14 @@ func TestCommandRunsTheProgramAndReportsItsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["success"] != true {
-		t.Errorf("success = %v, want true", result["success"])
+	if result.Result["success"] != true {
+		t.Errorf("success = %v, want true", result.Result["success"])
 	}
-	if result["exit_code"] != float64(0) {
-		t.Errorf("exit_code = %v, want 0", result["exit_code"])
+	if result.Result["exit_code"] != float64(0) {
+		t.Errorf("exit_code = %v, want 0", result.Result["exit_code"])
 	}
-	if result["timed_out"] != false {
-		t.Errorf("timed_out = %v, want false", result["timed_out"])
+	if result.Result["timed_out"] != false {
+		t.Errorf("timed_out = %v, want false", result.Result["timed_out"])
 	}
 }
 
@@ -155,11 +155,11 @@ func TestCommandReportsANonZeroExitWhenTheFailureIsAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["success"] != false {
-		t.Errorf("success = %v, want false", result["success"])
+	if result.Result["success"] != false {
+		t.Errorf("success = %v, want false", result.Result["success"])
 	}
-	if result["exit_code"] != float64(3) {
-		t.Errorf("exit_code = %v, want 3", result["exit_code"])
+	if result.Result["exit_code"] != float64(3) {
+		t.Errorf("exit_code = %v, want 3", result.Result["exit_code"])
 	}
 }
 
@@ -170,7 +170,7 @@ func TestCommandCapturesStandardError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got, _ := result["stderr"].(string); got != "something went wrong" {
+	if got, _ := result.Result["stderr"].(string); got != "something went wrong" {
 		t.Errorf("stderr = %q, want %q", got, "something went wrong")
 	}
 }
@@ -234,15 +234,15 @@ func TestCommandBoundsTheOutputAndReportsTheTruncation(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	stdout, _ := result["stdout"].(string)
+	stdout, _ := result.Result["stdout"].(string)
 	if len(stdout) != 16 {
 		t.Errorf("stdout is %d bytes, want 16", len(stdout))
 	}
-	if result["stdout_truncated"] != true {
-		t.Errorf("stdout_truncated = %v, want true", result["stdout_truncated"])
+	if result.Result["stdout_truncated"] != true {
+		t.Errorf("stdout_truncated = %v, want true", result.Result["stdout_truncated"])
 	}
-	if result["stderr_truncated"] == true {
-		t.Errorf("stderr_truncated = %v, want no truncation on an empty stream", result["stderr_truncated"])
+	if result.Result["stderr_truncated"] == true {
+		t.Errorf("stderr_truncated = %v, want no truncation on an empty stream", result.Result["stderr_truncated"])
 	}
 }
 
@@ -272,7 +272,7 @@ func TestCommandRunsWithAnAllowlistedEnvironment(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	environment, _ := result["stdout"].(string)
+	environment, _ := result.Result["stdout"].(string)
 	if strings.Contains(environment, "NEURON_COMMAND_SECRET") {
 		t.Error("the program inherited a variable that is not on the allowlist")
 	}
@@ -293,7 +293,7 @@ func TestCommandAddsTheRequestedEnvironment(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	environment, _ := result["stdout"].(string)
+	environment, _ := result.Result["stdout"].(string)
 	if !strings.Contains(environment, "NEURON_COMMAND_EXTRA=value") {
 		t.Errorf("the program did not receive the requested variable: %q", environment)
 	}
@@ -310,7 +310,7 @@ func TestCommandRunsInTheProjectRoot(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	directory, _ := result["stdout"].(string)
+	directory, _ := result.Result["stdout"].(string)
 	resolved, err := filepath.EvalSymlinks(directory)
 	if err != nil {
 		t.Fatalf("resolve the working directory: %v", err)
@@ -355,7 +355,7 @@ func TestCommandRunsInAWorkingDirectoryInsideTheProjectRoot(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	directory, _ := result["stdout"].(string)
+	directory, _ := result.Result["stdout"].(string)
 	resolved, err := filepath.EvalSymlinks(directory)
 	if err != nil {
 		t.Fatalf("resolve the working directory: %v", err)
@@ -390,8 +390,8 @@ func TestCommandRunsAProgramThatIsAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["success"] != true {
-		t.Errorf("success = %v, want true", result["success"])
+	if result.Result["success"] != true {
+		t.Errorf("success = %v, want true", result.Result["success"])
 	}
 }
 
@@ -433,9 +433,9 @@ func TestCommandReportsJSONOutput(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	output, ok := result["stdout"].(map[string]any)
+	output, ok := result.Result["stdout"].(map[string]any)
 	if !ok {
-		t.Fatalf("stdout = %#v, want a parsed object", result["stdout"])
+		t.Fatalf("stdout = %#v, want a parsed object", result.Result["stdout"])
 	}
 	if output["answer"] != float64(42) {
 		t.Errorf("answer = %v, want 42", output["answer"])
@@ -464,8 +464,8 @@ func TestCommandWritesToTheProgramsStandardInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["success"] != true {
-		t.Errorf("success = %v, want true", result["success"])
+	if result.Result["success"] != true {
+		t.Errorf("success = %v, want true", result.Result["success"])
 	}
 }
 
@@ -477,8 +477,8 @@ func TestCommandReportsTheDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if _, ok := result["duration_ms"].(float64); !ok {
-		t.Errorf("duration_ms = %#v, want a number", result["duration_ms"])
+	if _, ok := result.Result["duration_ms"].(float64); !ok {
+		t.Errorf("duration_ms = %#v, want a number", result.Result["duration_ms"])
 	}
 }
 
@@ -493,7 +493,7 @@ func TestCommandHelperOutputIsStable(t *testing.T) {
 	}
 
 	var lines []string
-	for _, line := range strings.Split(result["stdout"].(string), "\n") {
+	for _, line := range strings.Split(result.Result["stdout"].(string), "\n") {
 		if strings.Contains(line, "=") {
 			lines = append(lines, line)
 		}

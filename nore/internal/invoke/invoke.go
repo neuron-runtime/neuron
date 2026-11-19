@@ -33,6 +33,12 @@ import (
 // alive indefinitely.
 const shutdownTimeout = 10 * time.Second
 
+// unsupportedSuspendOutcome is the explicit answer to a capability that
+// suspends during a one-shot invocation. InvokeResponse has no suspend field and
+// a one-shot process has no wait lifecycle to enter, so an empty success would
+// hide the handoff the capability asked for.
+const unsupportedSuspendOutcome = "unsupported_suspend_outcome: one-shot invocation cannot represent a suspend result"
+
 // Run performs exactly one direct invocation. It always writes exactly one
 // InvokeResponse to out — even when the request cannot be decoded or the
 // invocation fails — so the parent CLI can render a structured error. It
@@ -98,14 +104,14 @@ func Invoke(ctx context.Context, storeRoot string, policy builtins.Policy, req c
 		}
 	}()
 
-	result, err := adapter.Execute(ctx, contracts.ExecutionContext{
+	outcome, err := adapter.Execute(ctx, contracts.ExecutionContext{
 		Params: req.Params,
 		Logger: contracts.NopLogger{},
 	})
 	if err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
-	return &capabilityrt.InvokeResponse{Result: result}
+	return outcomeResponse(outcome)
 }
 
 // invokeCore resolves a built-in core capability runtime from the same core
@@ -128,14 +134,24 @@ func invokeCore(ctx context.Context, policy builtins.Policy, req capabilityrt.In
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
 
-	result, err := runtime.Execute(ctx, contracts.ExecutionContext{
+	outcome, err := runtime.Execute(ctx, contracts.ExecutionContext{
 		Params: req.Params,
 		Logger: contracts.NopLogger{},
 	})
 	if err != nil {
 		return &capabilityrt.InvokeResponse{Error: err.Error()}
 	}
-	return &capabilityrt.InvokeResponse{Result: result}
+	return outcomeResponse(outcome)
+}
+
+// outcomeResponse maps one capability outcome onto the one-shot invoke response.
+// A suspend is rejected explicitly because this response cannot represent one;
+// an ordinary outcome keeps its result unchanged.
+func outcomeResponse(outcome contracts.CapabilityOutcome) *capabilityrt.InvokeResponse {
+	if outcome.Suspend != nil {
+		return &capabilityrt.InvokeResponse{Error: unsupportedSuspendOutcome}
+	}
+	return &capabilityrt.InvokeResponse{Result: outcome.Result}
 }
 
 func decode(in io.Reader) (capabilityrt.InvokeRequest, error) {

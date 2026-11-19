@@ -40,6 +40,12 @@ const DefaultDispatchLease = 30 * time.Second
 // cancellation does not leave a claim behind.
 const dispatchCompleteTimeout = 5 * time.Second
 
+// ErrSuspendLifecycleUnavailable is the fail-closed failure for a capability
+// that suspends before the engine has a wait lifecycle to enter it. Until T-025
+// supplies that lifecycle there is no honest execution state for a suspend, so
+// it is reported as a failure rather than as an empty success.
+var ErrSuspendLifecycleUnavailable = errors.New("engine: suspend outcome received but no wait lifecycle is configured")
+
 type CapabilityRuntimeEngine struct {
 	bus        contracts.EventBus
 	registry   contracts.CapabilityRuntimeRegistry
@@ -227,9 +233,14 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		return
 	}
 
+	// A suspend is an outcome rather than an error, so retry treats it as a
+	// success. Remember the last successful outcome's suspend so the engine can
+	// fail closed below: with no wait lifecycle there is no state to enter, and
+	// completing with the empty result would report a suspend as a success.
+	var suspend *contracts.CapabilitySuspend
 	output, err := policy.run(invocationCtx, capabilityID,
 		func(attemptCtx context.Context) (map[string]any, error) {
-			return cr.Execute(attemptCtx, contracts.ExecutionContext{
+			outcome, err := cr.Execute(attemptCtx, contracts.ExecutionContext{
 				ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
 				Capability: node.Capability, Params: input, CapabilityConfigurations: resolvedConfig,
 				// The runtime configuration comes from the capability's runtime
@@ -238,6 +249,11 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 				RuntimeConfig: node.Capability.RuntimeConfig,
 				Logger:        newExecLogger(e.bus, execution.ID, execution.CorrelationID, capabilityID),
 			})
+			if err != nil {
+				return nil, err
+			}
+			suspend = outcome.Suspend
+			return outcome.Result, nil
 		},
 		func(retry retryNotice) {
 			_ = e.bus.Publish(ctx, event.New(event.CapabilityRetry, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityRetryPayload{
@@ -251,6 +267,10 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		// publishStopped decides whether that is a failure or a consequence of
 		// someone else's decision; a timeout N.O.R.E. imposed is still a failure.
 		e.publishStopped(ctx, invocationCtx, execution, capabilityID, err)
+		return
+	}
+	if suspend != nil {
+		e.publishFailure(ctx, execution, capabilityID, ErrSuspendLifecycleUnavailable)
 		return
 	}
 	if output == nil {

@@ -33,7 +33,7 @@ func newOneFailsOneBlocks() *oneFailsOneBlocks {
 	}
 }
 
-func (r *oneFailsOneBlocks) Execute(ctx context.Context, execution contracts.ExecutionContext) (map[string]any, error) {
+func (r *oneFailsOneBlocks) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	if execution.Capability.Metadata.ID == "broken" {
 		// Fail only once the sibling is genuinely running. Returning an error
 		// immediately would race the sibling's dispatch, and the test would then
@@ -42,9 +42,9 @@ func (r *oneFailsOneBlocks) Execute(ctx context.Context, execution contracts.Exe
 		select {
 		case <-r.victimStarted:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return contracts.CapabilityOutcome{}, ctx.Err()
 		}
-		return nil, errors.New("capability is genuinely broken")
+		return contracts.CapabilityOutcome{}, errors.New("capability is genuinely broken")
 	}
 	r.once.Do(func() { close(r.victimStarted) })
 	<-ctx.Done()
@@ -52,7 +52,7 @@ func (r *oneFailsOneBlocks) Execute(ctx context.Context, execution contracts.Exe
 	case r.victimStopped <- struct{}{}:
 	default:
 	}
-	return nil, ctx.Err()
+	return contracts.CapabilityOutcome{}, ctx.Err()
 }
 
 func (r *oneFailsOneBlocks) awaitVictimStart(t *testing.T) {

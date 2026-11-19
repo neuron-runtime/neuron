@@ -34,12 +34,12 @@ func TestHTTPReturnsTheStatusAndTheParsedBody(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if result["status_code"] != 201 {
-		t.Errorf("status_code = %v, want 201", result["status_code"])
+	if result.Result["status_code"] != 201 {
+		t.Errorf("status_code = %v, want 201", result.Result["status_code"])
 	}
-	body, ok := result["body"].(map[string]any)
+	body, ok := result.Result["body"].(map[string]any)
 	if !ok {
-		t.Fatalf("body = %#v, want a parsed object", result["body"])
+		t.Fatalf("body = %#v, want a parsed object", result.Result["body"])
 	}
 	if body["id"] != "abc" {
 		t.Errorf("body id = %v, want %q", body["id"], "abc")
@@ -62,9 +62,9 @@ func TestHTTPReturnsTheResponseHeaders(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	headers, ok := result["headers"].(map[string]string)
+	headers, ok := result.Result["headers"].(map[string]string)
 	if !ok {
-		t.Fatalf("headers = %#v, want a map", result["headers"])
+		t.Fatalf("headers = %#v, want a map", result.Result["headers"])
 	}
 	if headers["X-Trace"] != "abc" {
 		t.Errorf("X-Trace = %q, want %q", headers["X-Trace"], "abc")
@@ -103,8 +103,8 @@ func TestHTTPKeepsANonJSONBodyAsText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["body"] != "plain text" {
-		t.Errorf("body = %#v, want the raw text", result["body"])
+	if result.Result["body"] != "plain text" {
+		t.Errorf("body = %#v, want the raw text", result.Result["body"])
 	}
 }
 
@@ -121,8 +121,8 @@ func TestHTTPAcceptsAnEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["body"] != nil {
-		t.Errorf("body = %#v, want no body", result["body"])
+	if result.Result["body"] != nil {
+		t.Errorf("body = %#v, want no body", result.Result["body"])
 	}
 }
 
@@ -140,8 +140,8 @@ func TestHTTPReturnsANonSuccessStatusWithoutFailing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["status_code"] != 404 {
-		t.Errorf("status_code = %v, want 404", result["status_code"])
+	if result.Result["status_code"] != 404 {
+		t.Errorf("status_code = %v, want 404", result.Result["status_code"])
 	}
 }
 
@@ -274,8 +274,8 @@ func TestHTTPAcceptsAResponseBodyAtTheLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["body"] != "0123456789" {
-		t.Errorf("body = %#v, want the whole body", result["body"])
+	if result.Result["body"] != "0123456789" {
+		t.Errorf("body = %#v, want the whole body", result.Result["body"])
 	}
 }
 
@@ -450,8 +450,8 @@ func TestHTTPReportsTheResponseContentType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result["content_type"] != "application/json" {
-		t.Errorf("content_type = %v, want %q", result["content_type"], "application/json")
+	if result.Result["content_type"] != "application/json" {
+		t.Errorf("content_type = %v, want %q", result.Result["content_type"], "application/json")
 	}
 }
 
@@ -468,8 +468,8 @@ func TestHTTPReportsTheDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if _, ok := result["duration_ms"].(float64); !ok {
-		t.Errorf("duration_ms = %#v, want a number", result["duration_ms"])
+	if _, ok := result.Result["duration_ms"].(float64); !ok {
+		t.Errorf("duration_ms = %#v, want a number", result.Result["duration_ms"])
 	}
 }
 

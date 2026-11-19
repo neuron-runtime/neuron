@@ -106,6 +106,65 @@ func (f *faultStore) DueTimers(context.Context, time.Time, int) ([]storage.Timer
 func (f *faultStore) Ping(context.Context) error { return nil }
 func (f *faultStore) Close() error               { return nil }
 
+// dispatchClaimFaultStore wraps a real store so a test can fail one claim and,
+// independently, fail the release that follows a partial claim failure. It is
+// armed only after test setup so enqueue writes keep their real behavior.
+// Every other operation is delegated, so compare-and-swap and lease fencing are
+// exercised against the real backend rather than a fake.
+type dispatchClaimFaultStore struct {
+	storage.Store
+	armed              bool
+	failOnAttempt      int
+	claimErr           error
+	cancelOnClaimFail  func()
+	failRelease        bool
+	releaseErr         error
+	claimAttempts      int
+	releasePutCalls    int
+	successfulReleases int
+}
+
+func (s *dispatchClaimFaultStore) WithTx(ctx context.Context, fn func(storage.Tx) error) error {
+	return s.Store.WithTx(ctx, func(tx storage.Tx) error {
+		return fn(&dispatchClaimFaultTx{Tx: tx, store: s})
+	})
+}
+
+type dispatchClaimFaultTx struct {
+	storage.Tx
+	store *dispatchClaimFaultStore
+}
+
+func (tx *dispatchClaimFaultTx) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	s := tx.store
+	if s.armed && s.failOnAttempt > 0 {
+		s.claimAttempts++
+		if s.claimAttempts == s.failOnAttempt {
+			if s.cancelOnClaimFail != nil {
+				s.cancelOnClaimFail()
+			}
+			return s.claimErr
+		}
+	}
+	return tx.Tx.CompareAndSwap(ctx, key, old, new)
+}
+
+func (tx *dispatchClaimFaultTx) Put(ctx context.Context, key string, data []byte) error {
+	s := tx.store
+	if !s.armed {
+		return tx.Tx.Put(ctx, key, data)
+	}
+	s.releasePutCalls++
+	if s.failRelease {
+		return s.releaseErr
+	}
+	if err := tx.Tx.Put(ctx, key, data); err != nil {
+		return err
+	}
+	s.successfulReleases++
+	return nil
+}
+
 func testExecution(t *testing.T) *Execution {
 	t.Helper()
 	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test", "", "", "", "")
