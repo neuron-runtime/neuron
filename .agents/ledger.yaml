@@ -793,18 +793,19 @@ tasks:
       - "Consumes `contracts.CapabilityOutcome.Suspend` through a consumer-local `engine.WaitLifecycle.EnterWait`; it never calls `MarkCapabilityCompleted` for a suspend"
       - "The suspend-to-`WaitSpec` mapping rejects executor-supplied `WaitTypeDeadline` and leaves `execution.EnterWait` as authoritative domain validator"
       - "The T-048 fail-closed sentinel is replaced only when a lifecycle is configured; non-durable mode keeps fail-closed behavior"
-      - "Durable retry calls `engine.WaitLifecycle.BeginRetryWait`, releases the worker, and no longer sleeps in `invocation.go`; non-durable retry keeps current behavior"
-      - "No `nore/internal/execution/engine/**` source imports scheduler, wait-store, timer, deadline-policy, execution-store, or runtime-config packages"
+      - "Durable retry calls `engine.WaitLifecycle.BeginRetryWait` through a callback-return control, releases the worker, and no longer sleeps in `invocation.go`; non-durable retry keeps current behavior"
+      - "Successful suspend emits no new event; `CapabilityRetry` remains published once in both modes before any lifecycle commit; no suspend/wait event contract is changed"
+      - "No `nore/internal/execution/engine/**` non-test source imports scheduler, execution subpackages, or runtime-config packages; allowed domain `execution`, `contracts`, and `storage.ErrNotFound` imports remain"
     verification:
       - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/engine/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/engine/... -run 'Retry|Suspend|Wait|Lifecycle'"
-      - "grep -R -n -E 'scheduler|waitstore|runtimeconfig|internal/execution\"' nore/internal/execution/engine --include='*.go'"
-    status: not_started
+      - "cd nore && ! grep -R -n -E --include='*.go' --exclude='*_test.go' '\"github.com/neuron-runtime/neuron/nore/internal/(execution/[^\"]+|runtimeconfig)\"' internal/execution/engine"
+    status: needs_review
     lease: null
-    evidence: []
-    reports: []
-    open_risks: ["Real suspend/resume remains unavailable until T-026 maps transports.", "Host lifecycle is not wired until T-050."]
+    evidence: ["Coordinator claimed disjoint engine-only lease; dependencies T-024 and T-048 are done.", "T-025 research mapped fail-closed suspend, retry sleep, domain wait methods, and tests with file:line evidence.", "T-025 architecture decisions: consumer-local `WaitLifecycle` keyed by execution/capability IDs; callback-return durable retry control; `nextAttemptAt = now + delay`; `CapabilityRetry` published in both modes before lifecycle commit; no new suspend event; guarded import-verification command replaces the previous false-positive grep.", "Coder changed only `nore/internal/execution/engine/**`: added `wait_lifecycle.go`, wired typed suspend into `EnterWait`, added callback-return durable retry control with `errRetryDeferred`, updated invocation tests, and added `wait_lifecycle_test.go`. Coordinator inspected the reported diff scope.", "Verification passed: `go build ./...`; compile-all tests; `go test -race -count=1 ./internal/execution/engine/...`; focused `Retry|Suspend|Wait|Lifecycle`; guarded import grep; gofmt; `git diff --check`.", "Independent reviewer APPROVED all six criteria with `file:line` evidence and re-ran build/compile/race/focused checks with `-mod=readonly`, all exit 0.", "Security APPROVE WITH NON-BLOCKING NOTES: no executor-controlled deadline policy, duplicate terminal event, worker/claim leak, or new I/O/trust boundary; `WaitTypeDeadline` reserved type and domain validation remain enforced.", "Architect APPROVE WITH NON-BLOCKING NOTES: exact interface, retry control, nextAttemptAt semantics, event behavior, and dependency boundary conform to binding decisions.", "Full integration gate `scripts/script.sh` passed after T-025: all Go modules and TypeScript packages built and tested successfully."]
+    reports: [".agents/reports/T-025.md"]
+    open_risks: ["Real suspend/resume remains unavailable until T-026 maps transports.", "Host lifecycle is not wired until T-050.", "`AttemptCount` is unused, so each durable re-dispatch restarts at attempt 1; global attempt bounds depend on T-028/T-050 policy."]
 
   - id: T-026
     objective: "Map suspend and resume through process and WASM capability runtimes with feature negotiation"
@@ -827,9 +828,9 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/..."
       - "cd shared && GOWORK=off go test -count=1 ./..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/... -run 'Suspend|Resume|Feature|Negotiat'"
-    status: not_started
-    lease: null
-    evidence: []
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/mechanism/process/**", "nore/internal/mechanism/wasm/**", "shared/types/capabilityruntime/**"], task: T-026 }
+    evidence: ["Coordinator claimed disjoint process/WASM/shared transport lease; dependencies T-023, T-024, and T-048 are done."]
     reports: []
     open_risks: ["One-shot `InvokeResponse` still cannot represent suspend; the future wire/product decision remains open.", "Public/additive JSON wire change requires documenter sign-off."]
 
@@ -855,9 +856,9 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/api/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/api/... -run 'Signal|Execution|Authorization|Wait'"
-    status: not_started
-    lease: null
-    evidence: []
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/api/handlers/instances/**", "nore/internal/api/routes/**", "shared/types/protocol/**", "nore/internal/api/**/*_test.go"], task: T-027 }
+    evidence: ["Coordinator claimed disjoint signal API lease; dependency T-024 is done."]
     reports: []
     open_risks: ["Security sign-off required for cross-execution authorization and delivery retention."]
 
@@ -883,9 +884,9 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/runtimeconfig/..."
       - "cd application && GOWORK=off go test -count=1 ./config/... ./cmd/..."
-    status: not_started
-    lease: null
-    evidence: []
+    status: in_progress
+    lease: { owner: coder, paths: ["shared/types/core/runtimeconfig.go", "nore/internal/runtimeconfig/**", "application/config/**", "application/cmd/**", "nore/cmd/**"], task: T-028 }
+    evidence: ["Coordinator claimed disjoint configuration lease; dependency T-024 is done."]
     reports: []
     open_risks: []
 

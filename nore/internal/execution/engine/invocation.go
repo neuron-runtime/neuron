@@ -100,8 +100,10 @@ type retryNotice struct {
 // alive far past the timeout its author declared.
 //
 // execute is called once per attempt. onRetry, when set, is called before each
-// backoff sleep.
-func (inv invocation) run(ctx context.Context, capabilityID core.ID, execute func(context.Context) (map[string]any, error), onRetry func(retryNotice)) (map[string]any, error) {
+// backoff sleep. Returning an error stops the invocation immediately without
+// sleeping or running another attempt, so a caller can defer the retry to a
+// durable wait; the error is passed through unchanged.
+func (inv invocation) run(ctx context.Context, capabilityID core.ID, execute func(context.Context) (map[string]any, error), onRetry func(retryNotice) error) (map[string]any, error) {
 	attemptCtx, cancel := inv.attemptContext(ctx)
 	defer cancel()
 
@@ -131,7 +133,9 @@ func (inv invocation) run(ctx context.Context, capabilityID core.ID, execute fun
 
 		delay := inv.backoff(attempt)
 		if onRetry != nil {
-			onRetry(retryNotice{attempt: attempt, nextAttempt: attempt + 1, delay: delay, err: err})
+			if err := onRetry(retryNotice{attempt: attempt, nextAttempt: attempt + 1, delay: delay, err: err}); err != nil {
+				return nil, err
+			}
 		}
 		if !sleep(attemptCtx, delay) {
 			return nil, inv.deadlineError(ctx, attemptCtx, capabilityID, lastErr)

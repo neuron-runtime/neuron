@@ -40,20 +40,15 @@ const DefaultDispatchLease = 30 * time.Second
 // cancellation does not leave a claim behind.
 const dispatchCompleteTimeout = 5 * time.Second
 
-// ErrSuspendLifecycleUnavailable is the fail-closed failure for a capability
-// that suspends before the engine has a wait lifecycle to enter it. Until T-025
-// supplies that lifecycle there is no honest execution state for a suspend, so
-// it is reported as a failure rather than as an empty success.
-var ErrSuspendLifecycleUnavailable = errors.New("engine: suspend outcome received but no wait lifecycle is configured")
-
 type CapabilityRuntimeEngine struct {
-	bus        contracts.EventBus
-	registry   contracts.CapabilityRuntimeRegistry
-	executions contracts.ExecutionRepository
-	scopes     *exec.ScopeRegistry
-	committer  contracts.TransitionCommitter
-	ready      event.Subscription
-	semaphore  chan struct{}
+	bus           contracts.EventBus
+	registry      contracts.CapabilityRuntimeRegistry
+	executions    contracts.ExecutionRepository
+	scopes        *exec.ScopeRegistry
+	committer     contracts.TransitionCommitter
+	waitLifecycle WaitLifecycle
+	ready         event.Subscription
+	semaphore     chan struct{}
 
 	// owner identifies this engine when it claims dispatch intents. It is stable
 	// for the engine's lifetime so a worker cannot release or complete a claim
@@ -235,8 +230,8 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 
 	// A suspend is an outcome rather than an error, so retry treats it as a
 	// success. Remember the last successful outcome's suspend so the engine can
-	// fail closed below: with no wait lifecycle there is no state to enter, and
-	// completing with the empty result would report a suspend as a success.
+	// either enter the wait or fail closed: completing with the empty result
+	// would report a suspend as a success.
 	var suspend *contracts.CapabilitySuspend
 	output, err := policy.run(invocationCtx, capabilityID,
 		func(attemptCtx context.Context) (map[string]any, error) {
@@ -255,13 +250,29 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 			suspend = outcome.Suspend
 			return outcome.Result, nil
 		},
-		func(retry retryNotice) {
+		func(retry retryNotice) error {
+			// The retry is announced before the lifecycle commits anything, in
+			// both modes. The intent is progress, not a new execution.
 			_ = e.bus.Publish(ctx, event.New(event.CapabilityRetry, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityRetryPayload{
 				Attempt: retry.attempt, NextAttempt: retry.nextAttempt,
 				Delay: retry.delay.String(), Message: retry.err.Error(),
 			}))
+			if e.waitLifecycle == nil {
+				// Non-durable mode keeps the inline backoff in invocation.run.
+				return nil
+			}
+			nextAttemptAt := time.Now().UTC().Add(retry.delay)
+			if err := e.waitLifecycle.BeginRetryWait(ctx, execution.ID, capabilityID, nextAttemptAt); err != nil {
+				return fmt.Errorf("begin retry wait for capability %s: %w", capabilityID, err)
+			}
+			return errRetryDeferred
 		})
 	if err != nil {
+		// A deferred retry is not an outcome: its worker and dispatch claim are
+		// released by the surrounding defers, and no terminal event is emitted.
+		if errors.Is(err, errRetryDeferred) {
+			return
+		}
 		// This is the one place a capability can stop without an outcome of its
 		// own, because the execution's scope may be cancelled underneath it.
 		// publishStopped decides whether that is a failure or a consequence of
@@ -270,7 +281,22 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		return
 	}
 	if suspend != nil {
-		e.publishFailure(ctx, execution, capabilityID, ErrSuspendLifecycleUnavailable)
+		if e.waitLifecycle == nil {
+			e.publishFailure(ctx, execution, capabilityID, ErrSuspendLifecycleUnavailable)
+			return
+		}
+		spec, err := waitSpecFromSuspend(suspend)
+		if err != nil {
+			e.publishFailure(ctx, execution, capabilityID, err)
+			return
+		}
+		// EnterWait uses the engine's context, not the attempt context: the
+		// wait must survive an attempt whose deadline or cancellation ended.
+		if err := e.waitLifecycle.EnterWait(ctx, execution.ID, capabilityID, spec); err != nil {
+			e.publishFailure(ctx, execution, capabilityID, err)
+			return
+		}
+		// Entering a wait is not a completion and produces no new event.
 		return
 	}
 	if output == nil {

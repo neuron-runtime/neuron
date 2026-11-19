@@ -62,7 +62,7 @@ func TestInvocationRetriesUntilSuccess(t *testing.T) {
 			return nil, errors.New("transient")
 		}
 		return map[string]any{"ok": true}, nil
-	}, func(notice retryNotice) { retries = append(retries, notice) })
+	}, func(notice retryNotice) error { retries = append(retries, notice); return nil })
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
