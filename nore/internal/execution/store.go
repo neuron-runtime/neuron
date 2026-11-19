@@ -401,16 +401,17 @@ func (s *ExecutionStore) DueWaitTimers(ctx context.Context, now time.Time, limit
 
 // WaitTimerKeys returns the wait timer keys in one execution, optionally
 // narrowed to a single capability when capabilityID is set. Prefix construction
-// is delegated to storage so the timer key format has one authority
-// (storage.TimerKey/TimerPrefix); the "timers" segment is that namespace. The
-// read is bounded to the requested scope and never lists the whole timer space.
-// It backs cancellation, which must remove every timer an execution owns, and
-// the poller's safety check for a timer that conflicts with a future deadline.
+// is delegated to storage (TimerKey/TimerPrefix/TimerPrefixForExecution), which
+// is the single authority for timer key and prefix layout. The read is bounded
+// to the requested scope and never lists the whole timer space. Callers use it
+// for cancellation (remove every timer an execution owns) and to inspect timer
+// presence in that scope; the poller consults snapshot state for deadline
+// semantics rather than relying on this list as proof of a future deadline.
 func (s *ExecutionStore) WaitTimerKeys(ctx context.Context, executionID shared.ID, capabilityID shared.ID) ([]string, error) {
 	var prefix string
 	var err error
 	if capabilityID == "" {
-		prefix, err = storage.Prefix("timers", string(executionID))
+		prefix, err = storage.TimerPrefixForExecution(string(executionID))
 	} else {
 		prefix, err = storage.TimerPrefix(string(executionID), string(capabilityID))
 	}

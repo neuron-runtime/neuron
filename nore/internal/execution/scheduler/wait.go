@@ -79,9 +79,10 @@ type WaitStore interface {
 	contracts.WaitCommitter
 	DueWaitTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error)
 	// WaitTimerKeys lists timer keys scoped to one execution, optionally narrowed
-	// to one capability (empty capabilityID means the whole execution). It lets
-	// cancellation remove every timer it owns and the poller prove whether a
-	// conflicting future deadline still has a dedicated timer.
+	// to one capability (empty capabilityID means the whole execution). Callers
+	// use it for cancellation (remove every timer an execution owns) and scoped
+	// timer-presence inspection. The poller consults snapshot state for deadline
+	// semantics rather than relying on this list as proof of a future deadline.
 	WaitTimerKeys(ctx context.Context, executionID core.ID, capabilityID core.ID) ([]string, error)
 	GetSignalDelivery(ctx context.Context, executionID core.ID, deliveryID string) (*executionmodel.SignalDelivery, error)
 	Reload(ctx context.Context, executionID core.ID) (*executionmodel.Execution, error)

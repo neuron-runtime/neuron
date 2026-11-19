@@ -424,6 +424,34 @@ func TestPollDueTimersDiscardsTimerForCapabilityNoLongerWaiting(t *testing.T) {
 	}
 }
 
+// TestPollDueTimersLeavesRetryWaitTimerIntact proves a due timer for a
+// capability in CapabilityRetryWait is not consumed or deleted by the poller;
+// retry resumption is handled elsewhere and the timer must remain claimable.
+func TestPollDueTimersLeavesRetryWaitTimerIntact(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+
+	due := time.Now().UTC().Add(-time.Minute)
+	if err := h.exec.BeginRetryWait("cap", due.Add(5*time.Minute)); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	key := putWaitTimer(t, h, "cap", string(h.exec.AttemptID), due)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil error)", count, err)
+	}
+	if count != 0 {
+		t.Fatalf("PollDueTimers processed = %d, want 0", count)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err != nil {
+		t.Fatalf("retry-wait timer was removed: %v", err)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityRetryWait {
+		t.Fatalf("capability status = %s, want %s", state.Status, executionmodel.CapabilityRetryWait)
+	}
+}
+
 // staleCleanupLeaseLossStore models losing the claim between the poller's claim
 // and the fenced stale-timer delete: another owner now holds the timer, so the
 // delete reports no removal without an error.
@@ -492,5 +520,39 @@ func TestPollDueTimersKeepsTimerForFutureSnapshotDeadline(t *testing.T) {
 	}
 	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityWaiting {
 		t.Fatalf("capability status = %s, want waiting", state.Status)
+	}
+}
+
+// TestPollDueTimersDiscardsStaleTimerWhenWaitUntilNil proves a due timer whose
+// claimed execution snapshot has WaitUntil == nil is fenced-deleted and does not
+// resume the execution.
+func TestPollDueTimersDiscardsStaleTimerWhenWaitUntilNil(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	due := time.Now().UTC().Add(-time.Minute)
+	enterDueWait(t, h, sched, executionmodel.WaitTypeTimer, "", due)
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+
+	snapshot := h.exec.Snapshot()
+	state := snapshot.States["cap"]
+	if state.Status != executionmodel.CapabilityWaiting {
+		t.Fatalf("test setup: capability status = %s, want waiting", state.Status)
+	}
+	state.WaitUntil = nil
+	snapshot.States["cap"] = state
+	h.exec.Restore(snapshot)
+
+	count, err := sched.PollDueTimers(h.ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityWaiting {
+		t.Fatalf("capability status = %s, want waiting (not resumed)", state.Status)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("stale claimed timer with nil WaitUntil survived poll")
 	}
 }

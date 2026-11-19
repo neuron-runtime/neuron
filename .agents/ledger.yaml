@@ -1,6 +1,7 @@
 version: 1
 project: neuron
-updated: 2026-11-17
+updated: 2026-11-19
+branch: fix/phase5-wait-followups
 
 # Authoritative execution ledger. Schema and state rules: .agents/README.md
 # The product backlog lives in todos/; this file tracks active work only.
@@ -407,7 +408,7 @@ tasks:
     lease: { owner: coder, paths: ["nore/internal/execution/execution.go", "nore/internal/execution/snapshot.go", "nore/internal/execution/accessors.go", "nore/internal/execution/wait.go", "nore/internal/execution/store.go", "nore/internal/execution/dispatch_intent*.go", "nore/internal/execution/recovery*.go", "nore/internal/execution/scheduler/**", "nore/internal/execution/*_test.go", "nore/internal/instance/**", "nore/internal/contracts/**", "nore/internal/event/**"], task: T-024 }
     evidence: ["T-024a `2b9dcaa`: durable wait/retry/deadline domain and snapshot v3; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution` -> ok, 2.232s; focused wait/snapshot/cancel/retry/deadline tests pass; build pass; gofmt/diff-check clean.", "T-024b `7e7e633`: atomic `SaveWaitTransition` store with timer/delivery/dispatch effects, owner-fenced timer operations, and additive `contracts.WaitCommitter`; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass (execution 2.639s, engine 1.399s, scheduler 1.815s, instance 7.500s); `-count=10 -run 'Wait'` pass; build/vet/gofmt/diff-check clean.", "T-024c1a `059cae7`: scheduler wait entry/resolution, due-timer poller, fresh per-claim owners, fenced timer deletion, replay reload, publish-after-commit, and `WaitStore`/poll config; `cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/contracts/...` -> pass; `-race -count=20 -run 'Wait|Timer'` pass; focused scheduler wait/timer tests pass; build/vet/gofmt/diff-check clean.", "T-024c1b1 `ffa4d57`: durable cancellation removes all execution-owned timers in one transition, retains wait metadata, discards join buffers; poller discards stale claimed timers under fence and preserves retry/future-deadline timers. `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, focused `Cancel|Wait|Timer|Retry|Dispatch`, `-race -count=20`, build, gofmt, diff-check all pass.", "T-040a `e7ab02e`: recovery accepts durable StatusWaiting, re-derives status, guards the no-work branch with authoritative waiting counts; execution/scheduler recovery tests pass under `-race` and `-count=20`.", "One earlier T-024b `-race` failure did not reproduce on rerun, five immediate reruns, the coordinator full race suite, or ten focused race runs."]
     reports: ["T-024", "T-024c1a", "T-024c1b1", "T-040a"]
-    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c1b2/T-024c2/T-024d remain: durable retry/max-lifetime, dispatch reconciler, and instance/event integration are not implemented.", "T-041: shared mutable Execution TOCTOU between ResolveSignal, PollDueTimers, and recovery can permit duplicate publish/commit. Must be serialized before T-025/T-027 production wiring.", "T-043: minor poller tests and timer-prefix authority cleanup remain."]
+    open_risks: ["Largest module; single owner to avoid wait-model divergence.", "Join durability must be verified, not assumed.", "T-024 must consume T-037/T-038 fencing conditions: unique per-claim owner tokens, RenewTimer==false means lease loss, DeleteTimerOwned for completion, validate lease duration/clock margin.", "T-024c must handle `SaveWaitTransition` replay: the caller's in-memory execution may already be mutated; reload durable state before another transition.", "T-024c1b2/T-024c2/T-024d remain: durable retry/max-lifetime, dispatch reconciler, and instance/event integration are not implemented."]
 
   - id: T-040
     objective: "Recover fully waiting executions without failing healthy waits or losing elapsed timers"
@@ -478,6 +479,7 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
     status: done
     lease: null
+    commit: aa24624
     evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race.", "ADR 0004 accepted Option A; architect T-041-design-close required all nine committers guarded with no residual second regime.", "T-041 implementation added `Execution.RunTransition`, wrapped all nine committers, kept helpers guard-oblivious, reloaded on conflict/replay, and moved publishes after guard release.", "Regression tests cover guard non-overlap/revision, stale rollback, signal-vs-poller exactly-one publish, fail-policy and different-capability variants, recovery-vs-signal, Run-loop-vs-signal, and nil-wait-store conflict behavior.", "Verification: `go test -race -count=50 ./internal/execution/scheduler -run 'Concurrent|Signal|Timer|Recover|RunLoop|Guard'`, `go test -race -count=1 ./internal/execution/... ./internal/instance/...`, plain tests, `go build ./...`, `gofmt -l`, and `git diff --check` pass; full `scripts/script.sh` passes.", "Reviewer T-041-review approved with follow-ups; architect T-041-architect approved; security T-041-security approved."]
     reports: ["0004-wait-transition-serialization", "T-041-progress", "T-041", "T-041-review"]
     open_risks: ["RecoverableDispatch re-dispatch of an already-ready capability remains an ADR 0004 open question; recovery is startup-only.", "Security low residual: narrow terminal+race path can leave a closed `done` with a non-terminal reloaded snapshot; no false event is published.", "T-042's separate stopped-capability flake remains uncharacterized and is not caused by T-041."]
@@ -501,7 +503,7 @@ tasks:
       - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance -run 'R4_24'"
     status: blocked
     lease: null
-    evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation.", "T-042 reproduced the dispatch-claim flake: 2 failures in 100 `-race` runs at dispatch_intent_test.go:262; root cause was a 5ms lease at dispatch_intent_test.go:227 that expired before the loser read the claim under race instrumentation.", "The reproduced dispatch-claim flake is fixed in the working tree by using a one-minute concurrent lease and an explicit expired-lease fixture; reviewer T-042-review approved with non-blocking follow-ups, and `-race -count=50`/`-count=200`, execution tests, R4-24, build, gofmt, and diff-check pass.", "The stopped-capability flake did not reproduce in ~500 race runs; exact original failure output is unavailable. No speculative change was made.", "Full `scripts/script.sh` is still required before commit."]
+    evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation.", "T-042 reproduced the dispatch-claim flake: 2 failures in 100 `-race` runs at dispatch_intent_test.go:262; root cause was a 5ms lease at dispatch_intent_test.go:227 that expired before the loser read the claim under race instrumentation.", "The reproduced dispatch-claim flake is fixed in the working tree by using a one-minute concurrent lease and an explicit expired-lease fixture; reviewer T-042-review approved with non-blocking follow-ups, and `-race -count=50`/`-count=200`, execution tests, R4-24, build, gofmt, and diff-check pass.", "The stopped-capability flake did not reproduce in ~500 race runs; exact original failure output is unavailable. No speculative change was made.", "The dispatch-claim fix was committed in 29c3ab0 with a full `scripts/script.sh` pass."]
     reports: ["T-042", "T-042-review"]
     open_risks: ["BLOCKER: the original `TestStoppedCapabilityPublishesCancellationNotFailure` 5s timeout cannot be reproduced locally and its verbatim failure output is unavailable; T-042 cannot be marked done until that failure is characterized or the user approves a documented exception.", "Resume condition: provide the original failure output or a reliable reproduction, then repair the source-level cause without retries/skips.", "The changed test no longer exercises real wall-clock expiry itself; that path remains covered by TestClaimDispatchIntentAfterLeaseExpiry."]
 
@@ -514,7 +516,7 @@ tasks:
       - "nore/internal/execution/scheduler/timer_poller_test.go"
     owner: coder
     reviewer: reviewer
-    signoff: [architect]
+    signoff: [architect, security]
     dependencies: [T-041]
     acceptance:
       - "Poller test proves CapabilityRetryWait leaves its timer intact"
@@ -522,12 +524,32 @@ tasks:
       - "Execution-wide timer prefix has one storage authority, not a duplicated 'timers' literal"
       - "WaitTimerKeys doc matches actual poller/cancellation use"
     verification:
-      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/scheduler -run 'Retry|NilWait|WaitTimerKeys'"
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/scheduler -run 'Retry|WaitUntilNil|WaitTimerKeys'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/storage/..."
-    status: not_started
+    status: done
     lease: null
-    evidence: ["Reviewer T-024c1b1-review minor findings: retry branch untested, nil-deadline-with-timer untested, duplicated timers namespace literal, overstated WaitTimerKeys comment."]
-    reports: []
+    evidence: ["Reviewer T-024c1b1-review minor findings: retry branch untested, nil-deadline-with-timer untested, duplicated timers namespace literal, overstated WaitTimerKeys comment.", "T-041 closed in aa24624 on feature/durable-signals-timers; full `scripts/script.sh` passed for that tree.", "T-043 added `storage.TimerPrefixForExecution`, changed `WaitTimerKeys` to use storage-owned prefixes, added regressions for retry-wait timer retention and nil-`WaitUntil` stale-timer deletion, and corrected both `WaitTimerKeys` doc comments. Focused test (`Retry|WaitUntilNil|WaitTimerKeys`), race suite for execution/storage, build, gofmt, and diff-check pass.", "Reviewer approved T-043; architect approved with a non-blocking stale-comment follow-up that was corrected before integration; security approved with no findings. Full `scripts/script.sh` passed on branch fix/phase5-wait-followups."]
+    reports: ["T-043"]
+    open_risks: []
+
+  - id: T-044
+    objective: "Close verified Phase 5 finding F5-9 in the product backlog"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-041]
+    acceptance:
+      - "F5-9 is checked with evidence from T-041 and commit aa24624"
+      - "F5-10 remains unchecked because T-042 is still blocked"
+      - "No other backlog item is changed"
+    verification:
+      - "git diff -- todos/TODO.md"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["T-041 is done in ledger with full `scripts/script.sh` pass; commit aa24624 contains implementation and regression tests.", "T-044 changed only F5-9 in `todos/TODO.md:820`: checkbox closed with T-041/aa24624 evidence; F5-10 remains unchecked. `git diff --check` passes. Reviewer approved; full `scripts/script.sh` passed on branch fix/phase5-wait-followups."]
+    reports: ["T-044"]
     open_risks: []
 
   - id: T-025

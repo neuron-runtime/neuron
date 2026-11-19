@@ -44,3 +44,10 @@ func TimerKey(executionID, capabilityID, attemptID string) (string, error) {
 func TimerPrefix(executionID, capabilityID string) (string, error) {
 	return Prefix("timers", executionID, capabilityID)
 }
+
+// TimerPrefixForExecution creates a timer prefix for listing all timers
+// belonging to a specific execution.
+// The prefix format is "timers/{executionID}/".
+func TimerPrefixForExecution(executionID string) (string, error) {
+	return Prefix("timers", executionID)
+}
