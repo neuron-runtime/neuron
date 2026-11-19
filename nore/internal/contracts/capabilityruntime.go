@@ -57,6 +57,16 @@ type ExecutionContext struct {
 	ExecutionID   core2.ID
 	CorrelationID core2.ID
 
+	// AttemptID is the per-invocation attempt identifier. It is set by the
+	// execution engine and carried through the capability runtime protocol
+	// so the capability runtime can participate in idempotency logic.
+	AttemptID core2.ID
+
+	// LogicalOperationID is a stable identifier for the logical operation
+	// being performed. It is preserved across restarts and used for
+	// idempotency and diagnostics.
+	LogicalOperationID core2.ID
+
 	Capability core2.Capability
 	Params     map[string]any
 

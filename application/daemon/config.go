@@ -83,6 +83,10 @@ func ConfigFromEffective(cfg config.Config) Config {
 		c.Args = append(c.Args, "--detached-drain-timeout", cfg.Runtime.DetachedDrainTimeout)
 	}
 
+	if cfg.Runtime.Execution.Durability != "" {
+		c.Args = append(c.Args, "--durability", cfg.Runtime.Execution.Durability)
+	}
+
 	if cfg.Daemon.PIDFile != "" {
 		c.PIDFile = cfg.Daemon.PIDFile
 	}

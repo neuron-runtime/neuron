@@ -63,8 +63,6 @@ func (r stubRegistry) Resolve(core.CapabilityRuntimeType) (contracts.CapabilityR
 	return r.runtime, nil
 }
 
-// staticConfigurations stands in for the planner-compiled configuration program
-// of a capability that declares no configuration templates.
 type staticConfigurations struct{}
 
 func (staticConfigurations) Resolve(context.Context, resolver.CapabilityEnvironment) (map[string]any, error) {
@@ -86,14 +84,23 @@ func stubNode(id core.ID, mode core.RuntimeExecutionMode) types.ExecutionNode {
 	}
 }
 
+func stubPredecessor(bindingID core.ID, capabilityID core.ID) types.ExecutionPredecessor {
+	return types.ExecutionPredecessor{
+		BindingID:    bindingID,
+		CapabilityID: capabilityID,
+	}
+}
+
 // detachBlueprint builds `a -> b(detach) -> c`. The work for `b` and everything
 // downstream belongs to a task, while `a` is awaited by the root execution.
 func detachBlueprint() *types.ExecutionBlueprint {
 	a := stubNode("a", core.RuntimeExecutionModeWait)
 	a.Next = []types.ExecutionTransition{{BindingID: "a-b", TargetCapabilityID: "b"}}
 	b := stubNode("b", core.RuntimeExecutionModeDetach)
+	b.Predecessors = []types.ExecutionPredecessor{stubPredecessor("a-b", "a")}
 	b.Next = []types.ExecutionTransition{{BindingID: "b-c", TargetCapabilityID: "c"}}
 	c := stubNode("c", core.RuntimeExecutionModeWait)
+	c.Predecessors = []types.ExecutionPredecessor{stubPredecessor("b-c", "b")}
 
 	// Inside its own scope the detached capability runs; only the enclosing
 	// plan describes it as detached.
@@ -133,7 +140,7 @@ func TestSchedulerHandsDetachedWorkToATrackedChildExecution(t *testing.T) {
 	go func() { _ = scheduler.Run(ctx) }()
 	go func() { _ = engineInstance.Run(ctx) }()
 
-	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1")
+	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -310,7 +317,7 @@ func TestDetachedWorkSurvivesInstanceShutdown(t *testing.T) {
 	engineDone := make(chan error, 1)
 	go func() { engineDone <- engineInstance.Run(ctx) }()
 
-	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1")
+	parent, err := executionmodel.NewExecution(detachBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -395,7 +402,7 @@ func TestOrdinaryWorkIsStillCancelledAtShutdown(t *testing.T) {
 	// One capability and no detached scopes, so the only work that exists is
 	// ordinary work the instance owns.
 	blueprint := singleCapabilityBlueprint("slow")
-	root, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1")
+	root, err := executionmodel.NewExecution(blueprint, "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

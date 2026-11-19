@@ -53,7 +53,7 @@ func resultContractBlueprint() *types.ExecutionBlueprint {
 // Start and the capability result is set by MarkCapabilityCompleted.
 func startedResultExecution(t *testing.T) *Execution {
 	t.Helper()
-	e, err := NewExecution(resultContractBlueprint(), "corr_1", "inst_1")
+	e, err := NewExecution(resultContractBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestResolveAssemblyResultWithoutAContractIsNil(t *testing.T) {
 			"say": {Capability: shared.Capability{Metadata: shared.Metadata{ID: "say"}}},
 		},
 		EntryCapabilityIDs: []shared.ID{"say"},
-	}, "corr_1", "inst_1")
+	}, "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestResolveAssemblyResultWithoutAContractIsNil(t *testing.T) {
 }
 
 func TestResolveAssemblyResultReportsAnUnresolvableCapabilityResult(t *testing.T) {
-	e, err := NewExecution(resultContractBlueprint(), "corr_1", "inst_1")
+	e, err := NewExecution(resultContractBlueprint(), "corr_1", "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}

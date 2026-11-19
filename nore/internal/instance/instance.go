@@ -53,6 +53,9 @@ type options struct {
 	// builtinPolicy bounds the built-in capability runtimes this instance
 	// registers.
 	builtinPolicy builtins.Policy
+
+	// durability is the execution durability mode. Controls recovery behavior.
+	Durability string
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -87,6 +90,14 @@ func WithBuiltinPolicy(policy builtins.Policy) Option {
 	}
 }
 
+// WithDurability sets the execution durability mode for the instance.
+// Valid values are "none", "history", and "durable".
+func WithDurability(d string) Option {
+	return func(o *options) {
+		o.Durability = d
+	}
+}
+
 type Instance struct {
 	ID        string
 	Key       protocol.InstanceKey
@@ -113,6 +124,12 @@ type Instance struct {
 	analytics *analytics.Analytics
 
 	execPersister *executionPersister
+
+	// durability is the execution durability mode. In "none" mode execution
+	// and event history live only in memory; in "history" mode the event-driven
+	// execution persister persists snapshots; in "durable" mode the scheduler
+	// owns transition persistence.
+	durability string
 }
 
 func New(
@@ -140,6 +157,20 @@ func New(
 			opt(&optsApplied)
 		}
 	}
+	durability, err := NormalizeDurability(optsApplied.Durability)
+	if err != nil {
+		cancel()
+		bus.Close()
+		return nil, err
+	}
+	optsApplied.Durability = durability
+
+	// "none" retains no history. Swap in a process-local store so execution and
+	// event persistence still work for in-flight observability, while instance
+	// metadata continues to use the caller's store through the manager.
+	if durability == DurabilityNone {
+		persistentStore = storage.NewMemoryStore()
+	}
 
 	store := execution.NewExecutionStore(persistentStore)
 	evtStore := event.NewStore(persistentStore)
@@ -162,7 +193,19 @@ func New(
 		return nil, fmt.Errorf("register resolved capability runtimes: %w", err)
 	}
 
-	sched, err := scheduler.New(bus, store, scopes)
+	// In durable mode the runtime owns transition persistence: the scheduler
+	// commits each transition with its dispatch intents and the engine claims
+	// those intents, so the event-driven persister must not also write snapshots.
+	// One writer per mode keeps the two from racing on the revision guard.
+	durable := durability == DurabilityDurable
+	var schedOpts []scheduler.Option
+	var engineOpts []engine.Option
+	if durable {
+		schedOpts = append(schedOpts, scheduler.WithTransitionCommitter(store))
+		engineOpts = append(engineOpts, engine.WithTransitionCommitter(store))
+	}
+
+	sched, err := scheduler.New(bus, store, scopes, schedOpts...)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -190,7 +233,7 @@ func New(
 		return nil, fmt.Errorf("compile assembly: %w", err)
 	}
 
-	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout)
+	execEngine, err := engine.NewCapabilityRuntimeEngine(bus, reg, store, scopes, workers, optsApplied.detachedDrainTimeout, engineOpts...)
 	if err != nil {
 		cancel()
 		bus.Close()
@@ -204,11 +247,17 @@ func New(
 		return nil, fmt.Errorf("create Analytics engine: %w", err)
 	}
 
-	persister, err := newExecutionPersister(bus, store)
-	if err != nil {
-		cancel()
-		bus.Close()
-		return nil, fmt.Errorf("create execution persister: %w", err)
+	// The persister is the snapshot writer for "none" and "history". Durable
+	// mode has the scheduler commit transitions instead, so no persister is
+	// created and none runs.
+	var persister *executionPersister
+	if !durable {
+		persister, err = newExecutionPersister(bus, store)
+		if err != nil {
+			cancel()
+			bus.Close()
+			return nil, fmt.Errorf("create execution persister: %w", err)
+		}
 	}
 
 	i := &Instance{
@@ -228,6 +277,7 @@ func New(
 		registry:      reg,
 		analytics:     anly,
 		execPersister: persister,
+		durability:    optsApplied.Durability,
 	}
 
 	return i, nil
@@ -253,7 +303,11 @@ func (i *Instance) Start() error {
 	i.status = StatusRunning
 	i.mu.Unlock()
 
-	i.wg.Add(5)
+	routines := 4
+	if i.execPersister != nil {
+		routines++
+	}
+	i.wg.Add(routines)
 
 	go func() {
 		defer i.wg.Done()
@@ -277,10 +331,12 @@ func (i *Instance) Start() error {
 		defer i.wg.Done()
 		i.persistEvents(i.ctx)
 	}()
-	go func() {
-		defer i.wg.Done()
-		_ = i.execPersister.Run(i.ctx)
-	}()
+	if i.execPersister != nil {
+		go func() {
+			defer i.wg.Done()
+			_ = i.execPersister.Run(i.ctx)
+		}()
+	}
 
 	return nil
 }
@@ -364,10 +420,14 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	// a TypeScript-authored assembly) once so every expression resolves.
 	input = data.SnakeMap(input)
 
-	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID))
+	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID), i.Key.AssemblyID, i.Key.Version, i.Key.Hash, i.Key.Env)
 	if err != nil {
 		return nil, err
 	}
+	// The start event is not durable, so record the input on the pending
+	// execution before it is persisted. Recovery starts a pending execution from
+	// this snapshot rather than losing the input that only existed in the event.
+	exec.SeedInitialParams(input)
 	if err := i.store.Add(ctx, exec); err != nil {
 		return nil, err
 	}
@@ -386,6 +446,52 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	}
 
 	return exec, nil
+}
+
+// RecoverExecution attaches a durable execution to this live instance and asks
+// the scheduler to resume it.
+//
+// The execution arrives without a blueprint because snapshots deliberately do
+// not copy the graph. The caller supplies the blueprint recompiled from the
+// immutable artifact the execution started with; a detached task receives the
+// sub-blueprint for the capability it took over.
+//
+// pendingInput is used only for a pending detached task, whose input lived in a
+// start event that never reached the scheduler. A pending root execution already
+// carries its input on the snapshot.
+func (i *Instance) RecoverExecution(ctx context.Context, exec *execution.Execution, blueprint *types.ExecutionBlueprint, pendingInput map[string]any) error {
+	if exec == nil {
+		return fmt.Errorf("execution is required")
+	}
+	if blueprint == nil {
+		return fmt.Errorf("execution %s has no recovery blueprint", exec.ID)
+	}
+	if i.scheduler == nil || i.engine == nil {
+		return fmt.Errorf("instance %s has no runtime; it cannot recover executions", i.ID)
+	}
+	if exec.IsTerminal() {
+		return nil
+	}
+
+	if exec.Status() == execution.StatusPending && len(pendingInput) > 0 {
+		exec.SeedInitialParams(pendingInput)
+	}
+	exec.AttachBlueprint(blueprint)
+
+	store, ok := i.store.(*execution.ExecutionStore)
+	if !ok {
+		return fmt.Errorf("instance %s does not use a durable execution store", i.ID)
+	}
+	if err := store.Adopt(ctx, exec); err != nil {
+		return err
+	}
+
+	if exec.ParentExecutionID != "" {
+		i.scopes.BindDetached(exec.ID)
+	} else {
+		i.scopes.Bind(exec.ID)
+	}
+	return i.scheduler.RecoverExecution(ctx, exec)
 }
 
 // ErrExecutionNotFound reports that no execution carries the requested ID on

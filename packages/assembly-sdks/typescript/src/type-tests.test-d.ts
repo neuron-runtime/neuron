@@ -1,4 +1,4 @@
-import { Capability, Assembly, connect, string, type Expression } from "./index.js";
+import { Capability, Assembly, connect, number, string, type Expression } from "./index.js";
 
 interface GitHubReadParams {
     owner: string;
@@ -105,6 +105,28 @@ Assembly()
             path: data.path,
         })
     );
+
+// ---------------------------------------------------------------------------
+// Fan-in: multiple sources binding to the same target capability field
+// ---------------------------------------------------------------------------
+
+// Fan-in with different target paths (each source maps to a distinct field).
+const targetDiff = Capability("target-diff").paramsSchema({ x: string(), y: string() });
+const aDiff = Capability("a-diff").resultSchema({ x: string() });
+const bDiff = Capability("b-diff").resultSchema({ y: string() });
+// Each source maps to a different target path — this has always been supported.
+githubRead.result.content satisfies Expression<string>;
+githubRead.result.path satisfies Expression<string>;
+
+// Fan-in with same target path: multiple sources contributing to one field.
+// This is now allowed — R3-10 duplicate-target rejection removed.
+// The withParams calls below should type-check successfully now that R3-10 is removed.
+const targetSame = Capability("target-same").paramsSchema({ count: number() });
+const aSame = Capability("a-same").resultSchema({ value: number().required() });
+const bSame = Capability("b-same").resultSchema({ value: number().required() });
+// Both a and b contribute to the same target field `count` — now permitted.
+targetSame.withParams({ count: aSame.result.value });
+targetSame.withParams({ count: bSame.result.value });
 
 // ---------------------------------------------------------------------------
 // Assembly result contract

@@ -32,22 +32,29 @@ func recordFor(i *Instance, status Status) metadata {
 //
 // Instances that were interrupted mid-run are coerced to failed: their
 // in-memory state is not trustworthy, and they must not be reported as
-// running when they have no runtime. Their unfinished executions are drained for
-// the same reason — nothing in this process can advance them, so reporting them
-// as running would be a permanent lie rather than a temporary inaccuracy.
+// running when they have no runtime.
+//
+// resumeDurable selects whether unfinished executions are left non-terminal for
+// recovery. In durable mode they are left untouched so the recovery protocol can
+// resume them. In "none" and "history" modes their unfinished executions are
+// drained: nothing in this process can advance them, so reporting them as
+// running would be a permanent lie rather than a temporary inaccuracy.
 func restoreInstance(
 	parent context.Context,
 	rec metadata,
 	store contracts.ExecutionRepository,
 	eventStore *event.Store,
+	resumeDurable bool,
 ) (*Instance, error) {
 	status := rec.Status
 	if status == StatusStarting || status == StatusRunning {
 		status = StatusFailed
 	}
 
-	if err := sweepUnresumableExecutions(parent, store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID)); err != nil {
-		return nil, err
+	if !resumeDurable {
+		if err := sweepUnresumableExecutions(parent, store, shared.ID(rec.ID), restoredWithoutRuntime(rec.ID)); err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(parent)

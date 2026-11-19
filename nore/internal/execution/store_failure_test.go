@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
@@ -44,6 +45,17 @@ func (f *faultStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (f *faultStore) CompareAndSwap(ctx context.Context, key string, old, new []byte) error {
+	current, err := f.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	if string(current) != string(old) {
+		return storage.ErrConflict
+	}
+	return f.Put(ctx, key, new)
+}
+
 func (f *faultStore) List(_ context.Context, prefix string) ([]string, error) {
 	if f.list != nil {
 		return f.list(prefix)
@@ -58,12 +70,45 @@ func (f *faultStore) WithTx(ctx context.Context, fn func(storage.Tx) error) erro
 	return fn(f)
 }
 
+func (f *faultStore) WithTimer(ctx context.Context, fn func(storage.TimerTx) error) error {
+	if f.withTx != nil {
+		return f.withTx(ctx, func(storage.Tx) error { return fn(f) })
+	}
+	return fn(f)
+}
+
+func (f *faultStore) PutTimer(context.Context, string, time.Time, []byte) error { return nil }
+
+func (f *faultStore) GetTimer(context.Context, string) ([]byte, error) {
+	return nil, storage.ErrTimerNotFound
+}
+
+func (f *faultStore) DeleteTimer(context.Context, string) error { return nil }
+
+func (f *faultStore) DeleteTimerOwned(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (f *faultStore) ListTimers(context.Context, string) ([]string, error) { return nil, nil }
+
+func (f *faultStore) ClaimTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (f *faultStore) RenewTimer(context.Context, string, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (f *faultStore) DueTimers(context.Context, time.Time, int) ([]storage.Timer, error) {
+	return nil, nil
+}
+
 func (f *faultStore) Ping(context.Context) error { return nil }
 func (f *faultStore) Close() error               { return nil }
 
 func testExecution(t *testing.T) *Execution {
 	t.Helper()
-	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test")
+	exec, err := NewExecution(&types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, shared.NewID("corr_"), "inst_test", "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

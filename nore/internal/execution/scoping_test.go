@@ -23,7 +23,7 @@ func openTestStore(t *testing.T) storage.Store {
 
 func newTestExecution(t *testing.T, bp *types.ExecutionBlueprint, instanceID shared.ID) *Execution {
 	t.Helper()
-	exec, err := NewExecution(bp, shared.NewID("corr_"), instanceID)
+	exec, err := NewExecution(bp, shared.NewID("corr_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -94,5 +94,42 @@ func TestExecutionInstanceIDRoundTripsSnapshot(t *testing.T) {
 	}
 	if loaded.InstanceID != "inst_x" {
 		t.Errorf("loaded InstanceID = %q, want inst_x", loaded.InstanceID)
+	}
+}
+
+func TestReferencedArtifactHashesIncludesOnlyUnfinishedExecutions(t *testing.T) {
+	ctx := context.Background()
+	store := NewExecutionStore(openTestStore(t))
+
+	running := testExecution(t)
+	running.Hash = "hash-running"
+	if err := store.Add(ctx, running); err != nil {
+		t.Fatalf("add running execution: %v", err)
+	}
+
+	finished := testExecution(t)
+	finished.Hash = "hash-finished"
+	if err := store.Add(ctx, finished); err != nil {
+		t.Fatalf("add finished execution: %v", err)
+	}
+	if err := finished.Start(nil, 1); err != nil {
+		t.Fatalf("start finished execution: %v", err)
+	}
+	if !finished.MarkCompleted() {
+		t.Fatal("MarkCompleted() = false")
+	}
+	if err := store.Save(ctx, finished); err != nil {
+		t.Fatalf("save finished execution: %v", err)
+	}
+
+	hashes, err := store.ReferencedArtifactHashes(ctx)
+	if err != nil {
+		t.Fatalf("ReferencedArtifactHashes: %v", err)
+	}
+	if !hashes["hash-running"] {
+		t.Error("unfinished execution hash was not referenced")
+	}
+	if hashes["hash-finished"] {
+		t.Error("terminal execution hash was reported as referenced")
 	}
 }

@@ -1,6 +1,7 @@
 package capabilityruntime
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -19,6 +20,29 @@ func readRequestFromStdin() (*capabilityrt.Request, error) {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// executeStdio runs one stdin/stdout execution. The legacy JSON transport has
+// no field for a resume input or a suspend outcome, so a suspend is reported as
+// an explicit failure instead of being treated as an empty success.
+func executeStdio(ctx context.Context, h Handler, req *capabilityrt.Request) capabilityrt.Response {
+	outcome, err := invokeHandler(ctx, h, ExecutionRequest{Params: req.Params})
+	if err != nil {
+		return capabilityrt.Response{Result: map[string]any{}, Error: err.Error()}
+	}
+	if msg := validateSuspendOutcome(outcome); msg != "" {
+		return capabilityrt.Response{Result: map[string]any{}, Error: msg}
+	}
+	if outcome.errText != "" {
+		return capabilityrt.Response{Result: map[string]any{}, Error: outcome.errText}
+	}
+	if outcome.suspend != nil {
+		return capabilityrt.Response{
+			Result: map[string]any{},
+			Error:  "unsupported_suspend_outcome: the stdin/stdout JSON transport cannot carry a suspend outcome",
+		}
+	}
+	return capabilityrt.Response{Result: outcome.result}
 }
 
 // writeStdioOutput writes a successful JSON Response to stdout.

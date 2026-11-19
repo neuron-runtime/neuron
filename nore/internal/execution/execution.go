@@ -3,6 +3,7 @@ package execution
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,8 @@ const (
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
+	StatusWaiting   Status = "waiting"
+	StatusRetryWait Status = "retry_wait"
 )
 
 type CapabilityStatus string
@@ -30,6 +33,8 @@ const (
 	CapabilityRunning   CapabilityStatus = "running"
 	CapabilityCompleted CapabilityStatus = "completed"
 	CapabilityFailed    CapabilityStatus = "failed"
+	CapabilityWaiting   CapabilityStatus = "waiting"
+	CapabilityRetryWait CapabilityStatus = "retry_wait"
 
 	// CapabilityDetached marks a capability whose work was handed off to a
 	// separate execution instead of being run in place. It is terminal for the
@@ -46,10 +51,69 @@ const (
 )
 
 type CapabilityExecutionState struct {
-	Status      CapabilityStatus
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	Error       string
+	Status       CapabilityStatus
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+	Error        string
+	AttemptCount int
+
+	// FailureClassification classifies the nature of a failure for
+	// retry policy decisions. Empty when the capability has not failed
+	// or when the status is not failed.
+	FailureClassification string
+
+	// NextAttemptAt is the earliest time at which a failed capability
+	// may be re-attempted. Nil when the capability is not awaiting a retry.
+	NextAttemptAt *time.Time
+
+	// WaitUntil is the earliest time at which a waiting capability may be resumed.
+	// Nil when the capability is not awaiting a signal/timer/deadline wait.
+	WaitUntil *time.Time
+
+	// WaitReason is a human-readable description of why the capability
+	// is waiting. Set when entering the waiting state; cleared when the
+	// wait is resolved.
+	WaitReason string
+
+	// CorrelationKey is a stable identifier for this wait instance.
+	// Used for deduplication of signals/timers and for matching a
+	// received signal/timer to the original wait request.
+	CorrelationKey string
+
+	// WaitType classifies the kind of wait and determines which resume
+	// mechanism applies. See WaitType for the recognized values.
+	WaitType WaitType
+
+	// ExpectedSignal is the name of the signal this capability is
+	// waiting for. Relevant when WaitType is WaitTypeSignal.
+	ExpectedSignal string
+
+	// PayloadSchema is a JSON schema that describes the expected
+	// signal payload structure. Used for validating signal deliveries.
+	PayloadSchema string
+
+	// WaitDeadlinePolicy is the action applied when WaitUntil passes for a
+	// wait that is not inherently time-triggered. Empty means the default,
+	// WaitDeadlinePolicyFail, preserving the Phase 5 design.
+	WaitDeadlinePolicy WaitDeadlinePolicy
+
+	// WaitDeadlineReason records why a wait ended by its deadline. It is
+	// retained for diagnostics when the capability fails or the execution is
+	// cancelled as a result of deadline expiry.
+	WaitDeadlineReason WaitDeadlineReason
+
+	// DeliveredPayload is the payload that resolved the wait. It becomes the
+	// capability's resume input when it is dispatched again and is nil until a
+	// signal or timer delivery is accepted.
+	DeliveredPayload map[string]any
+
+	// DispatchState tracks whether the capability has been dispatched
+	// and prevents duplicate dispatch. Values: "dispatched", "pending".
+	DispatchState string
+
+	// Deadline is the execution-level deadline for this capability's
+	// attempt. Zero value means no deadline is set.
+	Deadline *time.Time
 }
 
 type Execution struct {
@@ -60,6 +124,12 @@ type Execution struct {
 	// ParentExecutionID links a detached execution to the execution that handed
 	// its work off. It is empty for a root execution.
 	ParentExecutionID shared.ID
+
+	// DetachedCapabilityID names the capability in the parent blueprint whose
+	// sub-blueprint this detached task runs. It is empty for a root execution.
+	// Recovery uses it to recompile the task's scope from the immutable parent
+	// artifact without persisting a second copy of the graph.
+	DetachedCapabilityID shared.ID
 
 	Blueprint *types.ExecutionBlueprint
 	mu        sync.RWMutex
@@ -75,6 +145,12 @@ type Execution struct {
 	completedAt    *time.Time
 	executionError string
 
+	// executionDeadline is the wall-clock deadline derived from the
+	// execution's maximum lifetime. It is independent of any capability
+	// timeout or wait deadline, is serialized in snapshots from schema v3,
+	// and is nil when no maximum lifetime is configured.
+	executionDeadline *time.Time
+
 	// done is closed exactly once when the execution reaches a terminal
 	// state; Wait and Done poll it. It is a runtime-only device and is not
 	// serialized in snapshots.
@@ -84,18 +160,43 @@ type Execution struct {
 	// serialized in snapshots and incremented only after a successful save.
 	revision uint64
 
-	// saveMu serializes saves of this Execution value. Two writers sharing the
-	// same value cannot produce a false conflict; only a distinct copy with an
-	// older revision triggers storage.ErrConflict.
+	// transitionMu serializes composite state transitions on this Execution
+	// value through RunTransition. saveMu is the narrower commit lock and is
+	// taken only by store methods; it cannot serialize the read-validate-mutate
+	// window that precedes a commit. Lock order is transitionMu -> saveMu -> mu.
+	transitionMu sync.Mutex
+
+	// saveMu serializes saves of this Execution value. Writers sharing the value
+	// are additionally serialized by RunTransition, so they cannot produce a
+	// false conflict; the revision compare-and-swap is the cross-value backstop
+	// that rejects a distinct copy with an older revision (storage.ErrConflict).
 	saveMu sync.Mutex
 
 	// joinState tracks completion of predecessor bindings for join targets.
 	// Each key is a target capability ID; the value records which predecessor
 	// bindings have completed and what inputs they contributed.
 	joinState map[shared.ID]*joinStateInfo
+
+	// Assembly identity: the instance key that created this execution.
+	// Populated when the execution is created from an Instance; used by
+	// durable execution recovery (Phase 4) to resume against the correct
+	// immutable assembly artifact.
+	AssemblyID string
+	Version    string
+	Hash       string
+	Env        string
+
+	// LogicalOperationID is a stable identifier for the logical operation
+	// being performed. It is preserved across restarts and used for
+	// idempotency and diagnostics.
+	LogicalOperationID shared.ID
+
+	// AttemptID is the per-invocation attempt identifier. It increments
+	// when a capability is re-attempted after a failure or wait.
+	AttemptID shared.ID
 }
 
-func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID) (*Execution, error) {
+func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, instanceID shared.ID, assemblyID, version, hash, env string) (*Execution, error) {
 	if blueprint == nil {
 		return nil, errors.New("execution blueprint is required")
 	}
@@ -103,15 +204,35 @@ func NewExecution(blueprint *types.ExecutionBlueprint, correlationID shared.ID, 
 		correlationID = shared.NewID("corr_")
 	}
 	states := make(map[shared.ID]CapabilityExecutionState, len(blueprint.Nodes))
-	for capabilityID := range blueprint.Nodes {
+	joinState := make(map[shared.ID]*joinStateInfo)
+	for capabilityID, node := range blueprint.Nodes {
 		states[capabilityID] = CapabilityExecutionState{Status: CapabilityPending}
+		// Every capability with an incoming edge is a join target: it becomes
+		// ready only once its predecessor bindings are satisfied. The state must
+		// exist up front, because contributions arrive through the scheduler and
+		// nothing else may create it lazily under a different lock.
+		if len(node.Predecessors) > 0 {
+			joinState[capabilityID] = newJoinState()
+		}
 	}
 	return &Execution{
-		ID: shared.NewID("exec_"), CorrelationID: correlationID, InstanceID: instanceID, Blueprint: blueprint,
-		status: StatusPending, initialParams: make(map[string]any),
-		params: make(map[shared.ID]map[string]any), results: make(map[shared.ID]map[string]any), states: states,
-		done:      make(chan struct{}),
-		joinState: make(map[shared.ID]*joinStateInfo),
+		ID:                 shared.NewID("exec_"),
+		CorrelationID:      correlationID,
+		InstanceID:         instanceID,
+		Blueprint:          blueprint,
+		status:             StatusPending,
+		initialParams:      make(map[string]any),
+		params:             make(map[shared.ID]map[string]any),
+		results:            make(map[shared.ID]map[string]any),
+		states:             states,
+		done:               make(chan struct{}),
+		joinState:          joinState,
+		AssemblyID:         assemblyID,
+		Version:            version,
+		Hash:               hash,
+		Env:                env,
+		LogicalOperationID: shared.NewID("logop_"),
+		AttemptID:          shared.NewID("attempt_"),
 	}, nil
 }
 
@@ -124,6 +245,24 @@ func (e *Execution) signalTerminal() {
 	default:
 		close(e.done)
 	}
+}
+
+// RunTransition serializes one composite state transition on this Execution
+// value. fn must validate, mutate, and commit exactly once. It must not publish
+// events or wait on another driver of the same execution, because the guard is
+// held for the whole callback. Publish only after RunTransition returns.
+//
+// RunTransition is non-reentrant: fn must not call RunTransition again on this
+// Execution, or it will deadlock.
+//
+// Lock order is transitionMu -> store saveMu -> e.mu. Store commit methods take
+// saveMu and domain mutators take e.mu; neither takes transitionMu, so a caller
+// must never hold saveMu or e.mu when entering RunTransition. The store's
+// revision compare-and-swap remains the backstop for a distinct stale copy.
+func (e *Execution) RunTransition(fn func() error) error {
+	e.transitionMu.Lock()
+	defer e.transitionMu.Unlock()
+	return fn()
 }
 
 func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount int) error {
@@ -160,6 +299,13 @@ func (e *Execution) MarkCapabilityReady(capabilityID shared.ID, input map[string
 	e.states[capabilityID] = state
 	e.params[capabilityID] = data.CanonicalMap(input)
 	return nil
+}
+
+// Signal resolves a wait without a delivered payload. It is retained for the
+// existing instance-scoped signal handler and behaves exactly like ResolveWait
+// called with a nil payload.
+func (e *Execution) Signal(capabilityID shared.ID) error {
+	return e.ResolveWait(capabilityID, nil)
 }
 
 func (e *Execution) MarkCapabilityRunning(capabilityID shared.ID) error {
@@ -240,6 +386,10 @@ func (e *Execution) MarkCapabilityFailed(capabilityID shared.ID, err error) bool
 // It reports whether the state changed, for the same reason as
 // MarkCapabilityFailed: the engine can observe a stop after the execution has
 // already recorded an outcome for this capability, and must not overwrite it.
+//
+// If the capability is a join target, this also propagates the cancellation
+// to the join state so that any pending join involving this capability's
+// predecessors will be discarded (R3-23).
 func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -257,6 +407,12 @@ func (e *Execution) MarkCapabilityCancelled(capabilityID shared.ID, reason error
 		state.Error = reason.Error()
 	}
 	e.states[capabilityID] = state
+	// If this capability is a join target, propagate cancellation to join state
+	// so that any pending joins involving its predecessor bindings are discarded.
+	ji, isJoinTarget := e.joinState[capabilityID]
+	if isJoinTarget && ji != nil {
+		e.PropagateCancellationToJoins()
+	}
 	return true
 }
 
@@ -271,6 +427,156 @@ func isTerminalCapability(status CapabilityStatus) bool {
 	}
 }
 
+// SeedInitialParams records the input a pending execution was created with.
+//
+// Execute persists the execution before the scheduler starts it, so the start
+// payload is not durable yet. Recording the input on the pending record is what
+// lets recovery start that execution after a crash instead of losing the input
+// that only existed in an in-memory event.
+func (e *Execution) SeedInitialParams(params map[string]any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.status != StatusPending {
+		return
+	}
+	e.initialParams = data.CanonicalMap(params)
+}
+
+// RecoverableDispatch prepares a running execution for recovery and returns the
+// capabilities that must be dispatched again.
+//
+// A capability recorded as running has an unknown external outcome: the process
+// stopped while it may have been executing. Recovery follows the at-least-once
+// policy, so it is returned to ready and dispatched again under the same
+// attempt identity. A capability already recorded as ready is returned as-is.
+//
+// Pending entry capabilities and joins whose predecessor bindings are all
+// recorded are also made ready; both cover snapshots written before the current
+// atomic transition boundary.
+//
+// Only elapsed time-based waits resume here. A capability in RetryWait resumes
+// when its NextAttemptAt has elapsed. A capability in Waiting resumes only when
+// it is a timer or deadline wait with a non-nil, elapsed WaitUntil; a nil
+// WaitUntil never means "due" and a signal wait never resumes from recovery
+// alone. Waits that do not resume stay waiting and are not counted as in-flight
+// work, because they occupy no worker.
+//
+// The returned IDs are sorted so replay is deterministic. The in-flight count is
+// rebuilt from the recovered states rather than trusted blindly, because it is
+// the scheduler's accounting for work that may no longer exist. The derived
+// execution status is re-derived at the end, so a fully waiting execution that
+// resumes elapsed work becomes running again while a non-due wait stays waiting.
+//
+// This method is single-shot per recovery: a capability already recorded as
+// ready is returned again if called twice. Exactly-once dispatch rests on the
+// scheduler calling it once inside its clear-intents/commit/publish sequence,
+// not on this method being idempotent.
+func (e *Execution) RecoverableDispatch() []shared.ID {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if (e.status != StatusRunning && e.status != StatusWaiting) || e.Blueprint == nil {
+		return nil
+	}
+
+	dispatch := make([]shared.ID, 0, len(e.states))
+	active := 0
+	now := time.Now().UTC()
+	for capabilityID, state := range e.states {
+		switch state.Status {
+		case CapabilityRunning:
+			state.Status = CapabilityReady
+			e.states[capabilityID] = state
+			dispatch = append(dispatch, capabilityID)
+			active++
+		case CapabilityReady:
+			dispatch = append(dispatch, capabilityID)
+			active++
+		case CapabilityRetryWait:
+			if state.NextAttemptAt != nil && !state.NextAttemptAt.After(now) {
+				state.Status = CapabilityReady
+				state.NextAttemptAt = nil
+				e.states[capabilityID] = state
+				dispatch = append(dispatch, capabilityID)
+				active++
+			}
+		case CapabilityWaiting:
+			if isElapsedTimerWait(state, now) {
+				e.clearWaitMetadataLocked(&state)
+				state.Status = CapabilityReady
+				e.states[capabilityID] = state
+				dispatch = append(dispatch, capabilityID)
+				active++
+			}
+		case CapabilityPending:
+			if e.recoverPendingLocked(capabilityID, &state) {
+				dispatch = append(dispatch, capabilityID)
+				active++
+			}
+		}
+	}
+	sort.Slice(dispatch, func(i, j int) bool { return dispatch[i] < dispatch[j] })
+	e.inFlight = active
+	e.refreshStatusLocked()
+	return dispatch
+}
+
+// isElapsedTimerWait reports whether a waiting capability is a time-based wait
+// whose deadline has passed. A nil WaitUntil is never due, and a signal wait is
+// never resumed by the elapsed-time path alone.
+func isElapsedTimerWait(state CapabilityExecutionState, now time.Time) bool {
+	if state.WaitType != WaitTypeTimer && state.WaitType != WaitTypeDeadline {
+		return false
+	}
+	return state.WaitUntil != nil && !state.WaitUntil.After(now)
+}
+
+// recoverPendingLocked makes a pending capability ready when its recorded
+// state already satisfies it. The caller must hold e.mu.
+func (e *Execution) recoverPendingLocked(capabilityID shared.ID, state *CapabilityExecutionState) bool {
+	node, exists := e.Blueprint.Nodes[capabilityID]
+	if !exists {
+		return false
+	}
+	if len(node.Predecessors) == 0 {
+		for _, entryID := range e.Blueprint.EntryCapabilityIDs {
+			if entryID != capabilityID {
+				continue
+			}
+			state.Status = CapabilityReady
+			e.states[capabilityID] = *state
+			if _, recorded := e.params[capabilityID]; !recorded {
+				e.params[capabilityID] = data.CanonicalMap(e.initialParams)
+			}
+			return true
+		}
+		return false
+	}
+
+	ji, exists := e.joinState[capabilityID]
+	if !exists || ji == nil {
+		return false
+	}
+	if !ji.Dispatched {
+		for _, predecessor := range node.Predecessors {
+			if !ji.CompletedBindings[predecessor.BindingID] {
+				return false
+			}
+		}
+		// The join became ready in the previous process but the crash happened
+		// before the target's state was written. Recording the dispatch here is
+		// what closes that window without dispatching the target twice.
+		ji.Dispatched = true
+	}
+	merged := make(map[string]any)
+	for _, predecessor := range node.Predecessors {
+		mergeInto(merged, ji.PredecessorInputs[predecessor.BindingID])
+	}
+	state.Status = CapabilityReady
+	e.states[capabilityID] = *state
+	e.params[capabilityID] = data.CanonicalMap(merged)
+	return true
+}
+
 func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -280,10 +586,69 @@ func (e *Execution) CompleteCurrentAndSchedule(nextCapabilityCount int) (int, er
 	if e.inFlight <= 0 {
 		return e.inFlight, errors.New("execution in-flight counter is invalid")
 	}
-	if nextCapabilityCount > 0 {
-		e.inFlight += nextCapabilityCount - 1
-	}
+	// The capability that just reported an outcome is no longer in flight. Any
+	// capabilities scheduled from its completion replace it, so the count moves
+	// by nextCapabilityCount-1. That is true even when nothing is scheduled (a
+	// blocked fan-in or a detached hand-off): the completed capability must
+	// still be removed, or the execution can never drain.
+	e.inFlight += nextCapabilityCount - 1
 	return e.inFlight, nil
+}
+
+// PropagateFailureToJoins records which predecessor bindings of join targets
+// have permanently failed. This enforces the "one failure fails the execution"
+// semantics for fan-in: if a required predecessor permanently fails, the join
+// cannot be satisfied and the execution fails. The caller must already hold e.mu
+// or ensure external synchronization.
+func (e *Execution) PropagateFailureToJoins() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Blueprint == nil {
+		return
+	}
+	for capabilityID, node := range e.Blueprint.Nodes {
+		ji, isJoinTarget := e.joinState[capabilityID]
+		if !isJoinTarget || ji == nil {
+			continue
+		}
+		for _, predecessor := range node.Predecessors {
+			if ji.FailedBindings != nil && ji.FailedBindings[predecessor.BindingID] {
+				continue
+			}
+			if ji.FailedBindings == nil {
+				ji.FailedBindings = make(map[shared.ID]bool)
+			}
+			ji.FailedBindings[predecessor.BindingID] = true
+		}
+	}
+}
+
+// PropagateCancellationToJoins records which predecessor bindings of join targets
+// have been cancelled. This enforces the "cancelled predecessor discards the join"
+// semantics: if a required predecessor has been cancelled, the join cannot be
+// satisfied and buffered inputs are discarded. The caller must already hold e.mu
+// or ensure external synchronization.
+func (e *Execution) PropagateCancellationToJoins() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Blueprint == nil {
+		return
+	}
+	for capabilityID, node := range e.Blueprint.Nodes {
+		ji, isJoinTarget := e.joinState[capabilityID]
+		if !isJoinTarget || ji == nil {
+			continue
+		}
+		for _, predecessor := range node.Predecessors {
+			if ji.CancelledBindings != nil && ji.CancelledBindings[predecessor.BindingID] {
+				continue
+			}
+			if ji.CancelledBindings == nil {
+				ji.CancelledBindings = make(map[shared.ID]bool)
+			}
+			ji.CancelledBindings[predecessor.BindingID] = true
+		}
+	}
 }
 
 func (e *Execution) MarkCompleted() bool {
@@ -338,6 +703,7 @@ func (e *Execution) MarkCancelled(reason error) bool {
 	e.status = StatusCancelled
 	e.completedAt = &now
 	e.inFlight = 0
+	e.joinState = make(map[shared.ID]*joinStateInfo)
 	for capabilityID, state := range e.states {
 		// Anything already terminal -- completed, failed, or handed off to a
 		// detached task -- reported its own outcome and keeps it. Cancelling must
@@ -357,6 +723,36 @@ func (e *Execution) MarkCancelled(reason error) bool {
 		e.executionError = reason.Error()
 	}
 	e.signalTerminal()
+	return true
+}
+
+// MarkCommitFailed overrides an optimistically-completed execution when its
+// completion could not be durably committed.
+//
+// Durable mode marks an execution completed in memory, then commits that
+// snapshot before announcing it. If the commit fails, the completion exists only
+// in memory: a restart would recover the execution as unfinished. Reporting the
+// success anyway would tell a caller their work concluded when the durable record
+// says otherwise, so the execution is reclassified as failed and the commit
+// failure becomes its reason.
+//
+// It only overrides a completed execution. A failure or cancellation already
+// carries its own reason and must not be rewritten by a later bookkeeping error.
+// The done channel was already closed by the optimistic completion, so a caller
+// that observed success before the commit cannot be un-notified; durable mode
+// treats an uncommitted completion as a failure regardless, and that window is
+// the documented cost of committing after the in-memory transition.
+func (e *Execution) MarkCommitFailed(err error) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.status != StatusCompleted {
+		return false
+	}
+	e.status = StatusFailed
+	e.inFlight = 0
+	if err != nil {
+		e.executionError = err.Error()
+	}
 	return true
 }
 
@@ -481,156 +877,176 @@ func pathValue(payload any, path []string, source *shared.ValueRef) (any, error)
 	return nil, fmt.Errorf("%s reference path %q: unexpected end", source.Kind, strings.Join(path, "."))
 }
 
-// joinStateInfo holds the state for a join target capability.
+// joinStateInfo holds the completion and contribution state for a join target
+// capability. It is created for every capability with at least one incoming edge.
 type joinStateInfo struct {
 	CompletedBindings map[shared.ID]bool
 	PredecessorInputs map[shared.ID]map[string]any
+	FailedBindings    map[shared.ID]bool
+	CancelledBindings map[shared.ID]bool
 	Dispatched        bool
 }
 
-// RecordCompletedBinding marks a binding as completed for a join target.
-// It is safe to call even if the binding was already completed; it is idempotent.
-// Returns true if the join target is now ready (all predecessors completed).
-func (e *Execution) RecordCompletedBinding(capabilityID shared.ID, bindingID shared.ID) bool {
+func newJoinState() *joinStateInfo {
+	return &joinStateInfo{
+		CompletedBindings: make(map[shared.ID]bool),
+		PredecessorInputs: make(map[shared.ID]map[string]any),
+		FailedBindings:    make(map[shared.ID]bool),
+		CancelledBindings: make(map[shared.ID]bool),
+	}
+}
+
+// RecordJoinContribution records one predecessor binding's contribution to a
+// join target and reports whether this call completed the join.
+//
+// It is atomic and idempotent: only the call that satisfies the final required
+// predecessor returns ready=true, so a target can never be dispatched twice even
+// if completion events arrive concurrently or more than once. A call made after
+// the target was dispatched returns false and contributes nothing further.
+//
+// If any predecessor binding has been cancelled, the join cannot be satisfied
+// and this call discards its input and returns ready=false. This implements
+// R3-23: cancellation with a pending join discards buffered inputs and the
+// join never fires.
+//
+// partialInput is the target params produced by this predecessor's binding
+// mappings. Contributions are merged in blueprint predecessor order (binding ID,
+// then capability ID), which makes the merged input deterministic regardless of
+// completion order; target paths are disjoint by construction (R3-4).
+func (e *Execution) RecordJoinContribution(capabilityID shared.ID, bindingID shared.ID, partialInput map[string]any) (bool, map[string]any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	if e.Blueprint == nil {
+		return false, nil, fmt.Errorf("execution %s has no blueprint; cannot record join contribution", e.ID)
+	}
+	node, exists := e.Blueprint.Nodes[capabilityID]
+	if !exists {
+		return false, nil, fmt.Errorf("capability %s is not in the blueprint", capabilityID)
+	}
 	ji, exists := e.joinState[capabilityID]
 	if !exists {
-		return false
+		return false, nil, fmt.Errorf("capability %s is not a join target", capabilityID)
 	}
-
+	if ji.Dispatched {
+		return false, nil, nil
+	}
 	if ji.CompletedBindings == nil {
 		ji.CompletedBindings = make(map[shared.ID]bool)
 	}
-	ji.CompletedBindings[bindingID] = true
-
-	node := e.Blueprint.Nodes[capabilityID]
-	required := len(node.Predecessors)
-
-	if required == 0 {
-		ji.Dispatched = true
-		return true
-	}
-
-	allCompleted := true
-	for i := 0; i < required; i++ {
-		found := false
-		for completedID := range ji.CompletedBindings {
-			if completedID == node.Predecessors[i].BindingID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			allCompleted = false
-			break
-		}
-	}
-
-	if allCompleted && !ji.Dispatched {
-		ji.Dispatched = true
-	}
-
-	return allCompleted
-}
-
-// RecordPredecessorInput stores the output of a completed predecessor capability
-// as an input for the join target.
-func (e *Execution) RecordPredecessorInput(capabilityID shared.ID, bindingID shared.ID, input map[string]any) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return
-	}
-
 	if ji.PredecessorInputs == nil {
 		ji.PredecessorInputs = make(map[shared.ID]map[string]any)
 	}
-	ji.PredecessorInputs[bindingID] = input
-}
-
-// ReadyForJoin checks if a join target capability is ready to execute.
-func (e *Execution) ReadyForJoin(capabilityID shared.ID) bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return false
+	if ji.CancelledBindings == nil {
+		ji.CancelledBindings = make(map[shared.ID]bool)
 	}
 
-	node := e.Blueprint.Nodes[capabilityID]
-	if len(node.Predecessors) == 0 {
-		return true
+	// If any predecessor binding has been cancelled, the join cannot be
+	// satisfied. Discard this contribution and return ready=false.
+	if ji.CancelledBindings[bindingID] {
+		return false, nil, nil
 	}
 
-	required := len(node.Predecessors)
-	completed := 0
-	for _, pred := range node.Predecessors {
-		if ji.CompletedBindings != nil {
-			for completedID := range ji.CompletedBindings {
-				if completedID == pred.BindingID {
-					completed++
-					break
-				}
-			}
+	ji.CompletedBindings[bindingID] = true
+	ji.PredecessorInputs[bindingID] = data.CanonicalMap(partialInput)
+
+	// Readiness is decided from the blueprint's predecessor set, not from the
+	// number of contributions received: a stray or unknown binding can never
+	// satisfy a join.
+	// However, if any predecessor is cancelled, the join cannot fire.
+	cancelledAny := false
+	for _, predecessor := range node.Predecessors {
+		if ji.CancelledBindings[predecessor.BindingID] {
+			cancelledAny = true
+			break
+		}
+		if !ji.CompletedBindings[predecessor.BindingID] {
+			return false, nil, nil
 		}
 	}
-
-	return completed >= required
-}
-
-// MergeCompletedInputs gathers all inputs from completed predecessors.
-func (e *Execution) MergeCompletedInputs(capabilityID shared.ID) map[string]any {
-	e.mu.RLock()
-	ji, exists := e.joinState[capabilityID]
-	e.mu.RUnlock()
-	if !exists {
-		return nil
-	}
-
-	if ji.PredecessorInputs == nil {
-		return map[string]any{}
-	}
-
-	merged := make(map[string]any, len(ji.PredecessorInputs))
-	for _, input := range ji.PredecessorInputs {
-		for k, v := range input {
-			merged[k] = v
-		}
-	}
-	return merged
-}
-
-// DispatchedOnce checks if work has already been dispatched for a join target.
-func (e *Execution) DispatchedOnce(capabilityID shared.ID) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	ji, exists := e.joinState[capabilityID]
-	if !exists {
-		return false
-	}
-
-	if ji.Dispatched {
-		return true
+	// If any predecessor was cancelled, discard the join and return ready=false.
+	if cancelledAny {
+		// Reset the just-set completion so the join can be retried if desired,
+		// but since the capability is cancelled, it won't help. We keep the
+		// state as-is to record the cancellation, but the join will never fire.
+		ji.Dispatched = true // Prevent further contributions
+		return false, nil, nil
 	}
 
 	ji.Dispatched = true
-	return true
+	merged := make(map[string]any)
+	for _, predecessor := range node.Predecessors {
+		mergeInto(merged, ji.PredecessorInputs[predecessor.BindingID])
+	}
+	return true, merged, nil
 }
 
-// mergeWithTransitionInput combines merged predecessor inputs with transition mappings.
-func mergeWithTransitionInput(merged map[string]any, transitionInput map[string]any, transition types.ExecutionTransition) map[string]any {
-	result := map[string]any{}
-	for k, v := range merged {
-		result[k] = v
+// JoinState returns a deep copy of the target's join state for serialization.
+// It returns nil for a capability that is not a join target.
+func (e *Execution) JoinState(capabilityID shared.ID) *JoinState {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	ji, exists := e.joinState[capabilityID]
+	if !exists {
+		return nil
 	}
-	for k, v := range transitionInput {
-		result[k] = v
+	return ji.snapshot()
+}
+
+// joinStateSnapshot returns a serializable copy. The caller must hold e.mu.
+func (ji *joinStateInfo) snapshot() *JoinState {
+	completed := make([]shared.ID, 0, len(ji.CompletedBindings))
+	for bindingID, done := range ji.CompletedBindings {
+		if done {
+			completed = append(completed, bindingID)
+		}
 	}
-	return result
+	inputs := make(map[shared.ID]map[string]any, len(ji.PredecessorInputs))
+	for bindingID, input := range ji.PredecessorInputs {
+		inputs[bindingID] = data.CanonicalMap(input)
+	}
+	return &JoinState{
+		CompletedBindings: completed,
+		PredecessorInputs: inputs,
+		Dispatched:        ji.Dispatched,
+	}
+}
+
+func joinStateFromSnapshot(snapshot *JoinState) *joinStateInfo {
+	ji := newJoinState()
+	if snapshot == nil {
+		return ji
+	}
+	for _, bindingID := range snapshot.CompletedBindings {
+		ji.CompletedBindings[bindingID] = true
+	}
+	for bindingID, input := range snapshot.PredecessorInputs {
+		ji.PredecessorInputs[bindingID] = data.CanonicalMap(input)
+	}
+	ji.Dispatched = snapshot.Dispatched
+	return ji
+}
+
+// mergeInto deep-merges src into dst. Object values are merged recursively so
+// two bindings targeting sibling paths ("profile.name" and "profile.age") both
+// survive. Leaf paths are disjoint by construction, so leaf overwrites only
+// occur when a caller supplies duplicate paths, which the compiler rejects.
+func mergeInto(dst, src map[string]any) {
+	for key, value := range src {
+		if existing, ok := dst[key].(map[string]any); ok {
+			if incoming, ok := value.(map[string]any); ok {
+				mergeInto(existing, incoming)
+				continue
+			}
+		}
+		dst[key] = value
+	}
+}
+
+// JoinState is a serializable snapshot of a join target's completion state.
+// It is returned by the Execution.JoinState method.
+type JoinState struct {
+	CompletedBindings []shared.ID
+	PredecessorInputs map[shared.ID]map[string]any
+	Dispatched        bool
 }

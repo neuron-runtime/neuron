@@ -37,12 +37,14 @@ for mod in "${go_modules[@]}"; do
     # into the source tree. Library-only modules (no package main) have nothing
     # to link, so build them without -o; the scratch dir only applies when there
     # is something to build.
+    if [ -n "$(gofmt -l . 2>/dev/null)" ]; then
+      echo "FAILED: $mod contains unformatted Go files; run gofmt -w:" >&2
+      gofmt -l . >&2
+      exit 1
+    fi
     scratch="$(mktemp -d)"
     go vet ./... \
       && go test ./... \
-      && gofmt -l . 2>/dev/null | while IFS= read -r f; do \
-        echo "FAILED: gofmt needs $f" >&2; \
-      done \
       && if grep -rq '^package main' --include='*.go' .; then
            go build -o "$scratch" ./...
          else

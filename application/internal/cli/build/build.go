@@ -429,6 +429,9 @@ func printRegistration(result protocol.RegisterResponse) {
 		line += fmt.Sprintf(" (%s)", result.Status)
 	}
 	fmt.Println(line)
+	if result.Status == protocol.RegisterStatusReplaced {
+		fmt.Fprintln(os.Stderr, "warning: this version was already registered with a different artifact; the previous artifact is retained for unfinished executions")
+	}
 }
 
 // buildExecutionConfigurations assembles the N.O.R.E. payload from the

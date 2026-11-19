@@ -487,7 +487,8 @@ neuron instance list --target <instance-id>
 
 #### `neuron instance remove`
 
-Remove an instance and its executions and events.
+Remove an instance and its executions and events. Removal is refused while the
+instance has unfinished executions unless `--force` is supplied.
 
 ```
 Usage:
@@ -495,24 +496,31 @@ Usage:
 
 Aliases:
   remove, rm
+
+Flags:
+  --force   Remove the instance even when it has unfinished executions
 ```
 
 ```bash
 neuron instance remove <instance-id>
-neuron instance rm <instance-id>
+neuron instance rm <instance-id> --force
 ```
 
 #### `neuron instance clear`
 
-Remove **all** instances and their executions and events.
+Remove **all** instances and their executions and events. Clearing is refused
+while any instance has unfinished executions unless `--force` is supplied.
 
 ```
 Usage:
   neuron instance clear [flags]
+
+Flags:
+  --force   Clear instances even when they have unfinished executions
 ```
 
 ```bash
-neuron instance clear
+neuron instance clear --force
 ```
 
 ### `neuron daemon`

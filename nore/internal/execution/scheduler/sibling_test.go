@@ -113,12 +113,19 @@ func TestSiblingStoppedByAFailureIsRecordedAsCancelled(t *testing.T) {
 	}
 	exec := startExecution(t, ctx, bus, store, blueprint)
 
-	subscription := subscribeToExecution(t, bus, exec.ID)
-	defer func() { _ = subscription.Close() }()
+	failures := subscribeToExecution(t, bus, exec.ID)
+	defer func() { _ = failures.Close() }()
+	cancellations := subscribeToExecution(t, bus, exec.ID)
+	defer func() { _ = cancellations.Close() }()
 
 	runtime.awaitVictimStart(t)
-	awaitExecutionFailure(t, subscription)
-	runtime.awaitVictimStop(t)
+	awaitExecutionFailure(t, failures)
+	// A terminal execution does not by itself record what happened to a sibling
+	// still in flight: the engine records the cancellation when the invocation it
+	// stopped returns. The cancellation event is the stable barrier that the
+	// capability state has been updated, so the assertion below cannot observe
+	// the sibling mid-transition.
+	awaitCapabilityEvent(t, cancellations, event.CapabilityCancelled, "victim")
 
 	if state := exec.CapabilityState("broken"); state.Status != executionmodel.CapabilityFailed {
 		t.Errorf("the capability that actually broke is recorded as %q, want %q", state.Status, executionmodel.CapabilityFailed)
@@ -165,22 +172,24 @@ func TestStoppedCapabilityPublishesCancellationNotFailure(t *testing.T) {
 	}
 	exec := startExecution(t, ctx, bus, store, blueprint)
 
-	subscription := subscribeToExecution(t, bus, exec.ID)
-	defer func() { _ = subscription.Close() }()
+	failures := subscribeToExecution(t, bus, exec.ID)
+	defer func() { _ = failures.Close() }()
+	cancellations := subscribeToExecution(t, bus, exec.ID)
+	defer func() { _ = cancellations.Close() }()
 
 	runtime.awaitVictimStart(t)
-	awaitExecutionFailure(t, subscription)
+	awaitExecutionFailure(t, failures)
 	runtime.awaitVictimStop(t)
 
 	// Wait for the cancellation to be announced, then keep reading briefly: a
 	// capability.failed for the same capability arriving afterwards would mean
 	// both outcomes were published for one capability.
-	sawCancelled := awaitCapabilityEvent(t, subscription, event.CapabilityCancelled, "victim")
+	sawCancelled := awaitCapabilityEvent(t, cancellations, event.CapabilityCancelled, "victim")
 
 	grace := time.After(250 * time.Millisecond)
 	for {
 		select {
-		case received, open := <-subscription.Events():
+		case received, open := <-failures.Events():
 			if !open {
 				return
 			}

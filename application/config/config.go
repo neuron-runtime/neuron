@@ -17,6 +17,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // Config is the effective Neuron configuration.
@@ -134,6 +136,22 @@ type RuntimePort struct {
 // IsAuto reports whether the port is OS-assigned.
 func (p RuntimePort) IsAuto() bool { return p.Mode == RuntimePortAuto }
 
+// Execution durability modes. They are deliberately distinct: retaining
+// history is not the same guarantee as resuming unfinished work.
+const (
+	// DurabilityNone keeps no execution or event history. Executions remain
+	// observable in memory while they run, but nothing survives a restart.
+	DurabilityNone = core.DurabilityNone
+
+	// DurabilityHistory retains execution and event history for inspection.
+	// Unfinished work is not resumed after a restart; it is reported as failed.
+	DurabilityHistory = core.DurabilityHistory
+
+	// DurabilityDurable persists transitions and dispatch intents so unfinished
+	// work can resume after a restart. It requires a transactional backend.
+	DurabilityDurable = core.DurabilityDurable
+)
+
 // ExecutionConfig controls how executions behave by default.
 type ExecutionConfig struct {
 	// Mode is "wait" or "detach".
@@ -142,6 +160,31 @@ type ExecutionConfig struct {
 	// Timeout is a duration string such as "30m". Kept as a string so it
 	// unmarshals from YAML without custom parsing.
 	Timeout string `yaml:"timeout" mapstructure:"timeout"`
+
+	// Durability is the execution durability mode. Modes:
+	//   "none"     - no execution/event history is retained
+	//   "history"  - history is retained, but unfinished work is not resumed
+	//   "durable"  - unfinished work resumes after restart; requires a transactional storage backend
+	Durability string `yaml:"durability" mapstructure:"durability"`
+
+	// Retention controls the explicit garbage collection of superseded
+	// assembly artifacts at runtime startup. The zero policy retains every
+	// artifact.
+	Retention RetentionConfig `yaml:"retention" mapstructure:"retention"`
+}
+
+// RetentionConfig bounds superseded assembly artifacts. Artifacts referenced by
+// unfinished executions and the current artifact of every registered version
+// are always retained, regardless of these limits.
+type RetentionConfig struct {
+	// MaxAge is the minimum age of a superseded artifact before it may be
+	// removed, as a duration string such as "168h". Empty disables age-based
+	// pruning.
+	MaxAge string `yaml:"maxAge,omitempty" mapstructure:"maxAge"`
+
+	// MaxArtifactsPerVersion bounds the artifacts retained for one
+	// assembly/version. Zero disables count-based pruning.
+	MaxArtifactsPerVersion int `yaml:"maxArtifactsPerVersion,omitempty" mapstructure:"maxArtifactsPerVersion"`
 }
 
 // WorkerConfig describes the capability runtime worker pool.
@@ -192,7 +235,6 @@ type StorageConfig struct {
 	DSN string `yaml:"dsn" mapstructure:"dsn"`
 }
 
-// CapabilityRuntimesConfig lists the executable registries Neuron can resolve capabilities
 // against. A capability only declares `type`/`version`; the registry resolution
 // assembly determines where the capability runtime comes from.
 type CapabilityRuntimesConfig struct {

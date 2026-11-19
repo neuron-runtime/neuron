@@ -311,6 +311,40 @@ N.O.R.E. deliberately does **not**:
 
 The canonical manifest is compiled by the CLI; N.O.R.E. receives the compiled core assembly representation.
 
+## Storage backup, restore, and upgrade
+
+### Backup and restore
+
+| Backend | Backup | Restore |
+| --- | --- | --- |
+| **SQLite** | Offline copy of the database file (`<path>/nore.db`) while N.O.R.E. is stopped. Optionally checkpoint the WAL before copying to produce a consistent single-file snapshot: `sqlite3 <db> "PRAGMA wal_checkpoint(TRUNCATE)"`. | Place the backup file at the target path and start N.O.R.E. The SQLite driver will open the database and apply any pending WAL migrations automatically. |
+| **PostgreSQL** | `pg_dump -Fc <dsn> > nore.backup.dump` while N.O.R.E. is stopped. This produces a custom-format dump that preserves schemas, data, and ownership. | `pg_restore -d <dsn> nore.backup.dump`. The target database must have the same or compatible schema version. |
+
+### Upgrade path from existing SQLite DB
+
+Neuron uses schema version tracking via a `schema_migrations` table to determine whether the stored schema is compatible with the running binary. The table location per backend:
+
+| Backend | `schema_migrations` table |
+| --- | --- |
+| **SQLite** | `sqlite_master` catalog row where `name = 'schema_migrations'` (or the dedicated table created by the migration framework). Records store the applied migration version. |
+| **PostgreSQL** | `schema_migrations` table (created by the migration framework) with columns `version BIGINT PRIMARY KEY`, `description TEXT`, `applied_at TIMESTAMPTZ`, `dirty BOOLEAN`. |
+
+**Upgrade steps from a previous SQLite schema:**
+
+1. **Ensure N.O.R.E. is stopped** — do not attempt an online migration.
+2. **Run the migration framework** against the existing SQLite database to bring it to the current schema version. The `migrate.Migrate` function applies pending migrations in order, recording each in `schema_migrations`.
+3. **Verify the `schema_migrations` table** reflects the target version. For SQLite, query: `SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 1;`
+4. **Start N.O.R.E.** The binary will refuse to start if the schema version is newer than this binary understands (see `ErrNewerSchema` in `nore/internal/storage/migrate`). If the schema is exactly at the current version, N.O.R.E. will start normally.
+5. **If the previous schema is ahead of this binary's supported maximum**, the startup will fail with a precise error naming the current maximum supported version. In that case, apply compatible migrations backward (or forward via an intermediate binary) before restarting.
+
+The storage configuration remains **machine-level, not project-configured**. It is set via `storage.driver` (or `NEURON_STORAGE_DRIVER` / `--storage-driver` CLI flag) at deployment time and is rejected from project configuration files so an assembly never embeds database settings.
+
+## Indexed query operations decision
+
+In this phase, no indexed query operations were added behind the neutral `storage.Store` interface. The PostgreSQL backend includes an index on the `key` column of the `kv_store` table (`CREATE INDEX IF NOT EXISTS idx_kv_store_key ON kv_store (key)`) to accelerate `List(prefix)` lookups, but this was added without formal measurement of performance impact or extension of the neutral backend interface. The decision is recorded here for future optimization if measurement confirms indexed queries are needed. The SQLite backend performs full table scans via `LIKE` prefix matching, which is acceptable for the expected workloads in this phase.
+
+Users requiring optimized prefix listings for large datasets should consider the PostgreSQL backend or add custom query methods outside the neutral contract in a later phase.
+
 ## Internal architecture
 
 ```mermaid
@@ -607,6 +641,41 @@ The capability runtime returns the result map. Errors from the capability runtim
 > [!NOTE]
 > Execution history and events are an observability and persistence concern, not part of the execution semantics: an execution does not depend on persistence being enabled.
 
+## At-least-once dispatch guarantee
+
+N.O.R.E. provides an **at-least-once** dispatch guarantee for capable work. When an execution plan advances to a capability, the engine records a **dispatch intent** — a unit of ready work persisted to the store so that a process restart or crash does not lose track of which capabilities remain to be executed. The dispatch intent is the core mechanism that makes at-least-once possible.
+
+### Dispatch intent claiming mechanism (CAS + leases)
+
+Each dispatch intent carries an `owner` field and a `lease_expires_at` timestamp. The claiming workflow uses a **compare-and-swap (CAS)** pattern within a storage transaction:
+
+1. **Read** the dispatch intent from the store.
+2. **Check claimability**: the intent is claimable if it has no owner, or if its lease has expired (`LeaseExpiresAt` is before now). An intent held by a live owner is ineligible for re-claim.
+3. **Write** a new owner and lease expiry (`now + leaseDuration`) atomically via **compare-and-swap**. The CAS ensures that if two callers read the same intent concurrently, only one wins the claim — the other observes a conflict and retries or declines.
+4. **Release**: when an owner finishes with an intent, `ReleaseDispatchIntent` clears the owner, making the intent claimable again. A release that mismatches the current owner is a no-op, preventing a stale worker from reclaiming work already re-claimed by another owner.
+
+This CAS+lease pattern guarantees that at any moment, at most one owner claims a given dispatch intent, but if that owner crashes or its lease expires, the intent becomes claimable again — ensuring no ready work is permanently lost.
+
+### Idempotent handler design
+
+Because the runtime guarantees **at-least-once** dispatch — not exactly-once — an external capability runtime must design its handlers to be **idempotent**. If a capability is re-dispatched after a crash or network partition, the same params may be delivered again; the runtime does not deduplicate externally visible effects. The capability runtime author is responsible for ensuring that repeated execution with the same inputs produces the same result or safely merges duplicates.
+
+### Distinction from exactly-once external side effects
+
+The at-least-once guarantee covers dispatch lifecycle — recording, claiming, and re-dispatching ready work. It does **not** guarantee exactly-once execution of external side effects (e.g., writing to a database, sending a network request). Those are the responsibility of the capability runtime implementation. The runtime may record events and persist execution state, but durable execution resumption does not claim exactly-once semantics for the capability's business logic.
+
+```mermaid
+flowchart TB
+    A[Execution plan advances to capability] --> B[Engine records dispatch intent]
+    B --> C[Dispatch intent persisted with owner + lease]
+    C --> D[Worker claims intent via CAS+lease]
+    D -->|lease expires or owner crashes| E[intent becomes claimable again]
+    E --> F[Another worker claims the same intent]
+    F --> G[Capability executed again (idempotent handler required)]
+```
+
+---
+
 ## Execution lifecycle
 
 ```mermaid
@@ -883,9 +952,10 @@ The contract has explicit failure semantics. Missing records are `storage.ErrNot
 
 Transactions are required when one logical operation writes more than one key:
 
-- **Assembly registration** writes the artifact, prunes artifacts replaced for the same version, and updates the version index atomically. A failed registration leaves no partial artifact or index entry.
+- **Assembly registration** writes the artifact and updates the version index atomically. Superseded artifacts are retained, so registration never deletes work a durable execution still references. A failed registration leaves no partial artifact or index entry.
 - **Execution save** reads the persisted revision, compares it with the writer's revision, and writes the next snapshot in one transaction. This is the compare-and-swap guard that rejects a stale writer.
-- **Execution transition plus dispatch intent** (Phase 4) and **timer claim** (Phase 5) will use the same boundary. They are not implemented yet.
+- **Execution transition plus dispatch intent** persists the next execution snapshot and the ready dispatch intents atomically. A stale writer is rejected and a failed intent write rolls back the transition.
+- **Timer claim** (Phase 5) will use the same boundary. It is not implemented yet.
 
 Single-key reads and writes use the plain `Store`; they do not need a transaction.
 
@@ -897,35 +967,45 @@ Three guarantees are separate and must not be conflated:
 | --- | --- | --- |
 | **Observability** | A run's transitions and output can be inspected through events and the API | Implemented |
 | **Persistence** | Registered assemblies, instance metadata, execution history, and events survive a restart and remain queryable | Implemented |
-| **Durable execution** | Unfinished work resumes after a restart and reaches a terminal state exactly once | Not implemented |
+| **Durable execution** | Unfinished work resumes after a restart from its last committed transition, with at-least-once dispatch | Implemented |
+
+### R3-16 detached-plus-fan-in rule
+
+Under fan-in, a detached branch may not participate in a join. A detached capability runs in a separately tracked execution that the parent never waits for; if a predecessor from a detached scope feeds into a join with multiple incoming bindings, the join can never become satisfied. Linear chains with a single predecessor from a detached scope are allowed — the downstream capability runs inside the detached scope and is handled by `buildDetachedScopes` (`nore/internal/planner/detach.go`). This rule is enforced during compilation in `nore/internal/planner/compiler.go:154-160`, where the planner rejects any binding from a detached capability to a join point (multiple incoming bindings). The intent is to prevent an unsatisfiable join state that would result from mixing detached scope ownership with fan-in convergence.
 
 Persistence does not imply durable execution. N.O.R.E. keeps live executions in memory and writes snapshots through to storage, so live work is fast and completed history survives a restart. Saving a snapshot is not the same as recording a resumable transition and dispatch intent.
 
-On restart, N.O.R.E. restores instance metadata and execution records as **metadata-only** records. A restored instance has no event bus, scheduler, capability runtime engine, or worker processes, so it cannot be started or resumed. Executions that were unfinished when the process stopped are marked failed with the reason no runtime could resume them. This is the current non-durable mode, not an execution guarantee N.O.R.E. claims to provide.
-
-> [!WARNING]
-> Creating a new instance is how work is re-run today. Do not treat a restored instance or a persisted `running` execution as live work that will continue.
+In `history` mode, restore is metadata-only: unfinished executions are marked failed because no runtime can resume them. In `durable` mode, N.O.R.E. recompiles each execution's pinned assembly artifact, restores completed capabilities and recorded joins, and re-dispatches unfinished work. Interrupted `running` capabilities follow at-least-once dispatch, so external effects must be idempotent; recovery does not claim exactly-once execution.
 
 ### Durability modes
 
-The intended policy surface names three modes:
+The policy surface names three modes, configured at `runtime.execution.durability`. Durability is deployment-level configuration: the project configuration file rejects the key, and it is set through `--durability` or `NEURON_EXECUTION_DURABILITY`.
 
 | Mode | Semantics |
 | --- | --- |
-| `execution.durability: none` | No execution/event history is retained. Execution semantics do not depend on storage. |
-| `execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the behavior N.O.R.E. implements today. |
-| `execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with idempotent dispatch. Planned for Phase 4; not implemented. |
+| `runtime.execution.durability: none` | No execution/event history is retained. Live executions remain observable in memory, but nothing survives a restart. |
+| `runtime.execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the default. |
+| `runtime.execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with at-least-once dispatch. Startup refuses a non-transactional backend when this mode is selected. |
 
-The configuration key is not wired yet: today the `history` behavior is unconditional. Defining the modes here gives Phase 4 a contract to implement rather than an emergent behavior to reverse-engineer.
+All three modes are wired through the CLI, daemon, and project launch paths. Recovery restores pending and running root executions, recorded joins, and detached tasks against the execution's immutable artifact. Retry timers and suspended waits are Phase 5 work and are not yet resumed.
 
-### Retention limitation
+### Artifact retention
 
 Registered assemblies are stored under `assemblies/{id}/{version}/{hash}/{env}/manifest`. A key that carries a hash resolves exactly that artifact; an unknown or mismatched artifact is an error, never a fallback to the latest content.
 
-Registration is not content-addressed immutable. Registering the same assembly version again replaces the version's previous artifact(s) and prunes the earlier hashes, so a given `name:version` addresses exactly one artifact, the newest one. A hash that is no longer retained resolves to `ErrNotFound`. Phase 4 removes this retention limitation for artifacts referenced by durable executions.
+Artifacts are immutable once written. Registering the same assembly version again moves the version index to the new artifact but retains the earlier hashes, so a durable execution pinned to an older hash remains recoverable. The CLI reports a same-version replacement and warns that the previous artifact is retained; a version bump is still the clearest way to express a graph change.
+
+Removal is never a side effect of registration. It happens only through explicit deletion or startup garbage collection. Retention is configured under `runtime.execution.retention`:
+
+| Key | Meaning |
+| --- | --- |
+| `maxAge` | Minimum age of a superseded artifact before it may be removed, e.g. `168h`. Empty keeps artifacts indefinitely. |
+| `maxArtifactsPerVersion` | Maximum artifacts retained for one assembly/version. Zero keeps all. |
+
+The current artifact of every registered version and every hash referenced by a non-terminal execution are always retained, regardless of policy. Destructive instance removal and clearing are refused while unfinished executions exist unless `--force` is supplied; forced removal deletes their execution history.
 
 > [!NOTE]
-> Execution history and events are an observability and persistence concern, not part of execution semantics. The current implementation always retains history; making retention configurable is a separate policy layer, and execution must not depend on it being enabled.
+> Execution history and events are an observability and persistence concern, not part of execution semantics. History is retained by default and can be disabled with `runtime.execution.durability: none`; execution must not depend on retention being enabled.
 
 ## Security & isolation
 

@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
@@ -55,6 +56,16 @@ type Handler struct {
 	// resolved invocation data for the capability. Returning an error from
 	// Execute records a controlled failure.
 	Execute func(ctx context.Context, params map[string]any) (map[string]any, error)
+
+	// ExecuteWithRequest, when set, supersedes Execute. It receives the full
+	// request, including the resume input of a suspended capability, and may
+	// return an ExecutionResult whose Suspend field asks N.O.R.E. to suspend
+	// the capability.
+	//
+	// A handler that returns Suspend must advertise v1.SuspendFeature
+	// ("suspend") from Initialize. The SDK rejects an unnegotiated suspend
+	// explicitly rather than returning an empty success.
+	ExecuteWithRequest func(ctx context.Context, req ExecutionRequest) (*ExecutionResult, error)
 
 	// Health reports whether the capability runtime is ready to accept requests.
 	// It is called periodically by the runtime.
@@ -88,8 +99,8 @@ type InitializeResult struct {
 // process termination). It never returns nil; an error is always returned,
 // or a sentinel error indicating normal shutdown.
 func Serve(h Handler) error {
-	if h.Initialize == nil || h.Execute == nil {
-		return fmt.Errorf("capability runtime: Handler.Initialize and Handler.Execute are required")
+	if h.Initialize == nil || (h.Execute == nil && h.ExecuteWithRequest == nil) {
+		return fmt.Errorf("capability runtime: Handler.Initialize and one of Handler.Execute or Handler.ExecuteWithRequest are required")
 	}
 
 	if socketPath := os.Getenv("NEURON_CAPABILITY_RUNTIME_SOCKET"); socketPath != "" {
@@ -145,14 +156,73 @@ func serveStdio(h Handler) error {
 		return err
 	}
 
-	ctx := context.Background()
-	result, err := h.Execute(ctx, req.Params)
-	if err != nil {
-		writeStdioError(err.Error())
+	resp := executeStdio(context.Background(), h, req)
+	if resp.Error != "" {
+		writeStdioError(resp.Error)
 		return nil
 	}
 
-	return writeStdioOutput(result)
+	return writeStdioOutput(resp.Result)
+}
+
+// handlerOutcome is a normalized execution outcome. errText carries a
+// controlled failure from an outcome-aware handler; it is returned over the
+// transport rather than raised as a transport error.
+type handlerOutcome struct {
+	result  map[string]any
+	errText string
+	suspend *SuspendOutcome
+}
+
+// invokeHandler calls the configured execution entry point and normalizes its
+// outcome. ExecuteWithRequest supersedes Execute when present.
+func invokeHandler(ctx context.Context, h Handler, req ExecutionRequest) (handlerOutcome, error) {
+	if h.ExecuteWithRequest != nil {
+		result, err := h.ExecuteWithRequest(ctx, req)
+		if err != nil {
+			return handlerOutcome{}, err
+		}
+		if result == nil {
+			return handlerOutcome{}, nil
+		}
+		return handlerOutcome{
+			result:  result.Result,
+			errText: result.Error,
+			suspend: result.Suspend,
+		}, nil
+	}
+
+	result, err := h.Execute(ctx, req.Params)
+	if err != nil {
+		return handlerOutcome{}, err
+	}
+	return handlerOutcome{result: result}, nil
+}
+
+// validateSuspendOutcome rejects invalid or conflicting suspend outcomes
+// explicitly. A non-empty message describes the failure.
+func validateSuspendOutcome(outcome handlerOutcome) string {
+	if outcome.suspend == nil {
+		return ""
+	}
+	if len(outcome.result) != 0 || outcome.errText != "" {
+		return "unsupported_suspend_outcome: suspend must not be combined with a non-empty result or error"
+	}
+
+	switch outcome.suspend.WaitType {
+	case WaitTypeSignal:
+		if outcome.suspend.ExpectedSignal == "" {
+			return "unsupported_suspend_outcome: signal wait requires a non-empty expected_signal"
+		}
+	case WaitTypeTimer:
+		if outcome.suspend.DeadlineUnixMs <= 0 {
+			return "unsupported_suspend_outcome: timer wait requires deadline_unix_ms > 0"
+		}
+	default:
+		return "unsupported_suspend_outcome: wait_type must be \"signal\" or \"timer\""
+	}
+
+	return ""
 }
 
 // sdkServer is the internal gRPC server implementation that adapts the
@@ -161,10 +231,36 @@ type sdkServer struct {
 	v1.UnimplementedCapabilityRuntimeServiceServer
 	handler    Handler
 	onShutdown func()
+
+	mu       sync.RWMutex
+	features map[string]struct{}
 }
 
 func newGRPCServer(h Handler) *sdkServer {
 	return &sdkServer{handler: h}
+}
+
+// setFeatures records the features negotiated by the Initialize handshake. A
+// later Execute uses them to decide whether a suspend outcome is allowed.
+// Features are monotonic across repeated Initialize calls so a previously
+// advertised capability (such as suspend) is not revoked.
+func (s *sdkServer) setFeatures(features []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.features == nil {
+		s.features = make(map[string]struct{}, len(features))
+	}
+	for _, feature := range features {
+		s.features[feature] = struct{}{}
+	}
+}
+
+// supportsSuspend reports whether the runtime advertised the suspend feature.
+func (s *sdkServer) supportsSuspend() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.features[v1.SuspendFeature]
+	return ok
 }
 
 // Initialize handles the protocol negotiation handshake.
@@ -186,6 +282,8 @@ func (s *sdkServer) Initialize(ctx context.Context, req *v1.InitializeRequest) (
 		response.ProtocolVersion = capabilityrt.ProtocolV1
 	}
 
+	s.setFeatures(response.Features)
+
 	return response, nil
 }
 
@@ -196,17 +294,46 @@ func (s *sdkServer) Execute(ctx context.Context, req *v1.ExecuteRequest) (*v1.Ex
 		params[k] = fromProtoValue(v)
 	}
 
-	result, err := s.handler.Execute(ctx, params)
+	outcome, err := invokeHandler(ctx, s.handler, ExecutionRequest{
+		ExecutionID:        req.ExecutionId,
+		Params:             params,
+		TimeoutMs:          req.TimeoutMs,
+		CorrelationID:      req.CorrelationId,
+		AttemptID:          req.AttemptId,
+		LogicalOperationID: req.LogicalOperationId,
+		Resume:             resumeInputFromProto(req.Resume),
+	})
 	if err != nil {
 		return &v1.ExecuteResponse{
 			Error: err.Error(),
 		}, nil
 	}
 
-	resp := &v1.ExecuteResponse{
-		Result: make(map[string]*v1.Value, len(result)),
+	if msg := validateSuspendOutcome(outcome); msg != "" {
+		return &v1.ExecuteResponse{Error: msg}, nil
 	}
-	for k, v := range result {
+
+	if outcome.errText != "" {
+		return &v1.ExecuteResponse{
+			Error: outcome.errText,
+		}, nil
+	}
+
+	if outcome.suspend != nil {
+		if !s.supportsSuspend() {
+			return &v1.ExecuteResponse{
+				Error: "unsupported_suspend_outcome: capability runtime did not advertise the \"suspend\" feature during Initialize",
+			}, nil
+		}
+		return &v1.ExecuteResponse{
+			Suspend: suspendOutcomeToProto(outcome.suspend),
+		}, nil
+	}
+
+	resp := &v1.ExecuteResponse{
+		Result: make(map[string]*v1.Value, len(outcome.result)),
+	}
+	for k, v := range outcome.result {
 		resp.Result[k] = toProtoValue(v)
 	}
 

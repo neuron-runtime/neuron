@@ -20,4 +20,22 @@ public sealed class ExecuteContext
     /// Links this execution to a parent execution or request chain.
     /// </summary>
     public string CorrelationId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The per-invocation attempt identifier. A resumed invocation receives a
+    /// new attempt ID.
+    /// </summary>
+    public string AttemptId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// A stable identifier for the logical operation. It is preserved across a
+    /// suspend and its resume.
+    /// </summary>
+    public string LogicalOperationId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The resume input when this invocation resumes a suspended capability, or
+    /// <c>null</c> for a first invocation.
+    /// </summary>
+    public ResumeInput? Resume { get; init; }
 }

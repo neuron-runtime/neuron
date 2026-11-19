@@ -103,7 +103,7 @@ func TestCapabilityConfigParamsVariableExposesSnakeCaseKeys(t *testing.T) {
 	}
 	go func() { _ = engineInstance.Run(ctx) }()
 
-	execution, err := exec.NewExecution(p0ConfigBlueprint(t), core.NewID("corr_"), "inst_1")
+	execution, err := exec.NewExecution(p0ConfigBlueprint(t), core.NewID("corr_"), "inst_1", "", "", "", "")
 	if err != nil {
 		t.Fatalf("new execution: %v", err)
 	}

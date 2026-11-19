@@ -25,20 +25,54 @@ import (
 // with a default rather than an author's per-capability setting.
 const DefaultDetachedDrainTimeout = 30 * time.Second
 
+// DefaultDispatchLease is how long an engine's claim on a dispatch intent lasts
+// before another worker may take the work over. It is added to the capability's
+// own timeout so a claim outlives the invocation it guards; a capability with no
+// declared timeout relies on the base lease alone. Claims are not renewed, so a
+// capability that runs longer than its lease can be dispatched a second time;
+// that is the documented cost of not renewing, and at-least-once dispatch
+// tolerates it.
+const DefaultDispatchLease = 30 * time.Second
+
+// dispatchCompleteTimeout bounds the bookkeeping call that releases an intent
+// after a capability finishes. It is short because completion is a single small
+// write, and it is deliberately detached from the invocation context so a
+// cancellation does not leave a claim behind.
+const dispatchCompleteTimeout = 5 * time.Second
+
 type CapabilityRuntimeEngine struct {
 	bus        contracts.EventBus
 	registry   contracts.CapabilityRuntimeRegistry
 	executions contracts.ExecutionRepository
 	scopes     *exec.ScopeRegistry
+	committer  contracts.TransitionCommitter
 	ready      event.Subscription
 	semaphore  chan struct{}
+
+	// owner identifies this engine when it claims dispatch intents. It is stable
+	// for the engine's lifetime so a worker cannot release or complete a claim
+	// another engine owns.
+	owner string
 
 	// detachedDrainTimeout is how much of it a detached task may spend running
 	// after the instance stops accepting new work.
 	detachedDrainTimeout time.Duration
 }
 
-func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.CapabilityRuntimeRegistry, executions contracts.ExecutionRepository, scopes *exec.ScopeRegistry, maxConcurrency int, detachedDrainTimeout time.Duration) (*CapabilityRuntimeEngine, error) {
+// Option configures a CapabilityRuntimeEngine at construction time.
+type Option func(*CapabilityRuntimeEngine)
+
+// WithTransitionCommitter makes the engine claim dispatch intents before
+// invoking a capability, so the same ready work is not executed twice. It is
+// supplied only in durable mode; without it the engine invokes whatever
+// CapabilityReady event it observes, exactly as before.
+func WithTransitionCommitter(committer contracts.TransitionCommitter) Option {
+	return func(e *CapabilityRuntimeEngine) {
+		e.committer = committer
+	}
+}
+
+func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.CapabilityRuntimeRegistry, executions contracts.ExecutionRepository, scopes *exec.ScopeRegistry, maxConcurrency int, detachedDrainTimeout time.Duration, opts ...Option) (*CapabilityRuntimeEngine, error) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 8
 	}
@@ -48,11 +82,24 @@ func NewCapabilityRuntimeEngine(bus contracts.EventBus, registry contracts.Capab
 	if scopes == nil {
 		return nil, fmt.Errorf("execution scope registry is required")
 	}
+	e := &CapabilityRuntimeEngine{owner: string(core.NewID("engine_"))}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(e)
+		}
+	}
 	ready, err := bus.Subscribe(event.CapabilityReady, maxConcurrency*4)
 	if err != nil {
 		return nil, err
 	}
-	return &CapabilityRuntimeEngine{bus: bus, registry: registry, executions: executions, scopes: scopes, ready: ready, semaphore: make(chan struct{}, maxConcurrency), detachedDrainTimeout: detachedDrainTimeout}, nil
+	e.bus = bus
+	e.registry = registry
+	e.executions = executions
+	e.scopes = scopes
+	e.ready = ready
+	e.semaphore = make(chan struct{}, maxConcurrency)
+	e.detachedDrainTimeout = detachedDrainTimeout
+	return e, nil
 }
 
 func (e *CapabilityRuntimeEngine) Run(ctx context.Context) error {
@@ -119,6 +166,23 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		e.publishFailure(ctx, execution, capabilityID, err)
 		return
 	}
+
+	// In durable mode the ready capability is represented by a persisted
+	// dispatch intent. Claiming it is what makes duplicate CapabilityReady
+	// deliveries idempotent: only the worker that wins the claim invokes the
+	// capability, and a duplicate that loses the claim does nothing. The claim
+	// is released once this worker is done with the capability, whether it ran
+	// it, detached it, or failed to prepare it.
+	releaseClaim, claimed, err := e.claimDispatch(ctx, execution, capabilityID, policy)
+	if err != nil {
+		e.publishFailure(ctx, execution, capabilityID, err)
+		return
+	}
+	if !claimed {
+		return
+	}
+	defer releaseClaim()
+
 	if policy.Detached() {
 		e.detachCapability(ctx, execution, capabilityID)
 		return
@@ -197,6 +261,45 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		return
 	}
 	_ = e.bus.Publish(ctx, event.New(event.CapabilityCompleted, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityCompletedPayload{Result: output}))
+}
+
+// claimDispatch takes ownership of the persisted dispatch intent for one ready
+// capability and returns the function that releases it once this worker is done.
+//
+// The intent's identity is derived from the execution, the capability, and the
+// execution's attempt ID, so replaying the same readiness maps to the same
+// intent rather than a second one. The lease is the base lease plus the
+// capability's own timeout, so a claim outlives the invocation it guards.
+//
+// It reports claimed=false when the intent is missing, unready, or already held
+// under a live lease; the caller must then do nothing, because another worker
+// owns the work. Without a committer it reports claimed=true and a no-op
+// release, which is how the non-durable modes keep their existing behavior.
+func (e *CapabilityRuntimeEngine) claimDispatch(ctx context.Context, execution *exec.Execution, capabilityID core.ID, policy invocation) (func(), bool, error) {
+	if e.committer == nil {
+		return func() {}, true, nil
+	}
+	intent := exec.NewDispatchIntent(execution.ID, capabilityID, execution.AttemptID)
+	lease := DefaultDispatchLease
+	if policy.timeout > 0 {
+		lease += policy.timeout
+	}
+	if _, won, err := e.committer.ClaimDispatchIntent(ctx, intent, e.owner, lease); err != nil {
+		return nil, false, fmt.Errorf("claim dispatch intent for capability %s: %w", capabilityID, err)
+	} else if !won {
+		return nil, false, nil
+	}
+	return func() {
+		completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dispatchCompleteTimeout)
+		defer cancel()
+		if err := e.committer.CompleteDispatchIntent(completeCtx, execution.ID, capabilityID, execution.AttemptID, e.owner); err != nil {
+			slog.Error("complete dispatch intent",
+				slog.String("execution_id", string(execution.ID)),
+				slog.String("capability_id", string(capabilityID)),
+				slog.String("error", err.Error()),
+			)
+		}
+	}, true, nil
 }
 
 // detachCapability announces that a capability's work is handed off to a separate

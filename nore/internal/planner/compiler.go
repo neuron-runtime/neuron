@@ -59,6 +59,7 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 	incoming := make(map[shared.ID]int, len(capabilities))
 	predecessors := make(map[shared.ID][]types.ExecutionPredecessor, len(capabilities))
 	joinPolicies := make(map[shared.ID]shared.JoinPolicy, len(capabilities))
+	targetPaths := make(map[shared.ID]map[string]shared.ID, len(capabilities))
 	for id, capability := range capabilities {
 		compiledConfig, err := c.expressions.CompileCapabilityConfigurations(capability.CapabilityConfigurations)
 		if err != nil {
@@ -113,6 +114,22 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		if err != nil {
 			return nil, err
 		}
+		// R3-4: Two bindings feeding the same capability must not write the same
+		// target path. Fan-in merges predecessor outputs before dispatch, but a
+		// shared path would make the merged value depend on binding order.
+		paths := targetPaths[binding.To.CapabilityID]
+		if paths == nil {
+			paths = make(map[string]shared.ID)
+			targetPaths[binding.To.CapabilityID] = paths
+		}
+		for _, mapping := range transition.Mappings {
+			if existingBindingID, exists := paths[mapping.TargetPath]; exists {
+				return nil, fmt.Errorf(
+					"capability %s has conflicting target path %q between bindings %s and %s",
+					binding.To.CapabilityID, mapping.TargetPath, existingBindingID, binding.Metadata.ID)
+			}
+			paths[mapping.TargetPath] = binding.Metadata.ID
+		}
 		node := nodes[binding.From.CapabilityID]
 		node.Next = append(node.Next, transition)
 		nodes[binding.From.CapabilityID] = node
@@ -134,19 +151,26 @@ func (c *Compiler) Compile(assembly shared.Assembly) (*types.ExecutionBlueprint,
 		nodes[capabilityID] = node
 	}
 
-	// R3-16: A detached capability must not participate in a fan-in (multiple
-	// incoming bindings). Detached branches run in a separate execution that the
-	// parent does not wait for; a join spanning detached and non-detached work
-	// would create ambiguous ownership. Reject such configurations at build time.
-	for capabilityID, count := range incoming {
-		if count > 1 {
-			n, ex := nodes[capabilityID]
-			if ex && n.Capability.RuntimeConfig != nil && n.Capability.RuntimeConfig.Execution != nil && n.Capability.RuntimeConfig.Execution.Mode == shared.RuntimeExecutionModeDetach {
+	// R3-16: A detached branch may not participate in a join (fan-in).
+	// A detached branch runs in a separate execution that the parent never waits for;
+	// if a predecessor from a detached scope feeds into a join (multiple incoming bindings),
+	// the join can never become satisfied. Linear chains with a single predecessor from a
+	// detached scope are allowed — the downstream capability runs inside the detached
+	// scope and is handled by buildDetachedScopes.
+	for _, binding := range assembly.Specification.Bindings {
+		fromCapability, fromExists := capabilities[binding.From.CapabilityID]
+		if !fromExists {
+			continue // already errored above
+		}
+		if fromCapability.RuntimeConfig != nil && fromCapability.RuntimeConfig.Execution != nil && fromCapability.RuntimeConfig.Execution.Mode == shared.RuntimeExecutionModeDetach {
+			// Only reject when the target is a join point (multiple incoming bindings),
+			// not for linear chains where the downstream capability has a single predecessor.
+			if incoming[binding.To.CapabilityID] > 1 {
 				return nil, fmt.Errorf(
-					"capability %s is detached and has %d incoming bindings (fan-in); "+
+					"capability %s has a predecessor %s from a detached scope; "+
 						"a detached branch may not participate in a join; "+
 						"use an aggregation capability or restructure the graph",
-					capabilityID, count)
+					binding.To.CapabilityID, binding.From.CapabilityID)
 			}
 		}
 	}
@@ -274,11 +298,15 @@ func hasPort(ports []shared.Port, name string) bool {
 }
 
 func validateAcyclic(nodes map[shared.ID]types.ExecutionNode, incoming map[shared.ID]int) error {
-	counts := make(map[shared.ID]int, len(incoming))
+	// Use explicit predecessor edges for in-degree counting.
+	// len(nodes[id].Predecessors) tracks the number of incoming bindings
+	// compiled into the graph, providing a predecessor-aware check.
+	counts := make(map[shared.ID]int, len(nodes))
 	queue := make([]shared.ID, 0, len(nodes))
-	for id, count := range incoming {
-		counts[id] = count
-		if count == 0 {
+	for id := range nodes {
+		cnt := len(nodes[id].Predecessors)
+		counts[id] = cnt
+		if cnt == 0 {
 			queue = append(queue, id)
 		}
 	}
@@ -302,6 +330,10 @@ func validateAcyclic(nodes map[shared.ID]types.ExecutionNode, incoming map[share
 }
 
 func validateReachability(nodes map[shared.ID]types.ExecutionNode, entries []shared.ID) error {
+	// Reason over explicit predecessor edges, not just Next edges.
+	// The BFS explores both forward (Next transitions) and backward
+	// (explicit predecessor bindings) from entry points to determine
+	// reachability across the full graph structure.
 	visited := make(map[shared.ID]bool, len(nodes))
 	queue := append([]shared.ID(nil), entries...)
 	for len(queue) > 0 {
@@ -313,6 +345,9 @@ func validateReachability(nodes map[shared.ID]types.ExecutionNode, entries []sha
 		visited[current] = true
 		for _, transition := range nodes[current].Next {
 			queue = append(queue, transition.TargetCapabilityID)
+		}
+		for _, pred := range nodes[current].Predecessors {
+			queue = append(queue, pred.CapabilityID)
 		}
 	}
 	if len(visited) != len(nodes) {

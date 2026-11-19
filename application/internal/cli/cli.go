@@ -51,6 +51,7 @@ func init() {
 	RootCmd.PersistentFlags().String("remote", "", "Remote Neuron runtime endpoint (e.g., https://api.neuron.example.com)")
 	RootCmd.PersistentFlags().String("nore-path", "", "Path to the Neuron runtime binary")
 	RootCmd.PersistentFlags().Bool("force", false, "Force replacement (clear existing state before the command acts)")
+	RootCmd.PersistentFlags().String("durability", "", "Execution durability mode: none, history, or durable (overrides runtime.execution.durability)")
 
 	// --port applies to the project runtime that bare `neuron` starts. It is a
 	// local flag so `neuron run --port` keeps its own endpoint-override
@@ -118,6 +119,9 @@ func loadConfig(cmd *cobra.Command) (config.Config, error) {
 	}
 	if path, _ := cmd.Flags().GetString("nore-path"); path != "" {
 		cli["daemon.norePath"] = path
+	}
+	if durability, _ := cmd.Flags().GetString("durability"); durability != "" {
+		cli["runtime.execution.durability"] = durability
 	}
 	// --port is defined only on the root command (bare `neuron`); subcommands
 	// such as `run` define their own --port with endpoint-override semantics.
@@ -212,6 +216,18 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	}
 	if cfg.Storage.DSN != "" {
 		noreArgs = append(noreArgs, "--storage-dsn", cfg.Storage.DSN)
+	}
+
+	// Add durability mode (deployment-level; project config rejects it)
+	durability := cfg.Runtime.Execution.Durability
+	if durability != "" {
+		noreArgs = append(noreArgs, "--durability", durability)
+	}
+	if cfg.Runtime.Execution.Retention.MaxAge != "" {
+		noreArgs = append(noreArgs, "--retention-max-age", cfg.Runtime.Execution.Retention.MaxAge)
+	}
+	if cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion > 0 {
+		noreArgs = append(noreArgs, "--retention-max-artifacts-per-version", fmt.Sprintf("%d", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion))
 	}
 	// The built-in capability policy travels with the runtime: it states what
 	// the built-in capability runtimes may reach, and the runtime enforces it.

@@ -11,12 +11,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/neuron-runtime/neuron/shared/types/apitoken"
 	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
+	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
 const (
@@ -351,6 +354,12 @@ type runtimeSession struct {
 
 	cmd  *exec.Cmd
 	done chan error
+
+	// stopOnce makes shutdown idempotent. The background goroutine sends the
+	// single buffered value on done exactly once; without this guard a second
+	// stop call would send a signal to an exited process and then block forever
+	// waiting for a value that the first call already consumed.
+	stopOnce sync.Once
 }
 
 // startRuntime launches bare `neuron` in the project and waits until its
@@ -424,7 +433,27 @@ func startRuntime(t *testing.T, dir string, args ...string) *runtimeSession {
 }
 
 func (s *runtimeSession) stop() {
+	s.stopOnce.Do(func() { s.shutdown(false) })
+}
+
+// kill terminates the session with SIGKILL instead of the graceful SIGINT that
+// stop sends, simulating a process crash. The runtimes the tests start share one
+// process group, so the CLI and the runtime it spawned die together.
+func (s *runtimeSession) kill() {
+	s.stopOnce.Do(func() { s.shutdown(true) })
+}
+
+// shutdown terminates the session once. A graceful shutdown interrupts the
+// whole group and escalates to SIGKILL after the timeout; an abrupt shutdown
+// sends SIGKILL immediately. Both wait for the process to be reaped, and neither
+// can run twice because the callers go through stopOnce.
+func (s *runtimeSession) shutdown(abrupt bool) {
 	if s.cmd.Process == nil {
+		return
+	}
+	if abrupt {
+		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		<-s.done
 		return
 	}
 	// Interrupt the whole group: the CLI and the runtime child it started.
@@ -458,6 +487,62 @@ func health(record projectruntime.Record) error {
 		return fmt.Errorf("health status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// listExecutions reads the execution collection the runtime serves for the
+// Assembly selected by selector (an instance key or Assembly name). It uses the
+// same public endpoint a client uses, so a test observes recovered state instead
+// of inferring it from a log line or from the fact that a process started.
+func listExecutions(t *testing.T, record projectruntime.Record, selector string) []protocol.ExecutionItem {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, record.Endpoint()+protocol.InstanceExecutions(selector), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(apitoken.AuthorizationHeader, apitoken.Header(record.Token))
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("list executions for %s: %v", selector, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		t.Fatalf("read executions for %s: %v", selector, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list executions for %s: status %d: %s", selector, resp.StatusCode, body)
+	}
+
+	var payload struct {
+		Data []protocol.ExecutionItem `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode executions for %s: %v\nbody: %s", selector, err, body)
+	}
+	return payload.Data
+}
+
+// waitForExecutions polls the runtime until done reports true for the execution
+// collection or the timeout elapses, returning the last observed collection.
+func waitForExecutions(t *testing.T, record projectruntime.Record, selector string, timeout time.Duration, done func([]protocol.ExecutionItem) bool) []protocol.ExecutionItem {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var last []protocol.ExecutionItem
+	for {
+		last = listExecutions(t, record, selector)
+		if done(last) {
+			return last
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("executions for %s did not reach the expected state within %s; last = %#v", selector, timeout, last)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // decodeSingleJSON decodes exactly one JSON value from stdout and rejects any

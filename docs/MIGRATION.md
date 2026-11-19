@@ -175,8 +175,10 @@ Builds are immutable. Each build writes
   added to the hash input. A manifest built before that change hashes
   differently; rebuild to produce and register the current artifact.
 - Registration is keyed by `(assemblyID, version)`. Registering the same version
-  replaces its previous artifact and prunes the old content hash. A build that
-  pins an older hash must be rebuilt, otherwise `neuron run` cannot resolve it.
+  moves the version index to the new artifact but retains the old content hash,
+  so executions pinned to it remain recoverable. Old artifacts are removed only
+  by explicit deletion or configured startup garbage collection
+  (`runtime.execution.retention`), never by re-registration.
 - Multiple immutable builds of one project can coexist; the current pointer
   selects the active one.
 

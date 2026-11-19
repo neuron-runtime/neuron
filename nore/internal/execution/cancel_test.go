@@ -12,7 +12,7 @@ import (
 
 func newScopedExecution(t *testing.T, instanceID shared.ID) *Execution {
 	t.Helper()
-	exec, err := NewExecution(blueprintFor("cap_a", "cap_b"), shared.NewID("request_"), instanceID)
+	exec, err := NewExecution(blueprintFor("cap_a", "cap_b"), shared.NewID("request_"), instanceID, "", "", "", "")
 	if err != nil {
 		t.Fatalf("NewExecution: %v", err)
 	}
@@ -295,5 +295,108 @@ func TestCancelledExecutionRoundTripsThroughSnapshot(t *testing.T) {
 	}
 	if got := restored.InFlight(); got != 0 {
 		t.Errorf("restored InFlight() = %d, want 0", got)
+	}
+}
+
+// Cancellation ends the wait but keeps why it existed. The wait type, deadline,
+// expected signal and reason are diagnostics that must survive the terminal
+// transition; clearing them would make a cancelled wait indistinguishable from
+// a capability that never waited at all.
+func TestMarkCancelledRetainsWaitMetadata(t *testing.T) {
+	exec := newScopedExecution(t, "inst_1")
+	deadline := time.Now().UTC().Add(time.Hour)
+	spec := WaitSpec{
+		Type:           WaitTypeSignal,
+		Reason:         "waiting for approval",
+		CorrelationKey: "corr-key-1",
+		ExpectedSignal: "approved",
+		WaitUntil:      &deadline,
+		PayloadSchema:  `{"type":"object"}`,
+		DeadlinePolicy: WaitDeadlinePolicyCancel,
+	}
+	if err := exec.EnterWait("cap_a", spec); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+
+	if !exec.MarkCancelled(errors.New("operator stop")) {
+		t.Fatal("MarkCancelled() = false, want true")
+	}
+
+	state := exec.CapabilityState("cap_a")
+	if state.Status != CapabilityCancelled {
+		t.Fatalf("status = %s, want %s", state.Status, CapabilityCancelled)
+	}
+	if state.WaitType != WaitTypeSignal {
+		t.Errorf("wait type = %q, want %q", state.WaitType, WaitTypeSignal)
+	}
+	if state.WaitUntil == nil || !state.WaitUntil.Equal(deadline) {
+		t.Errorf("wait until = %v, want %v", state.WaitUntil, deadline)
+	}
+	if state.ExpectedSignal != "approved" {
+		t.Errorf("expected signal = %q, want approved", state.ExpectedSignal)
+	}
+	if state.WaitReason != "waiting for approval" {
+		t.Errorf("wait reason = %q, want the wait reason", state.WaitReason)
+	}
+	if state.CorrelationKey != "corr-key-1" {
+		t.Errorf("correlation key = %q, want corr-key-1", state.CorrelationKey)
+	}
+	if state.PayloadSchema != spec.PayloadSchema {
+		t.Errorf("payload schema = %q, want %q", state.PayloadSchema, spec.PayloadSchema)
+	}
+	if state.WaitDeadlinePolicy != WaitDeadlinePolicyCancel {
+		t.Errorf("deadline policy = %q, want %q", state.WaitDeadlinePolicy, WaitDeadlinePolicyCancel)
+	}
+}
+
+// A retry wait is also a wait. Cancelling it must make the capability terminal
+// while keeping NextAttemptAt so a reader can see when the abandoned retry was
+// due to resume.
+func TestMarkCancelledRetainsRetryWaitMetadata(t *testing.T) {
+	exec := newScopedExecution(t, "inst_1")
+	next := time.Now().UTC().Add(time.Minute)
+	if err := exec.BeginRetryWait("cap_b", next); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+
+	if !exec.MarkCancelled(errors.New("operator stop")) {
+		t.Fatal("MarkCancelled() = false, want true")
+	}
+
+	state := exec.CapabilityState("cap_b")
+	if state.Status != CapabilityCancelled {
+		t.Fatalf("status = %s, want %s", state.Status, CapabilityCancelled)
+	}
+	if state.NextAttemptAt == nil || !state.NextAttemptAt.Equal(next) {
+		t.Errorf("next attempt = %v, want %v", state.NextAttemptAt, next)
+	}
+}
+
+// A cancelled join must not keep the inputs other predecessors already
+// buffered: keeping them would let a later completion satisfy a join whose
+// execution is already over. Cancellation drops the whole join state.
+func TestMarkCancelledDiscardsBufferedJoinInputs(t *testing.T) {
+	bp := blueprintForJoin(capC1)
+	exec, err := NewExecution(bp, shared.NewID("corr"), shared.NewID("inst"), "", "", "", "")
+	if err != nil {
+		t.Fatalf("NewExecution: %v", err)
+	}
+	if err := exec.Start(map[string]any{}, 2); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ready, _, err := exec.RecordJoinContribution(capC1, "a-c1", map[string]any{"x": "from-a"})
+	if err != nil || ready {
+		t.Fatalf("RecordJoinContribution = (%v, %v), want (false, nil) while join is incomplete", ready, err)
+	}
+	before := exec.JoinState(capC1)
+	if before == nil || len(before.PredecessorInputs) == 0 {
+		t.Fatal("test setup: join input was not buffered")
+	}
+
+	if !exec.MarkCancelled(errors.New("operator stop")) {
+		t.Fatal("MarkCancelled() = false, want true")
+	}
+	if after := exec.JoinState(capC1); after != nil {
+		t.Fatalf("join state survived cancellation: %+v", after)
 	}
 }

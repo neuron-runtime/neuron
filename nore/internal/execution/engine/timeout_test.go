@@ -154,7 +154,7 @@ func TestCapabilityTimeoutIsAFailureNotACancellation(t *testing.T) {
 			}
 			go func() { _ = engineInstance.Run(ctx) }()
 
-			execution, err := exec.NewExecution(timeoutBlueprint("slow", tc.timeout), core.NewID("corr_"), "inst_1")
+			execution, err := exec.NewExecution(timeoutBlueprint("slow", tc.timeout), core.NewID("corr_"), "inst_1", "", "", "", "")
 			if err != nil {
 				t.Fatalf("NewExecution: %v", err)
 			}

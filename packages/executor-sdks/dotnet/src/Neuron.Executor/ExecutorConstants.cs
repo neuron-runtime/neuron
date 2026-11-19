@@ -14,6 +14,27 @@ public static class ExecutorConstants
     /// <summary>Legacy stdin/stdout JSON protocol (not implemented by this SDK).</summary>
     public const string ProtocolJSONV1 = "neuron/capability-runtime-v1-json";
 
+    /// <summary>
+    /// The InitializeResponse.features value an executor advertises to opt into
+    /// the additive suspend/resume extension.
+    /// </summary>
+    public const string SuspendFeature = "suspend";
+
+    /// <summary>A suspend wait that is resumed by a named signal.</summary>
+    public const string WaitTypeSignal = "signal";
+
+    /// <summary>A suspend wait that is resumed by a timer deadline.</summary>
+    public const string WaitTypeTimer = "timer";
+
+    /// <summary>A resume caused by a signal delivery.</summary>
+    public const string ResumeCauseSignal = "signal";
+
+    /// <summary>A resume caused by a timer firing.</summary>
+    public const string ResumeCauseTimer = "timer";
+
+    /// <summary>A resume caused by the wait deadline policy.</summary>
+    public const string ResumeCauseDeadline = "deadline";
+
     /// <summary>Declares the protocol version the runtime expects.</summary>
     public const string EnvProtocol = "NEURON_CAPABILITY_RUNTIME_PROTOCOL";
 

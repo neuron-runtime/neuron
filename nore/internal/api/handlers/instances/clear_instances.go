@@ -8,8 +8,13 @@ import (
 )
 
 func (h *Handler) ClearInstances(w http.ResponseWriter, r *http.Request) {
-	if err := h.instances.Clear(r.Context()); err != nil {
-		utils.ErrorJSON(w, http.StatusInternalServerError, err)
+	force, err := forceRequested(r)
+	if err != nil {
+		utils.ErrorJSON(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := h.instances.Clear(r.Context(), force); err != nil {
+		writeInstanceRemovalError(w, err)
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
