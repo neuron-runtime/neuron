@@ -716,12 +716,18 @@ Exit criteria:
 
 ### 5.1 Waiting state
 
-- [ ] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
+- [x] **R5-1** Add a defined `waiting` execution state with wait metadata: reason, correlation
       key, expected signal/timer, deadline, and the payload schema the execution expects.
-- [ ] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
+      Closed by `2b9dcaa` (typed wait model, `StatusWaiting` derivation, snapshot v3, with
+      `7e7e633` and `e7ab02e`); `scripts/script.sh` passed in full at `cf3e6a6`.
+- [x] **R5-2** Ensure waiting executions are excluded from in-flight/worker accounting. A wait
       must not look like a running capability.
-- [ ] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
+      Closed by `2b9dcaa` (waiting/retry capabilities excluded from in-flight/runnable
+      accounting); `scripts/script.sh` passed in full at `cf3e6a6`.
+- [x] **R5-3** Persist wait state transactionally with the transition that enters the wait, so a
       crash cannot produce a "waiting" execution with no wait record.
+      Closed by `7e7e633` (`SaveWaitTransition` commits snapshot, timer, delivery, and dispatch
+      effects in one transaction, with `059cae7`); `scripts/script.sh` passed in full at `cf3e6a6`.
 
 ### 5.2 Signals
 
@@ -760,22 +766,30 @@ Exit criteria:
       multi-day composition must not inherit a 30-minute capability timeout as its lifetime.
 - [ ] **R5-15** Add a wait deadline policy (fail, cancel, or continue) and an execution-level
       maximum lifetime.
-- [ ] **R5-16** On deadline expiry, apply the policy transactionally and record why.
+- [x] **R5-16** On deadline expiry, apply the policy transactionally and record why.
+      Closed by `2b9dcaa` (fail/cancel/continue deadline policy, committed via `7e7e633`);
+      `scripts/script.sh` passed in full at `cf3e6a6`.
 
 ### 5.5 Cancel and resume
 
 - [ ] **R5-17** Allow an authorized caller to cancel a waiting durable execution and to list
       suspended executions with their wait reason and deadline.
-- [ ] **R5-18** Define whether a cancelled wait can be resumed and how buffered state is handled.
+- [x] **R5-18** Define whether a cancelled wait can be resumed and how buffered state is handled.
       Prefer terminal cancellation unless a concrete need appears.
+      Closed by `ffa4d57` (terminal cancellation, wait metadata retained, join inputs discarded,
+      timers deleted); `scripts/script.sh` passed in full at `cf3e6a6`.
 
 ### 5.6 Capability protocol support
 
-- [ ] **R5-19** Define how a capability requests suspension. Prefer a general runtime primitive
+- [x] **R5-19** Define how a capability requests suspension. Prefer a general runtime primitive
       (the capability returns a "suspend" outcome with a correlation key and expected signal)
       over embedding approval logic in a built-in.
-- [ ] **R5-20** If the protocol is extended, version it and update every SDK README and the
+      Closed by `157ac66` (additive suspend outcome, with `18dc6a6` and `100d9dd` for SDK
+      conformance); `scripts/script.sh` passed in full at `cf3e6a6`.
+- [x] **R5-20** If the protocol is extended, version it and update every SDK README and the
       conformance tests. Keep it language-independent.
+      Closed by `157ac66` (versioned additive protocol, Go/.NET SDK updates and conformance, with
+      `18dc6a6` and `100d9dd`); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [ ] **R5-21** Ensure the engine still enforces cancellation and deadlines on suspended work.
 
 ### 5.7 Validation
@@ -795,14 +809,16 @@ Exit criteria:
 
 Append new findings here as checklist items.
 
-- [ ] **F5-1: CapabilityWaiting is never entered and wait fields have no writers.** Defect: the durable execution state never transitions into `CapabilityWaiting`; `StatusWaiting`, `WaitUntil`, and `DispatchState` have no writers, so the modeled wait state is unreachable in practice. Evidence: `nore/internal/execution/execution.go`. Impact: waiting cannot be represented, persisted, or excluded from scheduling as required by R5-1..R5-3, blocking durable suspension semantics. Intended fix: make wait transitions explicit and persist wait metadata atomically when entering/leaving a wait.
+- [x] **F5-1: CapabilityWaiting is never entered and wait fields have no writers.** Defect: the durable execution state never transitions into `CapabilityWaiting`; `StatusWaiting`, `WaitUntil`, and `DispatchState` have no writers, so the modeled wait state is unreachable in practice. Evidence: `nore/internal/execution/execution.go`. Impact: waiting cannot be represented, persisted, or excluded from scheduling as required by R5-1..R5-3, blocking durable suspension semantics. Intended fix: make wait transitions explicit and persist wait metadata atomically when entering/leaving a wait. Closed by `2b9dcaa` (typed wait model and mutators, with `7e7e633` and `059cae7` adding durable writers); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [ ] **F5-2: Signal handler mutates memory only and lacks delivery/authorization guarantees.** Defect: `SignalExecution` only mutates in-memory state, with no request body, delivery ID, payload handling, idempotency, persistence, or dispatch/resume side effects, and it does not verify execution ownership. Evidence: `nore/internal/api/handlers/instances/instance_executions.go:257-328`. Impact: signals can be lost across restart, duplicated, unauthenticated to the execution/wait, or applied without durable effect, violating R5-4..R5-8. Intended fix: define an authenticated, execution-bound signal API with delivery IDs, validation, transactional persistence-before-ack, and idempotent resume.
 - [ ] **F5-3: Timer records exist but are unconsumed with no due-time scheduling path.** Defect: timer KV/claim primitives exist but there are no consumers, no due-time index, and no poller to claim and fire due timers. Evidence: timer storage/claim primitives without consumers (no due-time index or poller). Impact: persisted `next_attempt_at`/wake times cannot drive recovery or resumption, so R5-10..R5-13 cannot be satisfied. Intended fix: add an indexed due-time claim/query and a timer poller that claims, fires, and resumes executions durably.
-- [ ] **F5-4: Recovery mishandles nil `WaitUntil` and miscounts in-flight waiting work.** Defect: recovery resumes `CapabilityWaiting` when `WaitUntil == nil || elapsed` and counts waiting in `inFlight` on the elapsed path. Evidence: `nore/internal/execution/execution.go:443-499`. Impact: indefinite waits can be resumed prematurely, and waiting work can occupy in-flight/worker accounting, violating R5-1, R5-2, and recovery expectations. Intended fix: treat nil deadlines as still waiting, keep waits out of in-flight accounting, and only resume when a concrete wait condition is satisfied.
+- [x] **F5-4: Recovery mishandles nil `WaitUntil` and miscounts in-flight waiting work.** Defect: recovery resumes `CapabilityWaiting` when `WaitUntil == nil || elapsed` and counts waiting in `inFlight` on the elapsed path. Evidence: `nore/internal/execution/execution.go:443-499`. Impact: indefinite waits can be resumed prematurely, and waiting work can occupy in-flight/worker accounting, violating R5-1, R5-2, and recovery expectations. Intended fix: treat nil deadlines as still waiting, keep waits out of in-flight accounting, and only resume when a concrete wait condition is satisfied. Closed by `059cae7` (nil-`WaitUntil` polling and in-flight handling, with `e7ab02e` for StatusWaiting recovery); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [ ] **F5-5: Retry backoff still blocks workers with in-memory sleeps.** Defect: retry handling still sleeps in the worker path instead of scheduling durable wake times for durable executions. Evidence: `nore/internal/execution/engine/invocation.go:132-139,232-244`. Impact: restarts lose pending retries, workers are occupied during backoff, and durable retry scheduling required by R5-10 is not achieved. Intended fix: persist retry wake times and let a durable timer/scheduler resume attempts without sleeping workers.
 - [ ] **F5-6: No execution maximum lifetime or wait-deadline policy.** Defect: there is no execution-level maximum lifetime and no wait-deadline policy to govern suspended executions. Evidence: absence of execution lifetime/wait-deadline policy in execution/runtime configuration and state handling (no enforced max lifetime or deadline policy). Impact: long-running or stuck waits have no bounded, policy-driven outcome, blocking R5-14..R5-16. Intended fix: introduce explicit execution lifetime and wait-deadline policies and apply expiry transitions transactionally with recorded reasons.
-- [ ] **F5-7: Capability runtime protocol lacks a suspension outcome.** Defect: the capability runtime protocol defines no suspend/wait outcome for a capability to request durable suspension. Evidence: `shared/protocol/capabilityruntime/v1/capability_runtime.proto` (no capability suspend outcome). Impact: capabilities cannot request waits through a general, language-independent protocol primitive, blocking R5-19/R5-20. Intended fix: version and extend the protocol with a suspension outcome carrying wait/correlation metadata and update all SDKs and conformance tests.
-- [ ] **F5-8: Pre-existing baseline failures block clean Phase 5 validation.** Defect: the baseline has unrelated build/format/acceptance failures that obscure Phase 5 verification. Evidence: four test packages do not compile because fakes lack `WithTimer`/`ClaimTimer` (`nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, `nore/cmd/nore/main_test.go`); acceptance `TestR4_24SigKill*` hangs due to non-idempotent stop; `gofmt -l` reports drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`. Impact: full validation cannot be treated as green, and regressions introduced by Phase 5 work are harder to isolate. Intended fix: repair the fake/store timer contract, make stop idempotent for the acceptance harness, and normalize formatting as separate, bounded fixes with recorded validation.
+- [x] **F5-7: Capability runtime protocol lacks a suspension outcome.** Defect: the capability runtime protocol defines no suspend/wait outcome for a capability to request durable suspension. Evidence: `shared/protocol/capabilityruntime/v1/capability_runtime.proto` (no capability suspend outcome). Impact: capabilities cannot request waits through a general, language-independent protocol primitive, blocking R5-19/R5-20. Intended fix: version and extend the protocol with a suspension outcome carrying wait/correlation metadata and update all SDKs and conformance tests. Closed by `157ac66` (additive suspend outcome, with `18dc6a6` and `100d9dd` for SDK conformance); `scripts/script.sh` passed in full at `cf3e6a6`.
+- [x] **F5-8: Pre-existing baseline failures block clean Phase 5 validation.** Defect: the baseline has unrelated build/format/acceptance failures that obscure Phase 5 verification. Evidence: four test packages do not compile because fakes lack `WithTimer`/`ClaimTimer` (`nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, `nore/cmd/nore/main_test.go`); acceptance `TestR4_24SigKill*` hangs due to non-idempotent stop; `gofmt -l` reports drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`. Impact: full validation cannot be treated as green, and regressions introduced by Phase 5 work are harder to isolate. Intended fix: repair the fake/store timer contract, make stop idempotent for the acceptance harness, and normalize formatting as separate, bounded fixes with recorded validation. Closed by `0a4b42d` (fake/timer contract and gofmt repairs, with `3d2e6d5` for the acceptance harness); `scripts/script.sh` passed in full at `cf3e6a6`.
+- [ ] **F5-9: Concurrent shared wait transitions can duplicate commit/publish.** Defect: ExecutionStore.Get returns a shared mutable *Execution; ResolveSignal and PollDueTimers mutate outside saveMu, while revision CAS validates against the same shared object. Two transitions can both pass a waiting precheck, commit, and publish CapabilityReady or inconsistent terminal events. Evidence: reviewer T-024c1b1-review (nore/internal/execution/store.go:99-108, :464-482, :993-994; scheduler/wait.go:251-253; scheduler/timer_poller.go:106-190). Impact: latent duplicate publish/inconsistent state before T-025/T-027 wiring. Intended fix: T-041 serialization or durable re-read with loser rejection before publication.
+- [ ] **F5-10: Scheduler/acceptance tests were observed flaky under full validation.** Defect: TestStoppedCapabilityPublishesCancellationNotFailure timed out and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reported more than one concurrent claim winner during review; both passed five times in isolation. Evidence: reviewer T-024c1b1-review. Impact: full validation signal is noisy. Intended fix: T-042 source-level synchronization repair, not retries or skips.
 
 ---
 

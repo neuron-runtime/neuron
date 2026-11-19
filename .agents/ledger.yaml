@@ -429,11 +429,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Recover|Wait|Retry|Timer'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... -run 'Recover|Wait|Retry|Timer'"
-    status: in_progress
+    status: done
     lease: null
-    evidence: ["Read-only verification `T-024c-recovery-check` confirmed `RecoverableDispatch` returns nil unless status is Running (execution.go:442-447) and `Scheduler.RecoverExecution` returns early for non-Running statuses (scheduler.go:139-141). At HEAD `039a782` the path was latent because wait mutators have no production callers yet.", "T-040a `e7ab02e`: execution/scheduler recovery fixed and tested; `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, `-race -count=20 -run 'Recover|Wait|Retry|Timer'`, build, gofmt, and diff-check pass.", "ADR 0003 architecture design approved with conditions; implementation sign-off pending."]
-    reports: ["T-040a"]
-    open_risks: ["T-040b instance recovery boundary remains.", "Reviewer/architect sign-off for e7ab02e remains.", "Concurrent recovery is subject to T-041 serialization.", "Recovery must not normalize a healthy non-due signal wait into a failure path."]
+    evidence: ["Read-only verification `T-024c-recovery-check` confirmed `RecoverableDispatch` returns nil unless status is Running (execution.go:442-447) and `Scheduler.RecoverExecution` returns early for non-Running statuses (scheduler.go:139-141). At HEAD `039a782` the path was latent because wait mutators have no production callers yet.", "T-040a `e7ab02e`: execution/scheduler recovery fixed and tested; `go test -count=1 ./internal/execution/... ./internal/instance/...`, `-race ./internal/execution/...`, `-race -count=20 -run 'Recover|Wait|Retry|Timer'`, build, gofmt, and diff-check pass. Reviewer T-040a-review approved with non-blocking follow-ups.", "T-040b `1a8051d`: instance-boundary recovery test passed focused, race, build, and full `scripts/script.sh`; reviewer T-040b-review approved with non-blocking follow-ups and architect T-041-design-close granted ADR 0003 D5.3 sign-off.", "Final focused `go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Recover|Wait|Retry|Timer'` and the same command with `-race` pass."]
+    reports: ["T-040a", "T-040a-review", "T-040b", "T-040b-review"]
+    open_risks: ["Concurrent recovery is subject to T-041 serialization.", "Live signal-delivery resume sequence remains gated on T-027.", "PostgreSQL parity remains unverified without NEURON_TEST_POSTGRES_DSN."]
 
   - id: T-040b
     objective: "Prove durable StatusWaiting recovery at the instance boundary"
@@ -450,11 +450,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recover|Wait|Timer'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/instance/..."
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
-    open_risks: ["Must use the existing scheduler recovery path, not duplicate it in instance."]
+    evidence: ["1a8051d added instance-boundary recovery tests; `cd nore && GOWORK=off go test -count=1 ./internal/instance/... -run 'Recover|Wait|Timer'`, `-race -count=1 ./internal/instance/...`, `go build ./...`, `gofmt -l`, and `git diff --check` pass.", "Reviewer T-040b-review approved with non-blocking follow-ups; architect T-041-design-close granted ADR 0003 D5.3 sign-off.", "Full `scripts/script.sh` passed after integration."]
+    reports: ["T-040b", "T-040b-review"]
+    open_risks: ["Non-due test does not yet distinguish a no-op recovery; reviewer suggested seeding a stale dispatch intent that recovery must clear.", "Live signal-delivery resume sequence remains gated on T-027.", "Concurrent recovery is T-041 scope."]
 
   - id: T-041
     objective: "Serialize shared in-memory wait transitions across signal, timer, and recovery drivers"
@@ -478,9 +478,9 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
     status: not_started
     lease: null
-    evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race."]
-    reports: []
-    open_risks: ["Architecture decision needed on per-execution serialization vs durable re-read before commit.", "Must coordinate with T-025/T-027 production wiring."]
+    evidence: ["Reviewer T-024c1b1-review found shared `*Execution` mutation outside `saveMu`, revision CAS against the same shared object, and unexercised signal-vs-poller race.", "ADR 0004 accepted Option A: add `Execution.RunTransition` serialization on the live object, retain CAS as cross-value backstop, wrap all five wait drivers plus the four Run-loop entry points, and keep publish outside the guard.", "Architect T-041-design-close resolved the Run-loop scope question: no residual second regime; helpers stay guard-oblivious and one Run-loop-vs-wait-driver regression is required.", "T-041 verification remains blocked by the reproduced T-042 dispatch-claim flake; scoped verification is required if T-042 is not fixed first."]
+    reports: ["0004-wait-transition-serialization"]
+    open_risks: ["Implementation must wrap all nine committers without nested guards.", "Must coordinate with T-025/T-027 production wiring.", "T-042 flake can obscure the prescribed race pattern."]
 
   - id: T-042
     objective: "Remove pre-existing flaky scheduler/acceptance test failures"
@@ -496,13 +496,14 @@ tasks:
       - "TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery no longer reports multiple winners"
       - "Flakes are fixed at the source, not retried or skipped"
     verification:
-      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'StoppedCapability|ConcurrentClaim'"
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'StoppedCapability'"
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution -run 'ConcurrentClaimDispatchIntentWinnerLoserAndRecovery'"
       - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance -run 'R4_24'"
-    status: not_started
+    status: blocked
     lease: null
-    evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation."]
-    reports: []
-    open_risks: ["May be timing/synchronization defects rather than test defects."]
+    evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation.", "T-042 reproduced the dispatch-claim flake: 2 failures in 100 `-race` runs at dispatch_intent_test.go:262; root cause is a 5ms lease at dispatch_intent_test.go:227 that expires before the loser reads the claim under race instrumentation.", "The stopped-capability flake did not reproduce in ~500 race runs; exact original failure output is unavailable. R4-24 acceptance, full execution tests, and build passed.", "The original lease omitted nore/internal/execution/dispatch_intent_test.go and the original verification pattern targeted the wrong package, so the reproduced defect could not be fixed."]
+    reports: ["T-042"]
+    open_risks: ["Resume only after the lease is extended to nore/internal/execution/dispatch_intent_test.go and the corrected execution-package verification command is authorized.", "The stopped-capability failure remains uncharacterized; do not change it speculatively."]
 
   - id: T-043
     objective: "Close wait-cancellation test and timer-prefix authority gaps"
