@@ -1024,8 +1024,9 @@ tasks:
     verification:
       - "Cross-check every changed TODO line against .agents/ledger.yaml, .agents/reports/phase5-implementation-plan.md, and cited code/tests"
       - "git diff -- todos/TODO.md && git diff --check"
-    status: needs_review
+    status: done
     lease: null
     evidence: ["TODO-AUDIT found no unchecked entry with full closure evidence after T-048/T-049 and found R5-20 checked without its required SDK README updates.", "CLOSURE-001 architect decision: keep R5-13 and R4-14 open pending T-030; reword F4-11/F5-3/F5-6 and keep them unchecked; reopen R5-20 pending T-026/T-031.", "Documenter changed only `todos/TODO.md`: F4-11 at line 699, R5-20 at lines 789-793, F5-3 at line 815, and F5-6 at line 818. No other checkbox changed.", "Independent reviewer PASS on all four acceptance criteria after verifying every cited source/test path and all task statuses; `git diff --check` clean.", "Full integration gate `scripts/script.sh` passed after T-054: all Go modules and TypeScript packages built and tested successfully.", "T-048 ledger scope corrected from nonexistent `executor_engine_test.go` to actual `suspend_test.go` during integration."]
+    commit: 4e92e35
     reports: [".agents/reports/T-054.md"]
     open_risks: ["Reviewer minor: F4-11 citation `execution.go:445-474` covers the doc comment/signature while implementation is at `:494-509`; behavior is still supported by the doc comment. Resolve precision in T-031.", "Reviewer minor: CLOSURE-001 rationale is recorded as ledger evidence but has no standalone ADR/report; add traceability in T-031.", "T-052 previously asserted R5-20 was correctly checked; T-054 supersedes that claim.", "PostgreSQL parity remains DSN-gated and cannot support any closure claim."]
