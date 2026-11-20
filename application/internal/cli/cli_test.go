@@ -201,3 +201,82 @@ func TestProjectRuntimeReceivesTheBuiltinPolicy(t *testing.T) {
 		t.Errorf("allowedHTTPHosts = %v, want [api.example.com]", policy.AllowedHTTPHosts)
 	}
 }
+
+// TestProjectRuntimeReceivesOperationalPolicy proves the second half of the
+// project-file denial contract: operational settings are refused there because
+// they belong to the deployment, but the global config is the deployment
+// surface that must actually reach the runtime. Without explicit forwarding,
+// the denial message would name a global config that the runtime never sees.
+func TestProjectRuntimeReceivesOperationalPolicy(t *testing.T) {
+	dir := t.TempDir()
+
+	// Point the global config at a temp file. os.UserConfigDir honours
+	// XDG_CONFIG_HOME, so the CLI resolves this path without a new flag.
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	globalDir := filepath.Join(dir, "neuron")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("create the global config directory: %v", err)
+	}
+	globalConfig := `runtime:
+  execution:
+    waitDeadlinePolicy: cancel
+    maxLifetime: 24h
+    timerPoll:
+      interval: 3s
+      batchSize: 64
+`
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte(globalConfig), 0o644); err != nil {
+		t.Fatalf("write the global configuration: %v", err)
+	}
+
+	argsFile := filepath.Join(dir, "nore-args.txt")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\" >> " + argsFile + "; done\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write the project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("bare `neuron`: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read the runtime arguments: %v", err)
+	}
+	args := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for _, want := range [][2]string{
+		{"--wait-deadline-policy", "cancel"},
+		{"--execution-max-lifetime", "24h"},
+		{"--timer-poll-interval", "3s"},
+		{"--timer-poll-batch-size", "64"},
+	} {
+		found := false
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == want[0] && args[i+1] == want[1] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("the runtime was not started with %s %s: %v", want[0], want[1], args)
+		}
+	}
+}

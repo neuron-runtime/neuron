@@ -229,6 +229,24 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	if cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion > 0 {
 		noreArgs = append(noreArgs, "--retention-max-artifacts-per-version", fmt.Sprintf("%d", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion))
 	}
+
+	// Operational wait/timer policy is deployment-level: the project file
+	// rejects it, so the effective values come from global config, the
+	// environment, or compiled defaults. Forward what Load validated so the
+	// runtime enforces the same policy Neuron resolved.
+	if policy := cfg.Runtime.Execution.WaitDeadlinePolicy; policy != "" {
+		noreArgs = append(noreArgs, "--wait-deadline-policy", policy)
+	}
+	if lifetime := cfg.Runtime.Execution.MaxLifetime; lifetime != "" {
+		noreArgs = append(noreArgs, "--execution-max-lifetime", lifetime)
+	}
+	if interval := cfg.Runtime.Execution.TimerPoll.Interval; interval != "" {
+		noreArgs = append(noreArgs, "--timer-poll-interval", interval)
+	}
+	if batchSize := cfg.Runtime.Execution.TimerPoll.BatchSize; batchSize > 0 {
+		noreArgs = append(noreArgs, "--timer-poll-batch-size", fmt.Sprintf("%d", batchSize))
+	}
+
 	// The built-in capability policy travels with the runtime: it states what
 	// the built-in capability runtimes may reach, and the runtime enforces it.
 	policy, err := cfg.BuiltinPolicy()

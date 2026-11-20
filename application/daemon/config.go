@@ -87,6 +87,22 @@ func ConfigFromEffective(cfg config.Config) Config {
 		c.Args = append(c.Args, "--durability", cfg.Runtime.Execution.Durability)
 	}
 
+	// The project file rejects operational wait/timer policy, so the daemon
+	// must receive the values Load resolved from global config or the
+	// environment; otherwise only the runtime's own environment is consulted.
+	if policy := cfg.Runtime.Execution.WaitDeadlinePolicy; policy != "" {
+		c.Args = append(c.Args, "--wait-deadline-policy", policy)
+	}
+	if lifetime := cfg.Runtime.Execution.MaxLifetime; lifetime != "" {
+		c.Args = append(c.Args, "--execution-max-lifetime", lifetime)
+	}
+	if interval := cfg.Runtime.Execution.TimerPoll.Interval; interval != "" {
+		c.Args = append(c.Args, "--timer-poll-interval", interval)
+	}
+	if batchSize := cfg.Runtime.Execution.TimerPoll.BatchSize; batchSize > 0 {
+		c.Args = append(c.Args, "--timer-poll-batch-size", strconv.Itoa(batchSize))
+	}
+
 	if cfg.Daemon.PIDFile != "" {
 		c.PIDFile = cfg.Daemon.PIDFile
 	}

@@ -159,21 +159,33 @@ func TestOperationalPolicyInvalidValuesFailWithActionableMessages(t *testing.T) 
 }
 
 func TestProjectFileRejectsOperationalPolicy(t *testing.T) {
+	// A denial message is part of the public configuration contract: it must
+	// name only authoring surfaces that actually reach the runtime. The `neuron`
+	// CLI has no operational-policy flags — only `nore` does — so advertising
+	// `--flag` forms here would send users to a nonexistent surface.
 	cases := map[string]struct {
 		content string
 		path    string
+		env     string
+		bogus   string
 	}{
 		"wait deadline policy": {
 			content: "runtime:\n  execution:\n    waitDeadlinePolicy: continue\n",
 			path:    "runtime.execution.waitDeadlinePolicy",
+			env:     "NEURON_WAIT_DEADLINE_POLICY",
+			bogus:   "--wait-deadline-policy",
 		},
 		"max lifetime": {
 			content: "runtime:\n  execution:\n    maxLifetime: 24h\n",
 			path:    "runtime.execution.maxLifetime",
+			env:     "NEURON_EXECUTION_MAX_LIFETIME",
+			bogus:   "--execution-max-lifetime",
 		},
 		"timer poll": {
 			content: "runtime:\n  execution:\n    timerPoll:\n      interval: 5s\n",
 			path:    "runtime.execution.timerPoll",
+			env:     "NEURON_TIMER_POLL_INTERVAL",
+			bogus:   "--timer-poll-interval",
 		},
 	}
 	for name, tc := range cases {
@@ -186,10 +198,13 @@ func TestProjectFileRejectsOperationalPolicy(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected the project file to reject the operational setting")
 			}
-			for _, fragment := range []string{tc.path, "deployment-level"} {
+			for _, fragment := range []string{tc.path, "deployment-level", "global config", tc.env} {
 				if !strings.Contains(err.Error(), fragment) {
 					t.Errorf("error %q does not mention %q", err, fragment)
 				}
+			}
+			if strings.Contains(err.Error(), tc.bogus) {
+				t.Errorf("error %q advertises the nonexistent neuron flag %q", err, tc.bogus)
 			}
 		})
 	}
