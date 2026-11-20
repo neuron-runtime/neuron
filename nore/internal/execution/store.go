@@ -2,14 +2,11 @@ package execution
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/neuron-runtime/neuron/nore/internal/data"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
@@ -864,70 +861,6 @@ func (s *ExecutionStore) releaseClaimedDispatchIntents(ctx context.Context, clai
 		}
 	}
 	return errors.Join(releaseErrs...)
-}
-
-// SignalDeliveryStatus is the outcome returned to the original sender and
-// retained with the delivery record.
-type SignalDeliveryStatus string
-
-const (
-	// SignalDeliveryAccepted means the delivery matched a waiting capability
-	// and was committed with its resolution.
-	SignalDeliveryAccepted SignalDeliveryStatus = "accepted"
-)
-
-// SignalDelivery is the durable record of one accepted signal delivery. It is
-// stored at SignalDeliveryKey and exists only for matched attempts; an
-// unmatched delivery is not recorded so a later retry can still succeed.
-// PayloadHash binds an idempotent replay to the original payload without
-// retaining the payload itself.
-type SignalDelivery struct {
-	DeliveryID     string               `json:"delivery_id"`
-	ExecutionID    shared.ID            `json:"execution_id"`
-	SignalName     string               `json:"signal_name"`
-	CorrelationKey string               `json:"correlation_key,omitempty"`
-	CapabilityID   shared.ID            `json:"capability_id"`
-	PayloadHash    string               `json:"payload_hash"`
-	Status         SignalDeliveryStatus `json:"status"`
-	CreatedAt      time.Time            `json:"created_at"`
-}
-
-// NewSignalDelivery builds a delivery record and hashes its payload for
-// duplicate detection. Validation happens here so the persistence boundary
-// never has to guess what identifies a delivery.
-func NewSignalDelivery(executionID, capabilityID shared.ID, deliveryID, signalName, correlationKey string, payload map[string]any) (*SignalDelivery, error) {
-	if executionID == "" || capabilityID == "" {
-		return nil, fmt.Errorf("signal delivery requires execution and capability IDs")
-	}
-	if deliveryID == "" {
-		return nil, fmt.Errorf("signal delivery id is required")
-	}
-	if signalName == "" {
-		return nil, fmt.Errorf("signal name is required")
-	}
-	encoded, err := json.Marshal(data.CanonicalMap(payload))
-	if err != nil {
-		return nil, fmt.Errorf("marshal signal payload: %w", err)
-	}
-	sum := sha256.Sum256(encoded)
-	return &SignalDelivery{
-		DeliveryID:     deliveryID,
-		ExecutionID:    executionID,
-		SignalName:     signalName,
-		CorrelationKey: correlationKey,
-		CapabilityID:   capabilityID,
-		PayloadHash:    hex.EncodeToString(sum[:]),
-		Status:         SignalDeliveryAccepted,
-	}, nil
-}
-
-// SignalDeliveryKey returns the durable key for a delivery record. Key
-// validation rejects traversal segments in deliveryID.
-func SignalDeliveryKey(executionID shared.ID, deliveryID string) (string, error) {
-	if deliveryID == "" {
-		return "", fmt.Errorf("signal delivery id is required")
-	}
-	return storage.Key("signals", string(executionID), deliveryID)
 }
 
 // WaitTimerKey returns the durable timer key for one wait or retry attempt. It

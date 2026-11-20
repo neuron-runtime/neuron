@@ -201,7 +201,13 @@ func New(
 	var schedOpts []scheduler.Option
 	var engineOpts []engine.Option
 	if durable {
-		schedOpts = append(schedOpts, scheduler.WithTransitionCommitter(store))
+		// The wait store is the scheduler's authoritative wait/signal/delivery
+		// boundary. It is supplied only in durable mode so non-durable behavior
+		// stays event-driven and unchanged.
+		schedOpts = append(schedOpts,
+			scheduler.WithTransitionCommitter(store),
+			scheduler.WithWaitStore(store, scheduler.DefaultTimerPollConfig()),
+		)
 		engineOpts = append(engineOpts, engine.WithTransitionCommitter(store))
 	}
 
