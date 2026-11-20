@@ -55,6 +55,18 @@ var (
 			path:   "runtime.execution.durability",
 			reason: "durability is a deployment-level setting; set via --durability or NEURON_EXECUTION_DURABILITY",
 		},
+		{
+			path:   "runtime.execution.waitDeadlinePolicy",
+			reason: "wait deadline policy is a deployment-level setting; set it in the global config or via --wait-deadline-policy / NEURON_WAIT_DEADLINE_POLICY",
+		},
+		{
+			path:   "runtime.execution.maxLifetime",
+			reason: "execution max lifetime is a deployment-level setting; set it in the global config or via --execution-max-lifetime / NEURON_EXECUTION_MAX_LIFETIME",
+		},
+		{
+			path:   "runtime.execution.timerPoll",
+			reason: "timer polling is a deployment-level setting; set it in the global config or via --timer-poll-interval / --timer-poll-batch-size",
+		},
 	}
 
 	deniedInGlobalFile = []deniedKey{

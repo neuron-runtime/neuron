@@ -1,6 +1,9 @@
 package config
 
-import "github.com/neuron-runtime/neuron/shared/types/builtins"
+import (
+	"github.com/neuron-runtime/neuron/shared/types/builtins"
+	"github.com/neuron-runtime/neuron/shared/types/core"
+)
 
 // Defaults returns the built-in Neuron configuration.
 //
@@ -23,6 +26,16 @@ func Defaults() Config {
 				Mode:       "wait",
 				Timeout:    "30m",
 				Durability: DurabilityHistory,
+
+				// Operational wait/timer policy. These defaults preserve
+				// non-durable behavior: without a durable wait store the
+				// deadline policy, maximum lifetime, and timer poller are inert.
+				WaitDeadlinePolicy: core.DefaultWaitDeadlinePolicy,
+				MaxLifetime:        core.DefaultExecutionMaxLifetime.String(),
+				TimerPoll: TimerPollConfig{
+					Interval:  core.DefaultTimerPollInterval.String(),
+					BatchSize: core.DefaultTimerPollBatchSize,
+				},
 			},
 			Workers: WorkerConfig{
 				Min: 1,

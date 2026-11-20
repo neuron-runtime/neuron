@@ -171,6 +171,33 @@ type ExecutionConfig struct {
 	// assembly artifacts at runtime startup. The zero policy retains every
 	// artifact.
 	Retention RetentionConfig `yaml:"retention" mapstructure:"retention"`
+
+	// WaitDeadlinePolicy is the deployment default action when a wait's
+	// deadline passes. It is a deployment-level operational setting: project
+	// configuration rejects it. It is also distinct from the per-capability
+	// runtimeConfig, which is authored with the assembly.
+	WaitDeadlinePolicy string `yaml:"waitDeadlinePolicy,omitempty" mapstructure:"waitDeadlinePolicy"`
+
+	// MaxLifetime bounds an execution's total lifetime as a duration string.
+	// "0" disables the bound. It is distinct from Timeout, which bounds one
+	// capability invocation, and is rejected from project configuration.
+	MaxLifetime string `yaml:"maxLifetime,omitempty" mapstructure:"maxLifetime"`
+
+	// TimerPoll bounds the due-timer consumer. Like the other operational
+	// settings here, it belongs to the deployment and not to an assembly.
+	TimerPoll TimerPollConfig `yaml:"timerPoll,omitempty" mapstructure:"timerPoll"`
+}
+
+// TimerPollConfig bounds the scheduler's due-timer consumer. Durations are
+// authored as strings so they unmarshal from YAML and the CLI without custom
+// decoding; Load parses and bounds them once, before the rest of Neuron sees
+// them.
+type TimerPollConfig struct {
+	// Interval is the poll cadence, for example "1s".
+	Interval string `yaml:"interval,omitempty" mapstructure:"interval"`
+
+	// BatchSize is the maximum number of due timers claimed per pass.
+	BatchSize int `yaml:"batchSize,omitempty" mapstructure:"batchSize"`
 }
 
 // RetentionConfig bounds superseded assembly artifacts. Artifacts referenced by

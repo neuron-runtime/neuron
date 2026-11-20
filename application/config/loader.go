@@ -117,6 +117,37 @@ func Load(opts Options) (Config, error) {
 		); err != nil {
 			return Config{}, fmt.Errorf("bind durability environment: %w", err)
 		}
+		// Operational wait/timer settings also have documented short names;
+		// bind them explicitly rather than relying on the derived key path.
+		operationalEnv := []struct {
+			key   string
+			names []string
+		}{
+			{
+				key:   "runtime.execution.waitDeadlinePolicy",
+				names: []string{"NEURON_WAIT_DEADLINE_POLICY", "NEURON_RUNTIME_EXECUTION_WAIT_DEADLINE_POLICY"},
+			},
+			{
+				key:   "runtime.execution.maxLifetime",
+				names: []string{"NEURON_EXECUTION_MAX_LIFETIME", "NEURON_RUNTIME_EXECUTION_MAX_LIFETIME"},
+			},
+			{
+				key:   "runtime.execution.timerPoll.interval",
+				names: []string{"NEURON_TIMER_POLL_INTERVAL", "NEURON_RUNTIME_EXECUTION_TIMERPOLL_INTERVAL"},
+			},
+			{
+				key:   "runtime.execution.timerPoll.batchSize",
+				names: []string{"NEURON_TIMER_POLL_BATCH_SIZE", "NEURON_RUNTIME_EXECUTION_TIMERPOLL_BATCHSIZE"},
+			},
+		}
+		for _, binding := range operationalEnv {
+			// BindEnv takes only a variadic list: the config key is its first
+			// element, followed by the accepted environment names.
+			args := append([]string{binding.key}, binding.names...)
+			if err := v.BindEnv(args...); err != nil {
+				return Config{}, fmt.Errorf("bind %s environment: %w", binding.key, err)
+			}
+		}
 	}
 
 	// Command-line overrides.
@@ -140,6 +171,25 @@ func Load(opts Options) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Runtime.Execution.Durability = durability
+
+	// Operational wait and timer policy is validated at load time so a bad
+	// deployment value fails `neuron build`/`neuron run` instead of surfacing as
+	// a partially applied bound inside the engine. These are deployment-level
+	// settings; project files are refused earlier by validateConfigFile.
+	waitPolicy, err := core.NormalizeWaitDeadlinePolicy(cfg.Runtime.Execution.WaitDeadlinePolicy)
+	if err != nil {
+		return Config{}, fmt.Errorf("runtime.execution.waitDeadlinePolicy: %w", err)
+	}
+	cfg.Runtime.Execution.WaitDeadlinePolicy = waitPolicy
+	if _, err := core.ValidateExecutionMaxLifetime(cfg.Runtime.Execution.MaxLifetime); err != nil {
+		return Config{}, fmt.Errorf("runtime.execution.maxLifetime: %w", err)
+	}
+	if _, err := core.ValidateTimerPollInterval(cfg.Runtime.Execution.TimerPoll.Interval); err != nil {
+		return Config{}, fmt.Errorf("runtime.execution.timerPoll.interval: %w", err)
+	}
+	if err := core.ValidateTimerPollBatchSize(cfg.Runtime.Execution.TimerPoll.BatchSize); err != nil {
+		return Config{}, fmt.Errorf("runtime.execution.timerPoll.batchSize: %w", err)
+	}
 
 	// The project root is the directory that owns the project configuration
 	// (neuron.config.*). When --config selects a file, the root is that file's
@@ -206,6 +256,10 @@ func registerDefaults(v *viper.Viper, cfg Config) {
 	v.SetDefault("runtime.execution.durability", cfg.Runtime.Execution.Durability)
 	v.SetDefault("runtime.execution.retention.maxAge", cfg.Runtime.Execution.Retention.MaxAge)
 	v.SetDefault("runtime.execution.retention.maxArtifactsPerVersion", cfg.Runtime.Execution.Retention.MaxArtifactsPerVersion)
+	v.SetDefault("runtime.execution.waitDeadlinePolicy", cfg.Runtime.Execution.WaitDeadlinePolicy)
+	v.SetDefault("runtime.execution.maxLifetime", cfg.Runtime.Execution.MaxLifetime)
+	v.SetDefault("runtime.execution.timerPoll.interval", cfg.Runtime.Execution.TimerPoll.Interval)
+	v.SetDefault("runtime.execution.timerPoll.batchSize", cfg.Runtime.Execution.TimerPoll.BatchSize)
 	v.SetDefault("runtime.workers.min", cfg.Runtime.Workers.Min)
 	v.SetDefault("runtime.workers.max", cfg.Runtime.Workers.Max)
 	v.SetDefault("runtime.detachedDrainTimeout", cfg.Runtime.DetachedDrainTimeout)

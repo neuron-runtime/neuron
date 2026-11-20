@@ -25,6 +25,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/planner"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/runtimeconfig"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	_ "github.com/neuron-runtime/neuron/nore/internal/storage/postgres"
 	_ "github.com/neuron-runtime/neuron/nore/internal/storage/sqlite"
@@ -61,6 +62,10 @@ func main() {
 		builtinPolicyArg       string
 		retentionMaxAge        string
 		retentionMaxPerVersion int
+		waitDeadlinePolicy     string
+		executionMaxLifetime   string
+		timerPollInterval      string
+		timerPollBatchSize     int
 	)
 
 	flag.StringVar(&port, "port", "", "TCP address for the N.O.R.E. API; empty disables TCP (default: Unix socket only)")
@@ -82,6 +87,10 @@ func main() {
 	flag.StringVar(&builtinPolicyArg, "builtin-policy", "", "JSON policy bounding the built-in capability runtimes (neuron:core:*)")
 	flag.StringVar(&retentionMaxAge, "retention-max-age", "", "minimum age of a superseded assembly artifact before garbage collection, e.g. 168h (default: keep all)")
 	flag.IntVar(&retentionMaxPerVersion, "retention-max-artifacts-per-version", 0, "maximum assembly artifacts retained per version (default: keep all)")
+	flag.StringVar(&waitDeadlinePolicy, "wait-deadline-policy", core.DefaultWaitDeadlinePolicy, "action when a wait deadline passes: fail, cancel, or continue")
+	flag.StringVar(&executionMaxLifetime, "execution-max-lifetime", core.DefaultExecutionMaxLifetime.String(), "maximum lifetime of an execution, e.g. 720h (default: 30 days; 0 disables)")
+	flag.StringVar(&timerPollInterval, "timer-poll-interval", core.DefaultTimerPollInterval.String(), "due-timer poll interval")
+	flag.IntVar(&timerPollBatchSize, "timer-poll-batch-size", core.DefaultTimerPollBatchSize, "maximum due timers claimed per poll")
 	flag.Parse()
 
 	// Environment variables supply defaults, but an explicitly parsed flag is a
@@ -93,6 +102,9 @@ func main() {
 	storageDSN = envUnlessSet(explicit["storage-dsn"], storageDSN, "NEURON_DATABASE_URL")
 	durability = envUnlessSet(explicit["durability"], durability, "NEURON_EXECUTION_DURABILITY")
 	retentionMaxAge = envUnlessSet(explicit["retention-max-age"], retentionMaxAge, "NEURON_RETENTION_MAX_AGE")
+	waitDeadlinePolicy = envUnlessSet(explicit["wait-deadline-policy"], waitDeadlinePolicy, "NEURON_WAIT_DEADLINE_POLICY")
+	executionMaxLifetime = envUnlessSet(explicit["execution-max-lifetime"], executionMaxLifetime, "NEURON_EXECUTION_MAX_LIFETIME")
+	timerPollInterval = envUnlessSet(explicit["timer-poll-interval"], timerPollInterval, "NEURON_TIMER_POLL_INTERVAL")
 	if !explicit["retention-max-artifacts-per-version"] {
 		if override := os.Getenv("NEURON_RETENTION_MAX_ARTIFACTS_PER_VERSION"); override != "" {
 			parsed, parseErr := strconv.Atoi(override)
@@ -100,6 +112,15 @@ func main() {
 				log.Fatalf("parse NEURON_RETENTION_MAX_ARTIFACTS_PER_VERSION: %v", parseErr)
 			}
 			retentionMaxPerVersion = parsed
+		}
+	}
+	if !explicit["timer-poll-batch-size"] {
+		if override := os.Getenv("NEURON_TIMER_POLL_BATCH_SIZE"); override != "" {
+			parsed, parseErr := strconv.Atoi(override)
+			if parseErr != nil {
+				log.Fatalf("parse NEURON_TIMER_POLL_BATCH_SIZE: %v", parseErr)
+			}
+			timerPollBatchSize = parsed
 		}
 	}
 
@@ -135,6 +156,26 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Resolve the deployment's wait/timer policy once, at the process boundary,
+	// so an invalid value stops startup instead of reaching the host as a
+	// partially applied bound. Consuming it (timer polling, deadline
+	// enforcement) is the host's responsibility, not this configuration seam.
+	executionPolicy, err := runtimeconfig.ResolveExecutionPolicy(runtimeconfig.ExecutionPolicyInput{
+		WaitDeadlinePolicy: waitDeadlinePolicy,
+		MaxLifetime:        executionMaxLifetime,
+		TimerPollInterval:  timerPollInterval,
+		TimerPollBatchSize: timerPollBatchSize,
+	})
+	if err != nil {
+		log.Fatalf("resolve execution policy: %v", err)
+	}
+	slog.Info("effective execution policy",
+		slog.String("waitDeadlinePolicy", executionPolicy.WaitDeadlinePolicy),
+		slog.Duration("maxLifetime", executionPolicy.MaxLifetime),
+		slog.Duration("timerPollInterval", executionPolicy.TimerPollInterval),
+		slog.Int("timerPollBatchSize", executionPolicy.TimerPollBatchSize),
+	)
 
 	// Project mode: run as a foreground project runtime with auto port allocation
 	// and discovery metadata.

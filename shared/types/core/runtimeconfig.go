@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -244,4 +245,102 @@ func ParseRuntimeDuration(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("%q must not be negative", value)
 	}
 	return parsed, nil
+}
+
+// Deployment-level execution policy.
+//
+// These values are deliberately NOT fields of RuntimeConfig. RuntimeConfig is
+// authored per capability and participates in assembly identity; these are
+// operational settings owned by the deployment, applied by N.O.R.E. to waits
+// and their timers, and never written into an assembly. They live in the shared
+// contract so the process that forms a deployment and the engine that consumes
+// it validate the same strings without either importing the other's internals.
+
+// Wait deadline policies select the action applied when a wait's deadline
+// passes for a wait that is not inherently time-triggered.
+const (
+	WaitDeadlinePolicyFail     = "fail"
+	WaitDeadlinePolicyCancel   = "cancel"
+	WaitDeadlinePolicyContinue = "continue"
+
+	// DefaultWaitDeadlinePolicy keeps the conservative behavior: an unset
+	// policy fails the capability rather than silently resuming or cancelling it.
+	DefaultWaitDeadlinePolicy = WaitDeadlinePolicyFail
+)
+
+// Execution policy defaults and bounds. A zero maximum lifetime disables the
+// bound; an empty timer-poll field means "apply the default".
+const (
+	DefaultExecutionMaxLifetime = 30 * 24 * time.Hour
+	DefaultTimerPollInterval    = time.Second
+	DefaultTimerPollBatchSize   = 256
+
+	MaxTimerPollInterval  = time.Minute
+	MaxTimerPollBatchSize = 4096
+)
+
+// NormalizeWaitDeadlinePolicy validates an operator-authored wait deadline
+// policy and returns its canonical form. An empty value resolves to the fail
+// default so a deployment that omits the setting keeps conservative behavior.
+func NormalizeWaitDeadlinePolicy(value string) (string, error) {
+	policy := strings.ToLower(strings.TrimSpace(value))
+	switch policy {
+	case "":
+		return DefaultWaitDeadlinePolicy, nil
+	case WaitDeadlinePolicyFail, WaitDeadlinePolicyCancel, WaitDeadlinePolicyContinue:
+		return policy, nil
+	default:
+		return "", fmt.Errorf(
+			"invalid wait deadline policy %q: supported values are %q, %q, and %q",
+			value, WaitDeadlinePolicyFail, WaitDeadlinePolicyCancel, WaitDeadlinePolicyContinue,
+		)
+	}
+}
+
+// ValidateExecutionMaxLifetime parses a deployment-level execution maximum
+// lifetime. "0" disables the bound and an empty value applies the default.
+// Unlike Timeout on RuntimeConfig, which bounds one capability invocation,
+// this bounds the whole execution and is never part of an assembly.
+func ValidateExecutionMaxLifetime(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return DefaultExecutionMaxLifetime, nil
+	}
+	parsed, err := ParseRuntimeDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid execution max lifetime: %w", err)
+	}
+	return parsed, nil
+}
+
+// ValidateTimerPollInterval parses and bounds the due-timer poll interval. An
+// empty value applies the default; an explicit non-positive or excessive value
+// is rejected so polling cannot become a busy loop or an unbounded scan.
+func ValidateTimerPollInterval(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return DefaultTimerPollInterval, nil
+	}
+	parsed, err := ParseRuntimeDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid timer poll interval: %w", err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("invalid timer poll interval %q: must be greater than 0", value)
+	}
+	if parsed > MaxTimerPollInterval {
+		return 0, fmt.Errorf("invalid timer poll interval %s: must not exceed %s", parsed, MaxTimerPollInterval)
+	}
+	return parsed, nil
+}
+
+// ValidateTimerPollBatchSize bounds the number of due timers claimed per poll.
+// Zero means "not declared": the caller applies its default. A negative or
+// excessive value is rejected so one pass cannot claim unbounded work.
+func ValidateTimerPollBatchSize(size int) error {
+	if size == 0 {
+		return nil
+	}
+	if size < 0 || size > MaxTimerPollBatchSize {
+		return fmt.Errorf("invalid timer poll batch size %d: must be between 1 and %d", size, MaxTimerPollBatchSize)
+	}
+	return nil
 }
