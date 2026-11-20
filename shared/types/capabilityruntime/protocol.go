@@ -7,6 +7,12 @@ type Request struct {
 	// Params carries the resolved execution params for the capability. Keys
 	// map to the capability's declared params.
 	Params map[string]any `json:"params"`
+
+	// Resume is an additive field carrying the input that resumes a suspended
+	// execution. It is nil for a first invocation. Runtimes that predate the
+	// suspend extension ignore the absent field, so its presence does not
+	// change the wire shape seen by an old runtime.
+	Resume *ResumeInput `json:"resume,omitempty"`
 }
 
 // Response is the stdout payload produced by a one-shot capability runtime
@@ -21,7 +27,20 @@ type Response struct {
 	// still exit zero after reporting an error this way; N.O.R.E. treats a
 	// non-empty Error as an execution failure and surfaces it downstream.
 	Error string `json:"error,omitempty"`
+
+	// Suspend is an additive field carrying the reason a capability suspended
+	// and what resumes it. It is mutually exclusive with a non-empty Result or
+	// Error. Because it is a pointer with omitempty, an old runtime's Response
+	// decodes with Suspend == nil and behaves exactly as before this extension.
+	Suspend *Suspend `json:"suspend,omitempty"`
 }
+
+// The Request.resume and Response.suspend fields are additive extensions of the
+// stdin/stdout JSON envelope (see suspend.go). Both are optional pointers with
+// omitempty: absent fields preserve the original wire shape and decoding
+// behavior, so old runtimes and old hosts remain compatible. Transport
+// boundaries are responsible for validating these untrusted fields before they
+// reach the execution domain.
 
 // Environment variables injected into a capability runtime process by the
 // runtime backend.

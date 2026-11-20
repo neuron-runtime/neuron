@@ -522,6 +522,7 @@ type worker struct {
 	version    string
 	conn       *grpc.ClientConn
 	client     v1.CapabilityRuntimeServiceClient
+	features   []string // features negotiated during Initialize; immutable after start
 	healthy    atomic.Bool
 	closeOnce  sync.Once
 	logger     *slog.Logger
@@ -580,6 +581,11 @@ func (w *worker) initialize(ctx context.Context, protocol string) error {
 		return fmt.Errorf("capability runtime %s: returned empty protocol version", w.type_)
 	}
 
+	// Suspend/resume is opt-in. Keep the negotiated feature set on the worker so
+	// Execute can reject a suspend from a runtime that never advertised it. A
+	// copy is taken because the response is owned by the gRPC client.
+	w.features = append([]string(nil), resp.Features...)
+
 	w.logger.Info("initialized capability runtime",
 		"protocol", resp.ProtocolVersion,
 		"features", resp.Features,
@@ -620,13 +626,15 @@ func (w *worker) execute(ctx context.Context, req *capabilityrt.Request) (*capab
 	for k, v := range req.Params {
 		execReq.Params[k] = makeProtoValue(v)
 	}
+	resume, err := resumeToProto(req.Resume)
+	if err != nil {
+		return nil, fmt.Errorf("capability runtime %s: %w", w.type_, err)
+	}
+	execReq.Resume = resume
 
 	resp, err := w.client.Execute(ctx, execReq)
 	if err != nil {
 		return nil, fmt.Errorf("execute via gRPC: %w", err)
-	}
-	if resp.Suspend != nil {
-		return nil, fmt.Errorf("unsupported_suspend_outcome: capability runtime returned a suspend outcome but suspend/resume is not yet supported")
 	}
 
 	out := &capabilityrt.Response{
@@ -635,6 +643,23 @@ func (w *worker) execute(ctx context.Context, req *capabilityrt.Request) (*capab
 	}
 	for k, v := range resp.Result {
 		out.Result[k] = makeGoValue(v)
+	}
+
+	if resp.Suspend != nil {
+		// Suspend is opt-in and untrusted. A runtime that did not negotiate the
+		// feature during Initialize is an old runtime, and a suspend from it is
+		// an explicit error rather than an empty success.
+		if !v1.HasFeature(w.features, v1.SuspendFeature) {
+			return nil, fmt.Errorf("unsupported_suspend_outcome: capability runtime %s returned a suspend outcome without negotiating the %q feature", w.type_, v1.SuspendFeature)
+		}
+		if err := rejectSuspendWithOutput(resp); err != nil {
+			return nil, fmt.Errorf("capability runtime %s: %w", w.type_, err)
+		}
+		typed, err := mapSuspendOutcome(resp.Suspend)
+		if err != nil {
+			return nil, fmt.Errorf("capability runtime %s: %w", w.type_, err)
+		}
+		out.Suspend = suspendToWire(typed)
 	}
 
 	return out, nil

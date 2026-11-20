@@ -21,7 +21,6 @@ package wasm
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -249,7 +248,7 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 		}
 	}
 
-	stdin, err := json.Marshal(req)
+	stdin, err := encodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("capability runtime %s: encode request: %w", i.type_, err)
 	}
@@ -330,12 +329,12 @@ func (i *instance) Execute(ctx context.Context, req *capabilityrt.Request) (*cap
 		}
 	}
 
-	var resp capabilityrt.Response
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+	resp, err := decodeResponse(stdout.Bytes())
+	if err != nil {
 		return nil, fmt.Errorf("capability runtime %s: decode response: %w (stderr: %s)", i.type_, err, stderr.String())
 	}
 
-	return &resp, nil
+	return resp, nil
 }
 
 // Health reports the WASM runtime and module are ready. Compilation status is
