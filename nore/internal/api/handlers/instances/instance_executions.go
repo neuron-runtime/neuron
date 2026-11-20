@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/api/utils"
 	"github.com/neuron-runtime/neuron/nore/internal/execution"
+	"github.com/neuron-runtime/neuron/nore/internal/execution/scheduler"
 	"github.com/neuron-runtime/neuron/nore/internal/instance"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/core"
@@ -57,13 +59,22 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A status filter lets an operator list only suspended executions; the
+	// wait details below say why each one is suspended and what resumes it.
+	statusFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+
 	items := make([]protocol.ExecutionItem, 0)
 	for _, exec := range executions {
+		status := string(exec.Status())
+		if statusFilter != "" && !strings.EqualFold(status, statusFilter) {
+			continue
+		}
 		item := protocol.ExecutionItem{
 			ID:                exec.ID,
 			CorrelationID:     exec.CorrelationID,
-			Status:            string(exec.Status()),
+			Status:            status,
 			ParentExecutionID: exec.ParentExecutionID,
+			Waits:             waitItems(exec),
 		}
 		if started := exec.StartedAt(); !started.IsZero() {
 			ns := started.UnixNano()
@@ -84,6 +95,33 @@ func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 		Status:  http.StatusOK,
 		Data:    items,
 	})
+}
+
+// waitItems reports the persisted wait state of every suspended capability in
+// an execution. It reads only execution accessors, never the blueprint, so
+// metadata-only restored executions expose the same wait details as live ones.
+func waitItems(exec *execution.Execution) []protocol.WaitItem {
+	ids := exec.WaitingCapabilities()
+	if len(ids) == 0 {
+		return nil
+	}
+	items := make([]protocol.WaitItem, 0, len(ids))
+	for _, id := range ids {
+		state := exec.CapabilityState(id)
+		item := protocol.WaitItem{
+			CapabilityID:   id,
+			WaitType:       string(state.WaitType),
+			ExpectedSignal: state.ExpectedSignal,
+			WaitReason:     state.WaitReason,
+			CorrelationKey: state.CorrelationKey,
+		}
+		if state.WaitUntil != nil {
+			ns := state.WaitUntil.UnixNano()
+			item.Deadline = &ns
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +214,7 @@ func (h *Handler) GetExecutionState(w http.ResponseWriter, r *http.Request) {
 		ID:            exec.ID,
 		CorrelationID: exec.CorrelationID,
 		Status:        string(exec.Status()),
+		Waits:         waitItems(exec),
 	}
 	if started := exec.StartedAt(); !started.IsZero() {
 		ns := started.UnixNano()
@@ -254,77 +293,171 @@ func (h *Handler) CancelExecution(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SignalExecution sends a signal to a waiting capability within an execution,
-// transitioning it from CapabilityWaiting to CapabilityReady.
-//
-// The request path identifies the instance, execution, and the name of the
-// signal to deliver. The execution's capability that has ExpectedSignal matching
-// the signalName will be transitioned. If no matching waiting capability is
-// found, a 404 is returned.
+// SignalExecution is the instance-scoped compatibility route. It resolves the
+// addressed instance and delegates the delivery to the same authoritative
+// boundary as the execution-scoped route. Ownership of the execution is checked
+// inside DeliverSignal against the durable execution record, so an execution
+// belonging to another instance is indistinguishable from a missing one.
 func (h *Handler) SignalExecution(w http.ResponseWriter, r *http.Request) {
 	instID := utils.PathID(r.PathValue("id"))
-	execID := utils.PathID(r.PathValue("execID"))
-	signalName := r.PathValue("signalName")
-
 	i, ok := h.instances.GetByID(instID)
 	if !ok {
-		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("instance %s not found", instID))
+		utils.WriteJSON(w, http.StatusNotFound, protocol.Response{
+			Message: fmt.Sprintf("instance %s not found", instID),
+			Status:  http.StatusNotFound,
+			Code:    protocol.SignalCodeNotFound,
+		})
 		return
 	}
+	h.deliverSignal(w, r, i, r.PathValue("execID"), r.PathValue("signalName"))
+}
 
-	exec, err := i.GetExecution(r.Context(), core.ID(execID))
+// SignalExecutionByExecution is the primary execution-scoped route. The owning
+// instance is resolved from the durable execution record, not from the URL, so
+// a caller cannot address an execution through the wrong instance.
+func (h *Handler) SignalExecutionByExecution(w http.ResponseWriter, r *http.Request) {
+	execID := utils.PathID(r.PathValue("id"))
+	i, err := h.instances.InstanceForExecution(r.Context(), core.ID(execID))
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, instance.ErrExecutionNotFound) {
-			status = http.StatusNotFound
-		}
-		utils.ErrorJSON(w, status, err)
+		writeSignalError(w, err)
+		return
+	}
+	h.deliverSignal(w, r, i, execID, r.PathValue("name"))
+}
+
+// deliverSignal is the thin HTTP boundary over Instance.DeliverSignal. It
+// validates the request shape, hands the delivery to the domain, and writes the
+// acknowledgement only after the domain has committed it. It never mutates
+// execution state itself and never traverses a blueprint to find a wait.
+func (h *Handler) deliverSignal(w http.ResponseWriter, r *http.Request, i *instance.Instance, execID, signalName string) {
+	execID = utils.PathID(execID)
+	signalName = strings.TrimSpace(signalName)
+	if execID == "" || signalName == "" {
+		utils.WriteJSON(w, http.StatusBadRequest, protocol.Response{
+			Message: "execution ID and signal name are required",
+			Status:  http.StatusBadRequest,
+			Code:    protocol.SignalCodeInvalidRequest,
+		})
 		return
 	}
 
-	// Find the capability waiting for this signal by matching ExpectedSignal.
-	capabilityID := core.ID("")
-	found := false
-	for cid := range exec.Blueprint.Nodes {
-		state := exec.CapabilityState(cid)
-		if state.Status == execution.CapabilityWaiting && state.ExpectedSignal == signalName {
-			capabilityID = cid
-			found = true
-			break
-		}
-	}
-	if !found {
-		utils.ErrorJSON(w, http.StatusNotFound, fmt.Errorf("no capability waiting for signal %s on execution %s", signalName, execID))
+	req, err := decodeSignalRequest(r)
+	if err != nil {
+		utils.WriteJSON(w, http.StatusBadRequest, protocol.Response{
+			Message: err.Error(),
+			Status:  http.StatusBadRequest,
+			Code:    protocol.SignalCodeInvalidRequest,
+		})
 		return
 	}
 
-	if err := exec.Signal(capabilityID); err != nil {
-		utils.ErrorJSON(w, http.StatusInternalServerError, err)
+	result, err := i.DeliverSignal(r.Context(), instance.SignalDeliveryRequest{
+		ExecutionID:    core.ID(execID),
+		DeliveryID:     req.DeliveryID,
+		SignalName:     signalName,
+		CorrelationKey: req.CorrelationKey,
+		Payload:        req.Payload,
+	})
+	if err != nil {
+		writeSignalError(w, err)
 		return
 	}
 
-	item := protocol.ExecutionItem{
-		ID:            exec.ID,
-		CorrelationID: exec.CorrelationID,
-		Status:        string(exec.Status()),
+	status := "accepted"
+	if result.Replay {
+		status = "replay"
 	}
-	if started := exec.StartedAt(); !started.IsZero() {
-		ns := started.UnixNano()
-		item.StartedAt = &ns
-	}
-	if completed := exec.CompletedAt(); !completed.IsZero() {
-		ns := completed.UnixNano()
-		item.CompletedAt = &ns
-	}
-	if errMsg := exec.Error(); errMsg != "" {
-		item.Error = errMsg
-	}
-
 	utils.WriteJSON(w, http.StatusOK, protocol.Response{
 		Message: "execution signaled",
 		Status:  http.StatusOK,
-		Data:    item,
+		Data: protocol.SignalDeliveryResponse{
+			DeliveryID: result.DeliveryID,
+			SignalName: signalName,
+			Status:     status,
+			Replay:     result.Replay,
+		},
 	})
+}
+
+// Signal requests are untrusted HTTP input. These bounds are applied before
+// decoding so a client cannot make the handler allocate an arbitrary body or
+// storage key. Domain payload/schema authority is unchanged.
+const (
+	// maxSignalBodyBytes is the largest accepted JSON request body. The decoder
+	// is given one extra byte so a body exactly at the limit can still reach
+	// EOF; anything larger is rejected.
+	maxSignalBodyBytes int64 = 64 << 10
+	// maxSignalFieldBytes bounds deliveryId and correlationKey, which are used
+	// in delivery identity and wait matching.
+	maxSignalFieldBytes = 256
+)
+
+// decodeSignalRequest validates the wire body at the boundary. DeliveryID is
+// required, bounded, and must be safe to use as one storage key segment;
+// correlationKey is bounded; payload defaults to an empty object. Body shape
+// errors never reach the domain boundary.
+func decodeSignalRequest(r *http.Request) (protocol.SignalDeliveryRequest, error) {
+	var req protocol.SignalDeliveryRequest
+	if r.Body == nil {
+		return req, fmt.Errorf("signal body is required")
+	}
+	// A nil ResponseWriter is deliberate: oversized input is reported as a 400
+	// invalid request by the caller, not as an HTTP 413 transport error.
+	body := http.MaxBytesReader(nil, r.Body, maxSignalBodyBytes+1)
+	dec := json.NewDecoder(body)
+	if err := dec.Decode(&req); err != nil {
+		return req, fmt.Errorf("invalid signal body: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return req, fmt.Errorf("invalid signal body: unexpected trailing JSON")
+		}
+		return req, fmt.Errorf("invalid signal body: %w", err)
+	}
+
+	req.DeliveryID = strings.TrimSpace(req.DeliveryID)
+	if req.DeliveryID == "" {
+		return req, fmt.Errorf("deliveryId is required")
+	}
+	if len(req.DeliveryID) > maxSignalFieldBytes {
+		return req, fmt.Errorf("deliveryId exceeds %d bytes", maxSignalFieldBytes)
+	}
+	if strings.ContainsAny(req.DeliveryID, "/\x00") {
+		return req, fmt.Errorf("deliveryId contains an invalid path character")
+	}
+	if len(req.CorrelationKey) > maxSignalFieldBytes {
+		return req, fmt.Errorf("correlationKey exceeds %d bytes", maxSignalFieldBytes)
+	}
+	if req.Payload == nil {
+		req.Payload = map[string]any{}
+	}
+	return req, nil
+}
+
+// writeSignalError maps the domain's typed errors to the HTTP contract. A
+// machine-readable code accompanies each case so callers can tell outcomes
+// apart without inspecting the error text.
+func writeSignalError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	code := ""
+	switch {
+	case errors.Is(err, instance.ErrExecutionNotFound):
+		status, code = http.StatusNotFound, protocol.SignalCodeNotFound
+	case errors.Is(err, scheduler.ErrSignalNoMatchingWait):
+		status, code = http.StatusNotFound, protocol.SignalCodeNoMatchingWait
+	case errors.Is(err, scheduler.ErrSignalAmbiguousWait):
+		status, code = http.StatusConflict, protocol.SignalCodeAmbiguousWait
+	case errors.Is(err, execution.ErrSignalDeliveryConflict):
+		status, code = http.StatusConflict, protocol.SignalCodeConflict
+	case errors.Is(err, scheduler.ErrSignalWaitExpired), errors.Is(err, scheduler.ErrSignalWaitTerminal):
+		status, code = http.StatusGone, protocol.SignalCodeExpired
+	case errors.Is(err, scheduler.ErrSignalInvalidPayload):
+		status, code = http.StatusBadRequest, protocol.SignalCodeInvalidPayload
+	case errors.Is(err, scheduler.ErrWaitStoreUnavailable):
+		status, code = http.StatusServiceUnavailable, protocol.SignalCodeUnavailable
+	}
+	utils.WriteJSON(w, status, protocol.Response{Message: err.Error(), Status: status, Code: code})
 }
 
 func (h *Handler) GetExecutionEvents(w http.ResponseWriter, r *http.Request) {

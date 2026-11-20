@@ -312,6 +312,8 @@ The coordinator remains responsible for the complete outcome. Delegation transfe
 | `reviewer` | subagent | none | Correctness, regressions, acceptance, boundaries |
 | `security` | subagent | none | Supply chain, secrets, isolation, permissions, resource bounds |
 | `documenter` | subagent | docs and markdown | Documentation synchronized with verified behavior |
+| `foundation` | subagent | leased config/infra paths | Needs-driven DevOps foundation: layout, workspace, CI/CD, local infra, release, backup and migration setup |
+| `ui-ux-designer` | subagent | leased UI paths | Premium UI/UX design systems, visual review, and UI implementation |
 
 Role rules are authoritative in each agent's global file. This table is an index, not a replacement.
 
@@ -399,6 +401,7 @@ Parallelize only independent read-only tasks, or mutating tasks with disjoint le
 | Module boundary, dependency direction, public contract, folder layout, persistence, concurrency, isolation | `architect` |
 | Runtime, registry, resolver, installer, artifact, storage, provider, daemon, auth, secrets, dependencies, CI, scripts, executor protocol | `security` |
 | User-facing behavior, CLI, configuration, public API, docs | `documenter` |
+| User-facing UI, visual design, design tokens, styling | `ui-ux-designer` |
 
 The coordinator may not waive a required sign-off without recording the reason and residual risk in the ledger.
 

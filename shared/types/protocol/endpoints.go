@@ -30,6 +30,12 @@ const (
 	CancelExecutionPath       = "/v1/instances/{id}/executions/{execID}/cancel"
 	SignalExecutionPath       = "/v1/instances/{id}/executions/{execID}/signals/{signalName}"
 
+	// ExecutionSignalPath is the primary signal route. It addresses the
+	// execution directly; the owning instance is resolved from the durable
+	// execution record rather than trusted from the URL. The instance-scoped
+	// SignalExecutionPath above remains as a compatibility surface.
+	ExecutionSignalPath = "/v1/executions/{id}/signals/{name}"
+
 	// RunPath is the simple synchronous execution facade: one request in, one
 	// Assembly result out. The advanced per-instance execution resources above
 	// remain the way to start, observe, stream, or cancel execution.
@@ -98,9 +104,15 @@ func CancelExecution(instanceID, executionID string) string {
 }
 
 // SignalExecution returns the path addressing the signaling of one execution's
-// waiting capability.
+// waiting capability through its owning instance (the compatibility route).
 func SignalExecution(instanceID, executionID, signalName string) string {
 	return fillRoute(SignalExecutionPath, instanceID, executionID, signalName)
+}
+
+// ExecutionSignal returns the path addressing the signaling of an execution
+// directly. No instance is named: ownership is resolved from the execution.
+func ExecutionSignal(executionID, signalName string) string {
+	return fillRoute(ExecutionSignalPath, executionID, signalName)
 }
 
 // routePlaceholder matches a named wildcard in a route template. It is

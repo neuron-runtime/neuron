@@ -171,6 +171,27 @@ type CancelExecutionRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// SignalDeliveryRequest is the body of a signal delivery to a waiting
+// execution. DeliveryID identifies one logical delivery so a retry is safe;
+// Payload defaults to an empty object and CorrelationKey narrows an ambiguous
+// wait. The handler validates the body before it reaches the domain boundary.
+type SignalDeliveryRequest struct {
+	DeliveryID     string         `json:"deliveryId"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	CorrelationKey string         `json:"correlationKey,omitempty"`
+}
+
+// SignalDeliveryResponse acknowledges one accepted delivery. Replay reports
+// that the delivery ID had already been accepted with the same payload and
+// that no state change was made. Status is the delivery outcome ("accepted"
+// for a new delivery, "replay" for an identical repeat).
+type SignalDeliveryResponse struct {
+	DeliveryID string `json:"delivery_id"`
+	SignalName string `json:"signal_name"`
+	Status     string `json:"status"`
+	Replay     bool   `json:"replay"`
+}
+
 type ExecuteResponse struct {
 	ExecutionID core.ID   `json:"execution_id"`
 	InstanceID  string    `json:"instance_id"`

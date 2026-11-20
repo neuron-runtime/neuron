@@ -31,6 +31,16 @@ func TestConstructorsRenderEveryParameterizedRoute(t *testing.T) {
 			CancelExecution("inst_1", "exec_1"),
 			"/v1/instances/inst_1/executions/exec_1/cancel",
 		},
+		{
+			"instance-scoped signal",
+			SignalExecution("inst_1", "exec_1", "approved"),
+			"/v1/instances/inst_1/executions/exec_1/signals/approved",
+		},
+		{
+			"execution-scoped signal",
+			ExecutionSignal("exec_1", "approved"),
+			"/v1/executions/exec_1/signals/approved",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,6 +64,8 @@ func TestConstructorsMatchRegisteredPatterns(t *testing.T) {
 		ExecutionEventsPath:       true,
 		ExecutionEventsStreamPath: true,
 		CancelExecutionPath:       true,
+		SignalExecutionPath:       true,
+		ExecutionSignalPath:       true,
 		WebSocketPath:             true,
 		RegisterPath:              true,
 	}
@@ -65,6 +77,8 @@ func TestConstructorsMatchRegisteredPatterns(t *testing.T) {
 		ExecutionEventsPath,
 		ExecutionEventsStreamPath,
 		CancelExecutionPath,
+		SignalExecutionPath,
+		ExecutionSignalPath,
 	} {
 		if !registered[template] {
 			t.Errorf("template %q has no registered route", template)

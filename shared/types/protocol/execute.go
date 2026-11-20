@@ -6,6 +6,22 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/core"
 )
 
+// WaitItem is the wire view of one capability parked in a wait. It exposes the
+// wait reason, which signal or timer is expected, the correlation key used to
+// match a delivery, and the wait deadline. It is read-only: the API never
+// mutates wait state through this shape.
+type WaitItem struct {
+	CapabilityID   core.ID `json:"capability_id"`
+	WaitType       string  `json:"wait_type"`
+	ExpectedSignal string  `json:"expected_signal,omitempty"`
+	WaitReason     string  `json:"wait_reason,omitempty"`
+	CorrelationKey string  `json:"correlation_key,omitempty"`
+	// Deadline is the wait's WaitUntil in Unix nanoseconds. Nil means the wait
+	// has no deadline and stays open until a signal, cancellation, or the
+	// execution's maximum lifetime.
+	Deadline *int64 `json:"deadline,omitempty"`
+}
+
 type ExecutionItem struct {
 	ID            core.ID `json:"id"`
 	CorrelationID core.ID `json:"correlation_id"`
@@ -18,6 +34,11 @@ type ExecutionItem struct {
 	// another execution in the same instance. It lets a caller walk from a
 	// detached task back to the execution whose caller handed the work off.
 	ParentExecutionID core.ID `json:"parent_execution_id,omitempty"`
+
+	// Waits lists the capabilities currently parked in a wait. It is populated
+	// for suspended executions so a caller can see why they are waiting and
+	// what would resume them.
+	Waits []WaitItem `json:"waits,omitempty"`
 }
 
 type EventItem struct {
