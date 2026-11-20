@@ -829,9 +829,9 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/..."
       - "cd shared && GOWORK=off go test -count=1 ./..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/... -run 'Suspend|Resume|Feature|Negotiat'"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/mechanism/process/**", "nore/internal/mechanism/wasm/**", "shared/types/capabilityruntime/**"], task: T-026 }
-    evidence: ["Coordinator claimed disjoint process/WASM/shared transport lease; dependencies T-023, T-024, and T-048 are done."]
+    status: needs_review
+    lease: null
+    evidence: ["Coordinator claimed disjoint process/WASM/shared transport lease; dependencies T-023, T-024, and T-048 are done.", "Coder added additive suspend/resume JSON contracts, process proto mapping with deadline conversion and feature gating, WASM envelope encode/decode, and process/WASM conformance tests. Coder reported all criteria met after completing missing criterion 4.", "Coordinator independently verified `cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/...`, focused mechanism tests, and `cd shared && GOWORK=off go test -count=1 ./...` PASS; final full build and compile-all passed after T-028 compile errors were corrected.", "Committed as `f886b20`."]
     reports: []
     open_risks: ["One-shot `InvokeResponse` still cannot represent suspend; the future wire/product decision remains open.", "Public/additive JSON wire change requires documenter sign-off."]
 
@@ -857,10 +857,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/api/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/api/... -run 'Signal|Execution|Authorization|Wait'"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/api/handlers/instances/**", "nore/internal/api/routes/**", "shared/types/protocol/**", "nore/internal/api/**/*_test.go"], task: T-027 }
-    evidence: ["Coordinator claimed disjoint signal API lease; dependency T-024 is done."]
+    status: blocked
+    lease: null
+    evidence: ["Coordinator claimed disjoint signal API lease; dependency T-024 is done.", "BLOCKER: API-only lease cannot satisfy criteria 1,3,4,5,7. `instance.Instance` exposes no scheduler or signal forwarder (`nore/internal/instance/instance.go:119,286-593`); authoritative `Scheduler.ResolveSignal` requires a resolved CapabilityID (`nore/internal/execution/scheduler/wait.go:217-317`); no wait lookup/ambiguity API exists; no payload schema validator or JSON-schema dependency exists. ADR 0001 `:208-212,289-290,346,365` assigns the missing forwarder to M2/T-024, which was not implemented. Coder made no changes.", "Attempted resolution: architect asked for a bounded boundary decision between instance/scheduler extension and API-local service; first architect follow-up returned no content and needs retry."]
     reports: []
+    open_risks: ["Resume condition: coordinator decision expands scope/lease to implement the missing authoritative forwarder and defines schema-validation policy; then coder can complete T-027."]
     open_risks: ["Security sign-off required for cross-execution authorization and delivery retention."]
 
   - id: T-028
@@ -885,9 +886,9 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/runtimeconfig/..."
       - "cd application && GOWORK=off go test -count=1 ./config/... ./cmd/..."
-    status: in_progress
-    lease: { owner: coder, paths: ["shared/types/core/runtimeconfig.go", "nore/internal/runtimeconfig/**", "application/config/**", "application/cmd/**", "nore/cmd/**"], task: T-028 }
-    evidence: ["Coordinator claimed disjoint configuration lease; dependency T-024 is done."]
+    status: needs_review
+    lease: null
+    evidence: ["Coordinator claimed disjoint configuration lease; dependency T-024 is done.", "Coder added `ExecutionPolicy`, defaults/validation, deployment-only project denial, and CLI/env resolution; initial verification failed with `BindEnv` misuse and four unused `nore/cmd/nore/main.go` variables.", "Follow-up fixed `v.BindEnv` variadic spread and consumed resolved policy through `nore` flags/env with startup logging; coder verification passed application config/cmd tests, runtimeconfig tests, `nore` build, gofmt, and `git diff --check`.", "Independent reviewer: all six written criteria PASS with file:line evidence, but returned CHANGES_REQUESTED for a major public-contract defect: user-facing denial guidance advertises `neuron --wait-deadline-policy` flags that do not exist, and global config values are not forwarded to `nore` except via inherited shell env (`application/config/validate.go:59-68`, `application/internal/cli/cli.go:176-242`, `application/daemon/config.go:47-94`, `nore/main.go:90-93`). Minor: no minimum timer-poll interval and no malformed-env actionable-message coverage.", "Committed as `c1b5f41` with the integration/contract defect tracked for bounded follow-up before task completion."]
     reports: []
     open_risks: []
 
@@ -1032,3 +1033,66 @@ tasks:
     commit: 4e92e35
     reports: [".agents/reports/T-054.md"]
     open_risks: ["Reviewer minor: F4-11 citation `execution.go:445-474` covers the doc comment/signature while implementation is at `:494-509`; behavior is still supported by the doc comment. Resolve precision in T-031.", "Reviewer minor: CLOSURE-001 rationale is recorded as ledger evidence but has no standalone ADR/report; add traceability in T-031.", "T-052 previously asserted R5-20 was correctly checked; T-054 supersedes that claim.", "PostgreSQL parity remains DSN-gated and cannot support any closure claim."]
+
+  - id: T-055
+    objective: "Complete the authoritative M2 signal delivery boundary required to unblock T-027"
+    scope:
+      - "nore/internal/execution/signal_delivery.go"
+      - "nore/internal/execution/signal_delivery_test.go"
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/scheduler/signal_delivery.go"
+      - "nore/internal/execution/scheduler/signal_delivery_test.go"
+      - "nore/internal/instance/signal_delivery.go"
+      - "nore/internal/instance/signal_delivery_test.go"
+      - "nore/internal/instance/execution_lookup.go"
+      - "nore/internal/instance/instance.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-024]
+    acceptance:
+      - "One authoritative `SignalPayloadHash` helper is used by `NewSignalDelivery`; there is no duplicate hashing implementation"
+      - "A bounded stdlib-only `ValidateSignalPayload` policy handles empty schemas, supported JSON-schema object keywords, and opaque schema names without claiming full JSON Schema support"
+      - "`Scheduler.DeliverSignal` checks delivery replay first by delivery ID and payload hash, returns replay/conflict correctly, and otherwise delegates the atomic transition to `ResolveSignal` with a resolved capability ID"
+      - "Wait lookup uses persisted wait state through `WaitingCapabilities`/`CapabilityState`; no handler or service iterates blueprints; zero, ambiguous, expired, and terminal waits have distinct typed errors"
+      - "`Instance.DeliverSignal` and `Manager.InstanceForExecution` enforce durable-instance ownership and cross-instance 404 semantics without exposing scheduler internals to the API"
+      - "Production durable instance construction wires `WithWaitStore`; non-durable behavior remains unchanged"
+      - "Focused tests cover replay, conflict, no-match, ambiguity, deadline expiry, terminal delivery, invalid payload, ownership, and production wait-store wiring"
+    verification:
+      - "cd nore && GOWORK=off go build ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Signal|Wait|Schedule|Instance|Replay|Payload'"
+      - "gofmt -l on changed Go files and git diff --check"
+    status: in_progress
+    lease: { owner: coder, paths: ["nore/internal/execution/signal_delivery.go", "nore/internal/execution/signal_delivery_test.go", "nore/internal/execution/store.go", "nore/internal/execution/scheduler/signal_delivery.go", "nore/internal/execution/scheduler/signal_delivery_test.go", "nore/internal/instance/signal_delivery.go", "nore/internal/instance/signal_delivery_test.go", "nore/internal/instance/execution_lookup.go", "nore/internal/instance/instance.go"], task: T-055 }
+    evidence: ["Coordinator claimed disjoint M2 boundary lease after binding architecture decision; T-024 is done.", "ADR 0001 D7 `:206-212`, edges `:289-290`, and module ownership `:328-329,342-346` require instance/scheduler ownership of signal lookup and forwarding."]
+    reports: []
+    open_risks: ["Payload-schema policy is bounded and documented; full JSON Schema is explicitly out of scope without a dependency.", "T-027 remains blocked until T-055 reaches done."]
+
+  - id: T-056
+    objective: "Fix the T-028 public configuration contract and forwarding defect"
+    scope:
+      - "application/config/validate.go"
+      - "application/config/operational_policy_test.go"
+      - "application/internal/cli/cli.go"
+      - "application/internal/cli/**/*_test.go"
+      - "application/daemon/config.go"
+      - "application/daemon/**/*_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, documenter]
+    dependencies: [T-028]
+    acceptance:
+      - "Project-config denial messages advertise only surfaces that actually work"
+      - "Operational wait policy settings from global config are forwarded to the `nore` process through real flags or an equivalent explicit boundary, with an integration-style CLI test"
+      - "Defaults and validation behavior from T-028 remain unchanged"
+      - "No new dependency, no weakening of tests, and no unrelated scope"
+    verification:
+      - "cd application && GOWORK=off go test -count=1 ./config/... ./internal/cli/... ./daemon/..."
+      - "cd application && GOWORK=off go build ./..."
+      - "gofmt -l on changed Go files and git diff --check"
+    status: in_progress
+    lease: { owner: coder, paths: ["application/config/validate.go", "application/config/operational_policy_test.go", "application/internal/cli/cli.go", "application/internal/cli/**/*_test.go", "application/daemon/config.go", "application/daemon/**/*_test.go"], task: T-056 }
+    evidence: ["Coordinator claimed disjoint CLI/config-contract lease in response to independent T-028 reviewer CHANGES_REQUESTED finding."]
+    reports: []
+    open_risks: ["T-028 cannot reach done until this defect is fixed and re-reviewed."]
