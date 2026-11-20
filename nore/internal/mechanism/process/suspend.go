@@ -17,21 +17,15 @@ import (
 // in capabilityrt.ValidateSuspend (shared with the WASM transport) so there is
 // one authoritative shape/size check at the transport boundary.
 
-// mapSuspendOutcome validates a proto SuspendOutcome and maps it to the
-// engine-facing typed suspend. deadline_unix_ms is converted to a *time.Time
-// WaitUntil; zero means no deadline and yields nil. Signal waits may carry a
-// positive deadline as a bound; timer waits require one.
-func mapSuspendOutcome(src *v1.SuspendOutcome) (*contracts.CapabilitySuspend, error) {
-	if src == nil {
+// MapSuspend is the single authoritative mapping from the transport-neutral
+// capabilityrt.Suspend wire value to the engine-facing typed suspend. Every
+// transport adapter calls it, so untrusted metadata validation and deadline
+// conversion are defined once rather than duplicated per transport.
+// deadline_unix_ms becomes a *time.Time WaitUntil; zero means no deadline and
+// yields nil. A nil wire value maps to a nil typed value.
+func MapSuspend(wire *capabilityrt.Suspend) (*contracts.CapabilitySuspend, error) {
+	if wire == nil {
 		return nil, nil
-	}
-
-	wire := &capabilityrt.Suspend{
-		CorrelationKey: src.CorrelationKey,
-		WaitType:       src.WaitType,
-		ExpectedSignal: src.ExpectedSignal,
-		DeadlineUnixMs: src.DeadlineUnixMs,
-		PayloadSchema:  src.PayloadSchema,
 	}
 	if err := capabilityrt.ValidateSuspend(wire); err != nil {
 		return nil, err
@@ -48,6 +42,24 @@ func mapSuspendOutcome(src *v1.SuspendOutcome) (*contracts.CapabilitySuspend, er
 		out.WaitUntil = &until
 	}
 	return out, nil
+}
+
+// mapSuspendOutcome adapts a proto SuspendOutcome to the wire value consumed by
+// MapSuspend. Signal waits may carry a positive deadline as a bound; timer waits
+// require one. All validation and typed conversion live in MapSuspend.
+func mapSuspendOutcome(src *v1.SuspendOutcome) (*contracts.CapabilitySuspend, error) {
+	if src == nil {
+		return nil, nil
+	}
+
+	wire := &capabilityrt.Suspend{
+		CorrelationKey: src.CorrelationKey,
+		WaitType:       src.WaitType,
+		ExpectedSignal: src.ExpectedSignal,
+		DeadlineUnixMs: src.DeadlineUnixMs,
+		PayloadSchema:  src.PayloadSchema,
+	}
+	return MapSuspend(wire)
 }
 
 // suspendToWire renders the typed suspend into the additive JSON-envelope

@@ -206,9 +206,9 @@ type instanceAdapter struct {
 
 // Execute runs one execution through the runtime-backed instance.
 //
-// The transport has no typed suspend mapping yet; T-026 owns translating a
-// runtime's suspend response into the outcome. This adapter therefore returns
-// only a result or an error.
+// A runtime's suspend response is an outcome, not a failure: it is mapped into
+// CapabilityOutcome.Suspend so the engine can enter its durable wait instead of
+// completing an empty result. Result and error behavior is unchanged.
 func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	// Store attempt_id and logical_operation_id in the context so the
 	// worker can populate them on the gRPC ExecuteRequest.
@@ -222,6 +222,13 @@ func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.Execu
 	}
 	if resp.Error != "" {
 		return contracts.CapabilityOutcome{}, fmt.Errorf("capability runtime %s: %s", a.typ, resp.Error)
+	}
+	if resp.Suspend != nil {
+		suspend, err := process.MapSuspend(resp.Suspend)
+		if err != nil {
+			return contracts.CapabilityOutcome{}, fmt.Errorf("capability runtime %s: %w", a.typ, err)
+		}
+		return contracts.CapabilityOutcome{Suspend: suspend}, nil
 	}
 	return contracts.CapabilityOutcome{Result: resp.Result}, nil
 }
