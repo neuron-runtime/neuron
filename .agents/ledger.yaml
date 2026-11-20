@@ -829,11 +829,12 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/..."
       - "cd shared && GOWORK=off go test -count=1 ./..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/mechanism/... -run 'Suspend|Resume|Feature|Negotiat'"
-    status: needs_review
+    status: done
     lease: null
-    evidence: ["Coordinator claimed disjoint process/WASM/shared transport lease; dependencies T-023, T-024, and T-048 are done.", "Coder added additive suspend/resume JSON contracts, process proto mapping with deadline conversion and feature gating, WASM envelope encode/decode, and process/WASM conformance tests. Coder reported all criteria met after completing missing criterion 4.", "Coordinator independently verified `cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/...`, focused mechanism tests, and `cd shared && GOWORK=off go test -count=1 ./...` PASS; final full build and compile-all passed after T-028 compile errors were corrected.", "Committed as `f886b20`."]
+    evidence: ["Coordinator claimed disjoint process/WASM/shared transport lease; dependencies T-023, T-024, and T-048 are done.", "Coder added additive suspend/resume JSON contracts, process proto mapping with deadline conversion and feature gating, WASM envelope encode/decode, and process/WASM conformance tests. Coder reported all criteria met after completing missing criterion 4.", "Coordinator independently verified `cd nore && GOWORK=off go test -race -count=1 ./internal/mechanism/...`, focused mechanism tests, and `cd shared && GOWORK=off go test -count=1 ./...` PASS; final full build and compile-all passed after T-028 compile errors were corrected.", "Committed as `f886b20`.", "Independent reviewer PASS on all five criteria with build, focused mechanism tests, and shared module tests exit 0.", "Security APPROVE WITH NON-BLOCKING NOTES: no critical/high findings; untrusted metadata bounds, feature gating, malformed JSON, duplicate pass-through, and old-runtime compatibility verified.", "Architect initial BLOCK found production plugin dropped `resp.Suspend`; T-057 fixed it, and the architect explicitly CLEARED the block after reviewing the fix.", "Documenter APPROVE WITH NON-BLOCKING NOTES for the additive JSON wire change; full SDK docs and one stale `docs/ARCHITECTURE.md:990` claim remain T-031 scope.", "T-057 integrated the production handoff as `f4d8b7c`, clearing the architect BLOCK.", "Full integration gate `scripts/script.sh` passed after T-026/T-055/T-056/T-057: all Go modules and TypeScript packages built and tested successfully.", "All required reviewer, architect, security, and documenter sign-offs are recorded; task is complete."]
     reports: []
-    open_risks: ["One-shot `InvokeResponse` still cannot represent suspend; the future wire/product decision remains open.", "Public/additive JSON wire change requires documenter sign-off."]
+    commit: "f886b20; production handoff f4d8b7c"
+    open_risks: ["One-shot `InvokeResponse` still cannot represent suspend; the future wire/product decision remains open."]
 
   - id: T-027
     objective: "Implement execution-scoped signal delivery, authorization, idempotency, payload validation, and suspended-execution query"
@@ -845,7 +846,7 @@ tasks:
     owner: coder
     reviewer: reviewer
     signoff: [security, architect]
-    dependencies: [T-024]
+    dependencies: [T-024, T-055]
     acceptance:
       - "POST /v1/executions/{id}/signals/{name} and the existing instance-scoped route both work; handlers never mutate execution state"
       - "Body accepts deliveryId (required), payload, optional correlationKey"
@@ -857,12 +858,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/api/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/api/... -run 'Signal|Execution|Authorization|Wait'"
-    status: blocked
+    status: not_started
     lease: null
-    evidence: ["Coordinator claimed disjoint signal API lease; dependency T-024 is done.", "BLOCKER: API-only lease cannot satisfy criteria 1,3,4,5,7. `instance.Instance` exposes no scheduler or signal forwarder (`nore/internal/instance/instance.go:119,286-593`); authoritative `Scheduler.ResolveSignal` requires a resolved CapabilityID (`nore/internal/execution/scheduler/wait.go:217-317`); no wait lookup/ambiguity API exists; no payload schema validator or JSON-schema dependency exists. ADR 0001 `:208-212,289-290,346,365` assigns the missing forwarder to M2/T-024, which was not implemented. Coder made no changes.", "Attempted resolution: architect asked for a bounded boundary decision between instance/scheduler extension and API-local service; first architect follow-up returned no content and needs retry."]
+    evidence: ["Coordinator claimed disjoint signal API lease; dependency T-024 is done.", "BLOCKER: API-only lease cannot satisfy criteria 1,3,4,5,7. `instance.Instance` exposes no scheduler or signal forwarder (`nore/internal/instance/instance.go:119,286-593`); authoritative `Scheduler.ResolveSignal` requires a resolved CapabilityID (`nore/internal/execution/scheduler/wait.go:217-317`); no wait lookup/ambiguity API exists; no payload schema validator or JSON-schema dependency exists. ADR 0001 `:208-212,289-290,346,365` assigns the missing forwarder to M2/T-024, which was not implemented. Coder made no changes.", "Attempted resolution: architect asked for a bounded boundary decision between instance/scheduler extension and API-local service; first architect follow-up returned no content and needs retry.", "BLOCK CLEARED: binding architecture decision created T-055 as a bounded M2 prerequisite; T-055 implemented the authoritative hashing/validation, replay-first scheduler delivery, wait lookup, instance ownership forwarder, and production wait-store wiring.", "T-055 reached done as `c575bce`; full integration gate passed. T-027 may now be leased and implemented at the API boundary without duplicating execution-domain authority.", "Binding schema policy: empty schema accepts object payloads; supported JSON-schema object keywords are validated by the stdlib-only domain helper; opaque schema names retain compatibility with bounded object-shape validation and are explicitly not full JSON Schema."]
     reports: []
-    open_risks: ["Resume condition: coordinator decision expands scope/lease to implement the missing authoritative forwarder and defines schema-validation policy; then coder can complete T-027."]
-    open_risks: ["Security sign-off required for cross-execution authorization and delivery retention."]
+    open_risks: ["Security and architect sign-off are still required for cross-execution authorization, delivery retention, and API boundary behavior."]
 
   - id: T-028
     objective: "Expose wait deadline policy, execution max lifetime, and timer poll configuration with validation"
@@ -886,10 +886,11 @@ tasks:
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/runtimeconfig/..."
       - "cd application && GOWORK=off go test -count=1 ./config/... ./cmd/..."
-    status: needs_review
+    status: done
     lease: null
-    evidence: ["Coordinator claimed disjoint configuration lease; dependency T-024 is done.", "Coder added `ExecutionPolicy`, defaults/validation, deployment-only project denial, and CLI/env resolution; initial verification failed with `BindEnv` misuse and four unused `nore/cmd/nore/main.go` variables.", "Follow-up fixed `v.BindEnv` variadic spread and consumed resolved policy through `nore` flags/env with startup logging; coder verification passed application config/cmd tests, runtimeconfig tests, `nore` build, gofmt, and `git diff --check`.", "Independent reviewer: all six written criteria PASS with file:line evidence, but returned CHANGES_REQUESTED for a major public-contract defect: user-facing denial guidance advertises `neuron --wait-deadline-policy` flags that do not exist, and global config values are not forwarded to `nore` except via inherited shell env (`application/config/validate.go:59-68`, `application/internal/cli/cli.go:176-242`, `application/daemon/config.go:47-94`, `nore/main.go:90-93`). Minor: no minimum timer-poll interval and no malformed-env actionable-message coverage.", "Committed as `c1b5f41` with the integration/contract defect tracked for bounded follow-up before task completion."]
+    evidence: ["Coordinator claimed disjoint configuration lease; dependency T-024 is done.", "Coder added `ExecutionPolicy`, defaults/validation, deployment-only project denial, and CLI/env resolution; initial verification failed with `BindEnv` misuse and four unused `nore/cmd/nore/main.go` variables.", "Follow-up fixed `v.BindEnv` variadic spread and consumed resolved policy through `nore` flags/env with startup logging; coder verification passed application config/cmd tests, runtimeconfig tests, `nore` build, gofmt, and `git diff --check`.", "Independent reviewer: all six written criteria PASS with file:line evidence, but returned CHANGES_REQUESTED for a major public-contract defect: user-facing denial guidance advertises `neuron --wait-deadline-policy` flags that do not exist, and global config values are not forwarded to `nore` except via inherited shell env (`application/config/validate.go:59-68`, `application/internal/cli/cli.go:176-242`, `application/daemon/config.go:47-94`, `nore/main.go:90-93`). Minor: no minimum timer-poll interval and no malformed-env actionable-message coverage.", "Committed as `c1b5f41` with the integration/contract defect tracked for bounded follow-up before task completion.", "After T-056 remediation, independent reviewer RECHECK PASS: prior major finding resolved, all six criteria still met, and no regression in forwarding changes.", "Architect APPROVE WITH NON-BLOCKING NOTES: one authoritative validator, deployment-only boundary, primitive CLI/daemon-to-nore translation, no shared-type leakage or boundary drift.", "Security APPROVE WITH NON-BLOCKING NOTES: no secret leakage, bounded values, fail-closed validation, no new process/network/filesystem/privilege surface; settings flow only to `nore` argv and INFO logs.", "Full integration gate `scripts/script.sh` passed after T-028/T-056: all Go modules and TypeScript packages built and tested successfully.", "All required reviewer, architect, and security sign-offs are recorded; task is complete."]
     reports: []
+    commit: "c1b5f41; public-contract fix 373d671"
     open_risks: []
 
   - id: T-029
@@ -1063,11 +1064,12 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Signal|Wait|Schedule|Instance|Replay|Payload'"
       - "gofmt -l on changed Go files and git diff --check"
-    status: in_progress
-    lease: { owner: coder, paths: ["nore/internal/execution/signal_delivery.go", "nore/internal/execution/signal_delivery_test.go", "nore/internal/execution/store.go", "nore/internal/execution/scheduler/signal_delivery.go", "nore/internal/execution/scheduler/signal_delivery_test.go", "nore/internal/instance/signal_delivery.go", "nore/internal/instance/signal_delivery_test.go", "nore/internal/instance/execution_lookup.go", "nore/internal/instance/instance.go"], task: T-055 }
-    evidence: ["Coordinator claimed disjoint M2 boundary lease after binding architecture decision; T-024 is done.", "ADR 0001 D7 `:206-212`, edges `:289-290`, and module ownership `:328-329,342-346` require instance/scheduler ownership of signal lookup and forwarding."]
+    status: done
+    lease: null
+    evidence: ["Coordinator claimed disjoint M2 boundary lease after binding architecture decision; T-024 is done.", "ADR 0001 D7 `:206-212`, edges `:289-290`, and module ownership `:328-329,342-346` require instance/scheduler ownership of signal lookup and forwarding.", "Coder implemented authoritative payload hashing/validation, scheduler replay-first `DeliverSignal`, instance forwarding and execution ownership lookup, production `WithWaitStore` wiring, and focused tests at all three layers. Coder reported all seven criteria met.", "Coordinator observed only the exact T-055 lease paths changed for this task; T-056/T-057 changes are disjoint and uncommitted.", "Independent reviewer PASS on all seven criteria with `file:line` evidence; build, race tests for execution/instance, focused tests, gofmt, and `git diff --check` all passed.", "Security APPROVE WITH NON-BLOCKING NOTES: delivery records are execution-scoped, cross-instance misses are indistinguishable, replay hash is authoritative, resource bounds are enforced, storage keys are opaque and traversal-safe, and production wait-store wiring does not start a poll loop.", "Architect APPROVE WITH NON-BLOCKING NOTES: scheduler owns replay/lookup/validation, instance forwards without exposing scheduler types, no blueprint traversal, schema policy is in the domain, and no boundary drift.", "Full integration gate `scripts/script.sh` passed after T-055: all Go modules and TypeScript packages built and tested successfully.", "All required reviewer, architect, and security sign-offs are recorded; task is complete."]
     reports: []
-    open_risks: ["Payload-schema policy is bounded and documented; full JSON Schema is explicitly out of scope without a dependency.", "T-027 remains blocked until T-055 reaches done."]
+    commit: c575bce
+    open_risks: ["Payload-schema policy is bounded and documented; full JSON Schema is explicitly out of scope without a dependency."]
 
   - id: T-056
     objective: "Fix the T-028 public configuration contract and forwarding defect"
@@ -1091,8 +1093,36 @@ tasks:
       - "cd application && GOWORK=off go test -count=1 ./config/... ./internal/cli/... ./daemon/..."
       - "cd application && GOWORK=off go build ./..."
       - "gofmt -l on changed Go files and git diff --check"
-    status: in_progress
-    lease: { owner: coder, paths: ["application/config/validate.go", "application/config/operational_policy_test.go", "application/internal/cli/cli.go", "application/internal/cli/**/*_test.go", "application/daemon/config.go", "application/daemon/**/*_test.go"], task: T-056 }
-    evidence: ["Coordinator claimed disjoint CLI/config-contract lease in response to independent T-028 reviewer CHANGES_REQUESTED finding."]
+    status: done
+    lease: null
+    evidence: ["Coordinator claimed disjoint CLI/config-contract lease in response to independent T-028 reviewer CHANGES_REQUESTED finding.", "Coder changed denial messages to advertise only global config and `NEURON_*` env, forwarded four operational settings as `nore` flags in foreground CLI and daemon paths, and added CLI/daemon boundary tests. Coder verification passed application config/cli/daemon tests, build, vet, gofmt, and `git diff --check`.", "Independent reviewer PASS: denial messages name only real surfaces, both launch paths forward real `nore` flags, boundary tests are meaningful, defaults/validation unchanged, and no dependency/scope expansion.", "Architect APPROVE WITH NON-BLOCKING NOTES: application translates config across the binary boundary as primitive args, with no shared-type leakage or new dependency.", "Documenter APPROVE WITH NON-BLOCKING NOTES: env names and global-config surface are accurate and no nonexistent flag guidance remains.", "Full integration gate `scripts/script.sh` passed after T-056: all Go modules and TypeScript packages built and tested successfully.", "All required reviewer, architect, and documenter sign-offs are recorded; task is complete."]
     reports: []
-    open_risks: ["T-028 cannot reach done until this defect is fixed and re-reviewed."]
+    commit: 373d671
+    open_risks: []
+
+  - id: T-057
+    objective: "Complete the production suspend outcome handoff from capability transport to engine contract"
+    scope:
+      - "nore/internal/plugin/plugin.go"
+      - "nore/internal/plugin/*_test.go"
+      - "nore/internal/mechanism/process/suspend.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-026]
+    acceptance:
+      - "A negotiated suspend response crossing `instanceAdapter.Execute` produces a typed `CapabilityOutcome.Suspend`, not an empty successful outcome"
+      - "One authoritative exported mapping function maps shared capability-runtime suspend data to the engine contract and is used by both process and plugin adapters"
+      - "No-suspend and explicit error responses preserve existing behavior"
+      - "A boundary test exercises the adapter and proves no empty-result completion path"
+    verification:
+      - "cd nore && GOWORK=off go build ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/plugin/... ./internal/mechanism/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/plugin/... -run 'Suspend|Outcome'"
+      - "gofmt -l on changed files and git diff --check"
+    status: done
+    lease: null
+    evidence: ["Created in response to architect BLOCK on T-026: `instanceAdapter.Execute` dropped `resp.Suspend`, allowing an empty-result completion.", "Coder added `process.MapSuspend`, used it from process and plugin adapters, and added `nore/internal/plugin/suspend_test.go`. Verification passed build, race tests for plugin/mechanism, focused adapter tests, gofmt, and `git diff --check`.", "Independent reviewer APPROVED all four criteria; adapter tests fail on pre-change code, no-suspend/error paths are preserved, and the T026 BLOCK is technically cleared.", "Architect APPROVE WITH NON-BLOCKING NOTES and explicitly CLEARED the prior T026 BLOCK: one authoritative mapping, no new dependency inversion, adapter boundary test proves no empty completion.", "Security APPROVE WITH NON-BLOCKING NOTES: malformed suspend fails closed, error handling is preserved, no new I/O/privilege/network/filesystem behavior, and one authoritative validator/mapping.", "Full integration gate `scripts/script.sh` passed after T-057: all Go modules and TypeScript packages built and tested successfully.", "All required reviewer, architect, and security sign-offs are recorded; task is complete."]
+    reports: []
+    commit: f4d8b7c
+    open_risks: []
