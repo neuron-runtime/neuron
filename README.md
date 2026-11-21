@@ -41,6 +41,8 @@ An assembly can be authored in any programming language that produces the Neuron
 
 At build time, Neuron compiles the manifest, resolves required external capability runtimes to exact versions, and freezes them. At run time, a project runtime executes the assembly according to the compiled plan and returns the assembly result. Because capabilities are reached through contracts, the physical location of a capability — in-process, a local worker, or a remote host — does not change the shape of the assembly.
 
+A capability may suspend instead of completing: it declares a signal or timer wait, and a later invocation of the same logical operation resumes it with a delivery payload. This protocol extension is additive and feature-gated; the wait and signal primitives exist, but the production due-timer poll loop and dispatch reconciler are not wired yet, so end-to-end restart behavior is not claimed. See [Waiting and signals](./docs/ARCHITECTURE.md#waiting-and-signals).
+
 ## Why Neuron
 
 The boundary Neuron introduces is between the definition of an assembly and the mechanisms that execute it.

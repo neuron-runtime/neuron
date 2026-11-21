@@ -14,8 +14,8 @@ Neuron is a runtime for building and operating complex software systems from com
 >
 > - **New to Neuron** — [The core idea](#the-core-idea), [The canonical pipeline](#the-canonical-pipeline), [What lives where](#what-lives-where).
 > - **Authoring an assembly** — [Assembly definition](#assembly-definition), [Authoring surfaces](#authoring-surfaces), [Building & loading](#building--loading).
-> - **Understanding the runtime** — [N.O.R.E. at a glance](#nore-at-a-glance), [The execution model](#the-execution-model), [Executing one capability](#executing-one-capability).
-> - **Implementing or hosting capability runtimes** — [The capability runtime contract](#the-capability-runtime-contract), [The process runtime](#the-process-runtime), [The WASM runtime](#the-wasm-runtime).
+> - **Understanding the runtime** — [N.O.R.E. at a glance](#nore-at-a-glance), [The execution model](#the-execution-model), [Executing one capability](#executing-one-capability), [Waiting and signals](#waiting-and-signals).
+> - **Implementing or hosting capability runtimes** — [The capability runtime contract](#the-capability-runtime-contract), [The process runtime](#the-process-provider), [The WASM runtime](#the-wasm-runtime).
 
 ---
 
@@ -467,7 +467,7 @@ Manifests declare the protocol honestly:
 
 ### The protocol
 
-Defines the wire data model of an execution: a `Request` with a `Params` map, and a `Response` with a `Result` map and an optional `Error` string. Two transports carry this data:
+Defines the wire data model of an execution: a `Request` with a `Params` map, and a `Response` with a `Result` map and an optional `Error` string. An additive v1 extension adds an optional `resume` input to the request and an optional `suspend` outcome to the response; absent fields preserve the original wire shape. Two transports carry this data:
 
 | Protocol | Transport | Used by |
 | --- | --- | --- |
@@ -475,6 +475,8 @@ Defines the wire data model of an execution: a `Request` with a `Params` map, an
 | `neuron/capability-runtime-v1-json` | One-shot line-delimited JSON over stdio | WASI modules and legacy process capability runtimes |
 
 The gRPC surface is `CapabilityRuntimeService` in `shared/protocol/capabilityruntime/v1/capability_runtime.proto`, with `Initialize`, `Execute`, `Health`, and `Shutdown` RPCs. It carries the handshake, protocol version, identity, capabilities, structured input/output/errors, cancellation, deadlines, and health.
+
+Suspend is opt-in and additive. A capability runtime must advertise `suspend` in `InitializeResponse.features` before it may return a suspend outcome; a client that did not negotiate the feature rejects the outcome explicitly instead of treating the response as an empty success. An executor may request only `signal` or `timer` waits — `deadline` is an engine-internal policy and is rejected in an executor-supplied suspend. Suspend is not a stackful continuation: a later fresh `Execute` carries the same logical operation ID, a new attempt ID, and a resume input, so the capability must reconstruct its state from the params and deduplicate on the delivery ID. Both transports validate untrusted suspend and resume metadata at the boundary before it reaches the execution domain. Neuron ships executor SDKs for Go and .NET only; there is no TypeScript executor SDK. See [Waiting and signals](#waiting-and-signals).
 
 > [!NOTE]
 > A non-empty `Error` in a response is a **controlled failure**, even when the process exits zero.
@@ -717,7 +719,7 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-Executions honor deadlines, support cancellation, and always finish in a terminal state.
+Executions honor deadlines and support cancellation. A capability may also enter a wait instead of completing: the execution is then `waiting`, is excluded from in-flight worker accounting, and can remain non-terminal until a signal or timer resumes it.
 
 ### One failure fails the execution
 
@@ -750,6 +752,30 @@ A client cancels an execution with `POST /v1/instances/{id}/executions/{execID}/
 Detached work is cancelled through its own execution. A detached task outlives the execution that handed off to it, so cancelling that execution leaves the task running under its own scope — and cancelling the task's execution stops it.
 
 `neuron run` cancels on Ctrl-C and keeps streaming until the cancellation is reported, so the outcome is presented like any other terminal state rather than the CLI exiting silently while the work continues. A second Ctrl-C force-quits.
+
+## Waiting and signals
+
+A capability that needs external input can **suspend** instead of completing. The engine records a durable wait on the capability (`signal`, `timer`, or engine-owned `deadline`) with its reason, correlation key, expected signal, wait deadline, and payload schema, and derives `waiting` status for the execution when no runnable work remains. This is the state-machine and protocol contract implemented in N.O.R.E.; it is separate from [durability modes](#durability-modes), which decide what survives a restart.
+
+The primary signal route is `POST /v1/executions/{id}/signals/{name}`. `POST /v1/instances/{id}/executions/{execID}/signals/{signalName}` remains as a compatibility surface with the same behavior. The owning instance is resolved from the durable execution record, so a caller cannot address an execution through the wrong instance. The request body requires `deliveryId` and accepts an optional `payload` object and `correlationKey`. The delivery is persisted before the acknowledgement is written; the HTTP handler only validates the request and maps the domain result, and never mutates execution state or walks the assembly blueprint.
+
+Delivery identifiers are idempotency keys. Presenting the same `deliveryId` with the same payload again returns `200` with `status: "replay"` and creates no second transition; reusing a `deliveryId` with a different payload returns `409` (`signal_delivery_conflict`). A payload is validated against the wait's declared schema; the validator is a bounded, standard-library object-shape check, not full JSON Schema. Wait selection and delivery are decided in the execution domain, which also rejects ambiguous waits.
+
+Signal error responses carry a stable `code` alongside the HTTP status so callers can branch without parsing the message:
+
+| Condition | Status | Code |
+| --- | --- | --- |
+| Missing, malformed, or oversized request fields | 400 | `invalid_signal_request` |
+| Payload does not satisfy the wait schema | 400 | `invalid_signal_payload` |
+| No matching wait, or execution/instance not found (cross-instance misses are indistinguishable) | 404 | `no_matching_wait` / `execution_not_found` |
+| More than one wait matches, or `deliveryId` reused with a different payload | 409 | `ambiguous_wait` / `signal_delivery_conflict` |
+| Wait expired or execution already terminal | 410 | `signal_expired` |
+| Durable wait store unavailable | 503 | `signal_unavailable` |
+
+`GET /v1/instances/{id}/executions` accepts `?status=waiting` and projects each suspended capability's wait type, expected signal, wait reason, correlation key, and deadline. The projection reads persisted wait state, so restored executions expose the same details as live ones.
+
+> [!NOTE]
+> These are implemented contracts and primitives, not a complete hosted suspend/resume lifecycle. The store exposes a limit-bounded claim over the dispatch-intent prefix, but bounded discovery is in progress as T-060, and production host reconciliation — the due-timer poll loop and dispatch-intent reconciler — remains unwired until T-050. Durable restart/end-to-end acceptance tests are not yet complete. A timer whose due time passes with no consumer running is therefore not yet guaranteed to fire. Signal delivery, wait state, retry waits, and recovery of restored waits are implemented and tested at their respective boundaries. PostgreSQL parity is not claimed without a test DSN.
 
 ## Event streaming
 
@@ -955,7 +981,7 @@ Transactions are required when one logical operation writes more than one key:
 - **Assembly registration** writes the artifact and updates the version index atomically. Superseded artifacts are retained, so registration never deletes work a durable execution still references. A failed registration leaves no partial artifact or index entry.
 - **Execution save** reads the persisted revision, compares it with the writer's revision, and writes the next snapshot in one transaction. This is the compare-and-swap guard that rejects a stale writer.
 - **Execution transition plus dispatch intent** persists the next execution snapshot and the ready dispatch intents atomically. A stale writer is rejected and a failed intent write rolls back the transition.
-- **Timer claim** (Phase 5) will use the same boundary. It is not implemented yet.
+- **Timer operations** use `Store.WithTimer`, which shares the main KV surface with a due-time-indexed timer surface. `PutTimer` records an explicit due time; `DueTimers` returns at most `limit` due, unleased timers ordered by due time then key; `ClaimTimer`, `RenewTimer`, and `DeleteTimerOwned` use an opaque per-claim owner token so a stale claimant cannot complete or extend another worker's timer. The shared contract suite exercises these operations on memory and SQLite; PostgreSQL coverage is gated on a test DSN and is not claimed here.
 
 Single-key reads and writes use the plain `Store`; they do not need a transaction.
 
@@ -987,7 +1013,22 @@ The policy surface names three modes, configured at `runtime.execution.durabilit
 | `runtime.execution.durability: history` | Execution and event history is retained for inspection, but unfinished work is not resumed. Restore marks it failed. This is the default. |
 | `runtime.execution.durability: durable` | Execution transitions and dispatch intent are persisted atomically; unfinished work is restored and resumed from the last committed state, with at-least-once dispatch. Startup refuses a non-transactional backend when this mode is selected. |
 
-All three modes are wired through the CLI, daemon, and project launch paths. Recovery restores pending and running root executions, recorded joins, and detached tasks against the execution's immutable artifact. Retry timers and suspended waits are Phase 5 work and are not yet resumed.
+All three modes are wired through the CLI, daemon, and project launch paths. Recovery restores pending and running root executions, recorded joins, detached tasks, durable retry waits, and suspended waits against the execution's immutable artifact; snapshots carry wait state and the execution deadline. The capability-level suspend/resume contract and the state machine that resumes restored waits are implemented and tested at their boundaries.
+
+The store (`nore/internal/execution/store.go`) exposes a limit-bounded claim over the dispatch-intent prefix, but that is neither bounded discovery nor host reconciliation. Bounded discovery is in progress as T-060, and the production due-timer poll loop and dispatch-intent reconciler are not wired into the daemon until T-050; durable restart/end-to-end acceptance tests are still incomplete. PostgreSQL parity remains unverified without a test DSN.
+
+### Execution policy
+
+Wait and timer behavior is also governed by deployment-level settings under `runtime.execution`. These are operational settings owned by the deployment, not by an assembly: project configuration rejects the key, and values are supplied through global configuration, `NEURON_*` environment variables, or `nore` flags before being forwarded to N.O.R.E. They never enter assembly identity and never turn a non-durable execution into a durable one.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `runtime.execution.waitDeadlinePolicy` | `fail` | Action when a wait deadline expires: `fail` (capability fails with `wait_timeout`), `cancel`, or `continue` (resume as though satisfied). |
+| `runtime.execution.maxLifetime` | `720h` (30 days) | Bound on the whole execution; `0` disables it. Distinct from a capability's `execution.timeout`. |
+| `runtime.execution.timerPoll.interval` | `1s` | Cadence of a due-timer consumer; must be greater than zero and at most `1m`. |
+| `runtime.execution.timerPoll.batchSize` | `256` | Maximum due timers claimed in one pass; must be between 1 and `4096`. |
+
+The short environment names are `NEURON_WAIT_DEADLINE_POLICY`, `NEURON_EXECUTION_MAX_LIFETIME`, `NEURON_TIMER_POLL_INTERVAL`, and `NEURON_TIMER_POLL_BATCH_SIZE`. Invalid values fail configuration load rather than falling back silently. These settings are parsed, validated, and forwarded, but the host does not yet start the due-timer poll loop that would consume the interval and batch size, so they do not yet produce periodic timer-driven resumes. See [Waiting and signals](#waiting-and-signals).
 
 ### Artifact retention
 

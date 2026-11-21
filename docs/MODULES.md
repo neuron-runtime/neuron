@@ -285,10 +285,10 @@ The runtime therefore never resolves anything — it receives a closed set of fr
 
 The Neuron runtime hosts external modules out-of-process. It dispatches on `runtime.type`:
 
-- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [the process runtime](./ARCHITECTURE.md#the-process-runtime).
+- **Process runtime** — a native worker process, launched per instance from the frozen entrypoint, kept alive and reused across requests, health-checked, cancellation/deadline-aware, and gracefully terminated. See [the process runtime](./ARCHITECTURE.md#the-process-provider).
 - **WASM runtime** — a WASI module loaded into an embedded, sandboxed runtime, with a fresh module instance per request. See [the WASM runtime](./ARCHITECTURE.md#the-wasm-runtime).
 
-The runtime never assumes an implementation language. The contract is the frozen resolved-capability-runtime record (runtime type, protocol, entrypoint, exact version) plus the declared wire protocol.
+The runtime never assumes an implementation language. The contract is the frozen resolved-capability-runtime record (runtime type, protocol, entrypoint, exact version) plus the declared wire protocol. Neuron ships executor SDKs for Go and .NET only; there is no TypeScript executor SDK.
 
 ---
 
@@ -298,7 +298,7 @@ The backbone of the capability runtime boundary is a stable, language-neutral wi
 
 ### `neuron/capability-runtime-v1` — gRPC
 
-The canonical protocol for **long-lived** capability runtimes. Spoken over gRPC (protobuf) on a Unix domain socket, so the transport is local and authenticated by filesystem permissions. The service definition lives in `shared/protocol/capabilityruntime/v1` and covers identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. The process runtime uses it for durable, reusable workers.
+The canonical protocol for **long-lived** capability runtimes. Spoken over gRPC (protobuf) on a Unix domain socket, so the transport is local and authenticated by filesystem permissions. The service definition lives in `shared/protocol/capabilityruntime/v1` and covers identity, capabilities, initialization, execution, structured input/output/errors, cancellation, deadlines, and health. The process runtime uses it for durable, reusable workers. An additive v1 extension carries an optional `resume` input on `ExecuteRequest` and an optional `suspend` outcome on `ExecuteResponse`, gated on the `suspend` feature advertised during `Initialize`. See [waiting and signals](./ARCHITECTURE.md#waiting-and-signals).
 
 ### `neuron/capability-runtime-v1-json` — one-shot JSON over stdio
 
@@ -320,6 +320,8 @@ Response:
 ```
 
 A controlled failure can be reported in-band (`"error": "..."`, possibly with exit zero); the runtime treats a non-empty `error` as an execution failure and surfaces it downstream.
+
+The JSON envelope also accepts optional `resume` and `suspend` fields additively; a module that omits them keeps the one-shot shape above. The N.O.R.E. WASM transport decodes and validates these fields. The Go SDK's stdin/stdout mode rejects a suspend outcome explicitly, so suspend-capable Go capability runtimes must use the gRPC process transport.
 
 The runtime also injects execution context as environment variables, so a capability runtime can observe which protocol version, logical type, and exact version it is being run as:
 

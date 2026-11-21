@@ -86,39 +86,41 @@ This is a production-shaped capability runtime — real input structure, real ou
 
 ## The Handler contract
 
-A capability runtime is implemented as an `executor.Handler` with four callbacks:
+A capability runtime is implemented as an `executor.Handler` with `Initialize`, `Execute`, an optional `ExecuteWithRequest`, `Health`, and `Shutdown` callbacks:
 
 
-| Callback     | When it runs                           | Responsibility                                               |
-| ------------ | -------------------------------------- | ------------------------------------------------------------ |
-| `Initialize` | Once per process, before anything else | Negotiate protocol version; return identity and capabilities |
-| `Execute`    | Once per execution                     | Run the capability and return the output map                 |
-| `Health`     | Periodically by the runtime            | Report readiness to accept requests (`nil` → always healthy) |
-| `Shutdown`   | Before the process terminates          | Release resources gracefully (`nil` → terminate immediately) |
+| Callback             | When it runs                           | Responsibility                                                        |
+| -------------------- | -------------------------------------- | --------------------------------------------------------------------- |
+| `Initialize`         | Once per process, before anything else | Negotiate protocol version; return features and metadata               |
+| `Execute`            | Once per execution                     | Run the capability and return the output map (legacy entry point)     |
+| `ExecuteWithRequest` | Once per execution, when set           | Supersedes `Execute`; receives resume input and may return a suspend  |
+| `Health`             | Periodically by the runtime            | Report readiness to accept requests (`nil` → always healthy)          |
+| `Shutdown`           | Before the process terminates          | Release resources gracefully (`nil` → terminate immediately)          |
 
 
 ```go
 type Handler struct {
-    Initialize func(ctx context.Context, protocol string, metadata map[string]string) (*InitializeResult, error)
-    Execute    func(ctx context.Context, input map[string]any) (map[string]any, error)
-    Health     func(ctx context.Context) error
-    Shutdown   func(ctx context.Context) error
+    Initialize         func(ctx context.Context, protocol string, metadata map[string]string) (*InitializeResult, error)
+    Execute            func(ctx context.Context, params map[string]any) (map[string]any, error)
+    ExecuteWithRequest func(ctx context.Context, req ExecutionRequest) (*ExecutionResult, error)
+    Health             func(ctx context.Context) error
+    Shutdown           func(ctx context.Context) error
 }
 ```
 
-`Serve` requires both `Initialize` and `Execute`; a handler missing either is rejected at startup.
+`Serve` requires `Initialize` and at least one execution callback — `Execute` or `ExecuteWithRequest`; a handler missing `Initialize` or both execution callbacks is rejected at startup. When set, `ExecuteWithRequest` supersedes `Execute`.
 
 `InitializeResult` carries the capability runtime's side of the negotiation:
 
 ```go
 type InitializeResult struct {
     ProtocolVersion string
-    Capabilities    []string
+    Features        []string
     Metadata        map[string]string
 }
 ```
 
-Return the protocol version you support in `ProtocolVersion`. A known protocol is mirrored back; when left empty, the SDK fills in the canonical value (`neuron/capability-runtime-v1`). The constants live in `shared/types/capabilityruntime`.
+Return the protocol version you support in `ProtocolVersion`. A known protocol is mirrored back; when left empty, the SDK fills in the canonical value (`neuron/capability-runtime-v1`). The constants live in `shared/types/capabilityruntime`. Declare `v1.SuspendFeature` (`"suspend"`, from `shared/protocol/capabilityruntime/v1`) in `Features` only if the capability can return a suspend outcome.
 
 ---
 
@@ -192,7 +194,6 @@ func main() {
 		Initialize: func(ctx context.Context, protocol string, metadata map[string]string) (*executor.InitializeResult, error) {
 			return &executor.InitializeResult{
 				ProtocolVersion: shadexec.ProtocolV1,
-				Capabilities:    []string{"document.metadata.extract"},
 				Metadata: map[string]string{
 					"capability": "content.document-metadata",
 				},
@@ -227,6 +228,55 @@ func main() {
 
 > [!TIP]
 > Keep the business logic (`extractMetadata`) separate from the handler glue. The pure function is unit-testable without the SDK, and the handler stays a thin protocol adapter.
+
+---
+
+## Suspending and resuming a capability
+
+Suspend is an additive, opt-in v1 extension. A capability that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the capability again with the same logical operation ID, a new attempt ID, and a resume input. It is not a stackful continuation: reconstruct state from `req.Params` and deduplicate on `req.Resume.DeliveryID`.
+
+```go
+import (
+    "context"
+    "log"
+
+    executor "github.com/neuron-runtime/neuron/packages/executor-sdks/golang"
+    v1 "github.com/neuron-runtime/neuron/shared/protocol/capabilityruntime/v1"
+)
+
+func main() {
+    if err := executor.Serve(executor.Handler{
+        Initialize: func(ctx context.Context, protocol string, metadata map[string]string) (*executor.InitializeResult, error) {
+            return &executor.InitializeResult{Features: []string{v1.SuspendFeature}}, nil
+        },
+        ExecuteWithRequest: func(ctx context.Context, req executor.ExecutionRequest) (*executor.ExecutionResult, error) {
+            if req.Resume != nil {
+                // Reconstruct state from req.Params; dedupe on req.Resume.DeliveryID.
+                return &executor.ExecutionResult{Result: map[string]any{"resumed": true}}, nil
+            }
+            return &executor.ExecutionResult{Suspend: &executor.SuspendOutcome{
+                WaitType:       executor.WaitTypeSignal,
+                ExpectedSignal: "approval",
+                CorrelationKey: req.LogicalOperationID,
+            }}, nil
+        },
+    }); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+Rules enforced by the SDK:
+
+- `WaitType` must be `WaitTypeSignal` or `WaitTypeTimer`. A signal wait requires `ExpectedSignal`; a timer wait requires `DeadlineUnixMs > 0`. `deadline` is an engine-internal cause, not an executor wait type.
+- `Result` and `Error` must be empty when `Suspend` is set.
+- `Initialize` must advertise `v1.SuspendFeature`; otherwise the SDK returns an explicit `unsupported_suspend_outcome` error rather than an empty success.
+- `req.Resume` carries `Cause`, `SignalName`, `DeliveryID`, and `Payload`. `Cause` may be `signal`, `timer`, or `deadline`.
+
+Handlers that implement only `Execute` keep the original wire behavior; absent `resume`/`suspend` fields preserve the pre-extension protocol.
+
+> [!NOTE]
+> Suspend support in this SDK requires the gRPC process transport. In one-shot stdin/stdout mode (the WASM path), returning a suspend outcome produces `unsupported_suspend_outcome: the stdin/stdout JSON transport cannot carry a suspend outcome`. The N.O.R.E. WASM runtime itself decodes the additive JSON fields, but this SDK's stdio mode does not emit or consume them.
 
 ---
 
@@ -353,6 +403,8 @@ printf '{"input":{"document":{"name":"report.md","content":"# Q3 Revenue\n\nReve
 >
 > The implementation may be written in Go, .NET, Java, Rust, Python, another language, or authored as a WebAssembly module, whatever speaks the declared protocol. `executor-go` is one implementation SDK for building capability runtimes; it is never a requirement.
 
+Neuron ships executor SDKs for Go and .NET only; there is no TypeScript executor SDK.
+
 The two declared protocols are language-neutral:
 
 - `neuron/capability-runtime-v1` — gRPC: implement `CapabilityRuntimeService` from the proto schema in `shared/protocol/capabilityruntime/v1/capability_runtime.proto` in any language with gRPC support.
@@ -370,7 +422,7 @@ The two declared protocols are language-neutral:
 | Implementation     | `packages/executor-sdks/golang/`                                  |
 | gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
 | Contract types     | `shared/types/capabilityruntime`                                  |
-| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-runtime) |
+| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-provider) |
 | WASM runtime       | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-wasm-runtime)     |
 | Capability runtime model | [docs/MODULES.md](../../../docs/MODULES.md)            |
 | Reference capability runtime | `examples/capability-runtimes/echo` (single source, native + WASI) |

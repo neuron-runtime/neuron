@@ -43,7 +43,7 @@ A capability runtime is implemented as an `ExecutorHandler` with four callbacks:
 
 | Callback    | When it runs                           | Responsibility                                              |
 | ----------- | -------------------------------------- | ----------------------------------------------------------- |
-| `Initialize` | Once per process, before anything else | Negotiate protocol version; return identity and capabilities |
+| `Initialize` | Once per process, before anything else | Negotiate protocol version; return features and metadata |
 | `Execute`   | Once per execution                     | Run the capability and return the result                    |
 | `Health`    | Periodically by the runtime            | Report readiness to accept requests (`null` → always healthy) |
 | `Shutdown`  | Before the process terminates          | Release resources gracefully (`null` → terminate immediately) |
@@ -54,7 +54,7 @@ var handler = new ExecutorHandler
     Initialize = (protocol, metadata, ct) => new ValueTask<InitializeResult>(
         new InitializeResult { ProtocolVersion = ExecutorConstants.ProtocolV1 }),
     Execute = (input, context, ct) => new ValueTask<ExecutionResult>(
-        new ExecutionResult { Output = input }),
+        new ExecutionResult { Result = input }),
     Health = ct => ValueTask.CompletedTask,
     Shutdown = ct => ValueTask.CompletedTask,
 };
@@ -70,14 +70,14 @@ return await ExecutorServer.RunAsync(handler);
 public sealed class InitializeResult
 {
     public string ProtocolVersion { get; init; }
-    public IReadOnlyList<string> Capabilities { get; init; }
+    public IReadOnlyList<string> Features { get; init; }
     public IReadOnlyDictionary<string, string> Metadata { get; init; }
 }
 ```
 
-Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/capability-runtime-v1`), mirroring `packages/executor-sdks/golang`.
+Return the protocol version you support in `ProtocolVersion`. When left empty, the SDK fills in the canonical value (`neuron/capability-runtime-v1`), mirroring `packages/executor-sdks/golang`. Declare `ExecutorConstants.SuspendFeature` (`"suspend"`) in `Features` only if the handler can return a suspend outcome.
 
-`Execute` receives the resolved input map plus an `ExecuteContext` (execution id, timeout, correlation id) and returns `ExecutionResult` with an output map. Setting `ExecutionResult.Error` records a **controlled failure** — the request still succeeds over the transport, and the runtime surfaces the message as an execution failure, exactly like an error in the Go SDK.
+`Execute` receives the resolved input map plus an `ExecuteContext` (execution id, timeout, correlation id, attempt id, logical operation id, and optional `Resume`) and returns `ExecutionResult` with a result map. Setting `ExecutionResult.Error` records a **controlled failure** — the request still succeeds over the transport, and the runtime surfaces the message as an execution failure, exactly like an error in the Go SDK. Setting `ExecutionResult.Suspend` asks N.O.R.E. to record a durable wait instead of completing; see [Suspending and resuming a capability](#suspending-and-resuming-a-capability).
 
 ---
 
@@ -92,7 +92,6 @@ var handler = new ExecutorHandler
         new InitializeResult
         {
             ProtocolVersion = ExecutorConstants.ProtocolV1,
-            Capabilities = new[] { "document.metadata.extract" },
             Metadata = new Dictionary<string, string> { ["capability"] = "content:document-metadata" },
         }),
 
@@ -108,7 +107,7 @@ var handler = new ExecutorHandler
 
         return new ExecutionResult
         {
-            Output = new Dictionary<string, object?>
+            Result = new Dictionary<string, object?>
             {
                 ["metadata"] = new Dictionary<string, object?>
                 {
@@ -129,6 +128,58 @@ return await ExecutorServer.RunAsync(handler);
 
 > [!TIP]
 > Keep the business logic (`ExtractMetadata`) separate from the handler glue. The pure function is unit-testable without the SDK, and the handler stays a thin protocol adapter.
+
+---
+
+## Suspending and resuming a capability
+
+Suspend is an additive, opt-in v1 extension. A handler that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the handler again with the same logical operation ID, a new attempt ID, and `ExecuteContext.Resume`. It is not a stackful continuation: reconstruct state from the input and deduplicate on `Resume.DeliveryId`.
+
+```csharp
+using Neuron.Executor;
+
+var handler = new ExecutorHandler
+{
+    Initialize = (protocol, metadata, ct) => new ValueTask<InitializeResult>(
+        new InitializeResult
+        {
+            Features = new[] { ExecutorConstants.SuspendFeature },
+        }),
+
+    Execute = (input, context, ct) =>
+    {
+        if (context.Resume is not null)
+        {
+            // Reconstruct state from input; dedupe on context.Resume.DeliveryId.
+            return new ValueTask<ExecutionResult>(
+                new ExecutionResult { Result = new Dictionary<string, object?> { ["resumed"] = true } });
+        }
+
+        return new ValueTask<ExecutionResult>(
+            new ExecutionResult
+            {
+                Suspend = new SuspendOutcome
+                {
+                    WaitType = ExecutorConstants.WaitTypeSignal,
+                    ExpectedSignal = "approval",
+                    CorrelationKey = context.LogicalOperationId,
+                },
+            });
+    },
+};
+
+return await ExecutorServer.RunAsync(handler);
+```
+
+Rules enforced by the SDK:
+
+- `WaitType` must be `ExecutorConstants.WaitTypeSignal` or `ExecutorConstants.WaitTypeTimer`. A signal wait requires `ExpectedSignal`; a timer wait requires `DeadlineUnixMs > 0`.
+- `Result` must be empty and `Error` unset when `Suspend` is set.
+- `Initialize` must advertise `ExecutorConstants.SuspendFeature`; otherwise the SDK returns an explicit `unsupported_suspend_outcome` error rather than an empty success.
+- `context.Resume` carries `Cause`, `SignalName`, `DeliveryId`, and `Payload`. Causes are `signal`, `timer`, and the engine-owned `deadline`.
+- This SDK implements only the gRPC process transport; there is no JSON/WASM suspend path here.
+
+Handlers that never set `Suspend` keep the original wire behavior; absent fields preserve the pre-extension protocol.
 
 ---
 
@@ -170,7 +221,12 @@ On the way back, numeric protobuf values that are whole numbers are returned as 
 > [!IMPORTANT]
 > A Capability Runtime is a runtime implementation of a Capability contract. It is **not** required to be written in .NET, nor compiled to WASM. `executor-dotnet` is one implementation SDK; `executor-go` is another; any language with gRPC support can implement `neuron/capability-runtime-v1`.
 
+Neuron ships executor SDKs for Go and .NET only; there is no TypeScript executor SDK.
+
 The gRPC contract lives once in `shared/protocol/capabilityruntime/v1/capability_runtime.proto`. This SDK references that file via `Grpc.Tools` — it is never copied, so the wire contract has a single source of truth.
+
+> [!NOTE]
+> Validation performed for this SDK: `dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` passed 38 tests (`net10.0`). No .NET-specific end-to-end conformance against a running N.O.R.E. host, timer poll, or restart scenario has been run; the SDK tests cover protocol mapping and validation only.
 
 ---
 
@@ -182,7 +238,7 @@ The gRPC contract lives once in `shared/protocol/capabilityruntime/v1/capability
 | Go SDK (parity)    | [packages/executor-sdks/golang](../../../packages/executor-sdks/golang/README.md) |
 | gRPC schema        | `shared/protocol/capabilityruntime/v1/capability_runtime.proto`  |
 | Contract types     | `shared/types/capabilityruntime`                                  |
-| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-runtime) |
+| Process runtime    | [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#the-process-provider) |
 | Capability runtime model | [docs/MODULES.md](../../../docs/MODULES.md)            |
 
 ## License
