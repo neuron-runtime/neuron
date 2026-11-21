@@ -180,7 +180,7 @@ Flags:
       --remote string              Remote Neuron runtime endpoint (e.g., http://host:port)
 ```
 
-`neuron run` is a client of the project runtime. It discovers the project's runtime endpoint (from `.neuron/` state or the project config), sends one synchronous execution request, and prints the Assembly result to stdout. It does not stream events or return execution handles — advanced execution inspection is exposed through the API rather than the normal `run` output.
+`neuron run` is a client of the project runtime. It discovers the project's runtime endpoint (from `.neuron/` state or the project config), sends one synchronous execution request, and prints the Assembly result to stdout. It does not stream events or return execution handles; to inspect, signal, or cancel an execution, use the [`neuron instance`](#neuron-instance) commands.
 
 The Assembly is addressed by the `assembly` selector on the request URL, never inside the params payload, so the same command works whether the runtime hosts one Assembly or many. Without an argument, `neuron run` uses the key of the current project build — the one `neuron build` recorded in `.neuron/current.json`. With a target argument it addresses that Assembly instead:
 
@@ -230,7 +230,7 @@ neuron run -c example:echo@1.0.0 --params '{"message":"hi"}'
 
 Core runtimes (`set`, `ai`, `command`, `delay`, `http`, `log` under `neuron:core:`) are compiled into N.O.R.E. and are never installed, so they take no version — `neuron:core:set@1.0.0` is rejected — and resolve without touching the store. Installed artifacts resolve from the machine-global store only and are never fetched or installed implicitly. `--capability-runtime` cannot be combined with a target argument, `--remote`, or `--port`; the result prints to stdout in `--format` exactly as Assembly mode does.
 
-Starting, observing, streaming, and cancelling executions remain available as advanced API operations: starting an execution (optionally detached), streaming its events, and cancelling a specific execution.
+Starting an execution (optionally detached) and streaming its events remain advanced API operations. Cancelling a specific execution is also available from the CLI with `neuron instance cancel`, and waiting executions can be inspected with `neuron instance list --status waiting`; see [`neuron instance`](#neuron-instance).
 
 ### `neuron add`
 
@@ -450,9 +450,11 @@ Usage:
   neuron instance [command]
 
 Available Commands:
+  cancel      Cancel a waiting or running execution
   clear       Remove all instances and their executions and events
   list        List instances or executions of a specific instance
   remove      Remove an instance and its executions and events
+  signal      Deliver a signal to a waiting execution
 ```
 
 An instance is a living realization of a registered assembly. `neuron run` creates one implicitly.
@@ -467,7 +469,7 @@ Usage:
 
 Flags:
   -a, --all             List all instances including inactive ones
-  -s, --status string   Filter instances by a specific status (e.g., running, stopped)
+  -s, --status string   Filter instances/executions by status (e.g., running, waiting, completed)
   -t, --target string   List executions of the instance with the given ID
 ```
 
@@ -483,7 +485,83 @@ neuron instance list --status running
 
 # List executions of one instance
 neuron instance list --target <instance-id>
+
+# Show only the waiting executions of one instance, with their wait details
+neuron instance list --target <instance-id> --status waiting
 ```
+
+With `--target`, `--status` filters that instance's executions by status; the value is passed to the runtime unchanged. `waiting` is the useful filter for suspended executions: in addition to the executions table, the command prints a `Waits:` table with one row per parked capability, showing the execution and capability IDs, wait type, expected signal, correlation key, reason, and deadline. Empty fields and a missing deadline render as `-`. If nothing matches, the command prints `No <status> executions found for instance <instance-id>` (or `No executions found for instance <instance-id>` without a status filter).
+
+`--all` and `--status` are mutually exclusive, and naming the instance both positionally and with `--target` is an error.
+
+#### `neuron instance signal`
+
+Deliver a signal to a waiting execution. The first argument is the execution ID (the `ID` in `neuron instance list --target <instance-id>` output); the runtime resolves the owning instance, so no instance ID is needed. `--delivery-id` is required and makes delivery idempotent.
+
+```
+Usage:
+  neuron instance signal <execution-id> <signal-name> [flags]
+
+Flags:
+      --correlation-key string   correlation key to target a specific wait when multiple waits match
+      --delivery-id string       idempotent delivery identifier (required)
+      --payload string           JSON object payload for the signal
+      --payload-file string      path to a JSON file containing the signal payload object
+```
+
+The payload is optional and must be a JSON object. With neither `--payload` nor `--payload-file`, an empty object is sent. The two flags are mutually exclusive. Use `--correlation-key` when more than one wait in the execution matches the signal name; an ambiguous match is rejected with guidance to supply one.
+
+Repeating a delivery ID with the same payload is idempotent: the runtime reports a replay and makes no second state change. Reusing a delivery ID with a different payload is a conflict, not a replay. Success prints one line to stdout:
+
+```text
+accepted signal "approved" for execution exec_1 (delivery=del_1)
+replayed signal "approved" for execution exec_1 (delivery=del_1)
+```
+
+```bash
+# Deliver an inline JSON payload
+neuron instance signal exec_1 approved --delivery-id del_1 --payload '{"status":"approved"}'
+
+# Load the payload from a file and target one wait by correlation key
+neuron instance signal exec_1 approved --delivery-id del_2 --payload-file ./payload.json --correlation-key order-42
+```
+
+Failures go to stderr and exit non-zero. The runtime returns a stable response code for each outcome, and the CLI maps it to an actionable message instead of printing the raw error:
+
+| Response code              | CLI message / guidance                                                              |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| `signal_delivery_conflict` | Conflicts with an existing delivery for the execution.                              |
+| `ambiguous_wait`           | Signal matches multiple waits; provide `--correlation-key`.                         |
+| `no_matching_wait`         | No waiting capability in the execution matches the signal.                          |
+| `signal_expired`           | The wait expired or the execution is no longer waiting.                             |
+| `execution_not_found`      | The execution was not found.                                                        |
+| `invalid_signal_request`   | The signal request was rejected as malformed.                                       |
+| `invalid_signal_payload`   | The signal payload was invalid for the wait.                                        |
+| `signal_unavailable`       | Signal delivery is unavailable for the execution.                                   |
+
+#### `neuron instance cancel`
+
+Cancel a waiting or running execution. Both the instance ID and the execution ID are required.
+
+```
+Usage:
+  neuron instance cancel <instance-id> <execution-id> [flags]
+
+Flags:
+      --reason string   reason recorded with the cancellation
+```
+
+```bash
+neuron instance cancel inst_ab12cd exec_1 --reason "operator request"
+```
+
+Success prints the terminal execution state to stdout:
+
+```text
+cancelled execution exec_1 (status=cancelled)
+```
+
+The `cancelled` status is returned only when this call is what stopped the execution; a call that races the runtime's own completion gets an error instead. A missing execution is reported as `execution <id> was not found in instance <id>`, and a refusal (for example, an execution already terminal) as `execution <id> cannot be cancelled`. Errors go to stderr and exit non-zero. The optional `--reason` is sent with the cancellation request.
 
 #### `neuron instance remove`
 
