@@ -776,9 +776,16 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "git diff --check"
-    status: not_started
-    lease: null
-    evidence: []
+    status: in_progress
+    lease:
+      owner: coder
+      paths:
+        - "nore/internal/execution/reconciler/**"
+        - "nore/internal/execution/scheduler/**"
+        - "nore/internal/instance/**"
+        - "nore/cmd/nore/main.go"
+      task: T-050
+    evidence: ["Coordinator dispatched T-050 after T-025/T-026/T-027/T-028/T-049 all reached done and full integration gates passed."]
     reports: []
     open_risks: ["Must not proceed to a periodic production reconciler until the D4 bounded-discovery precondition is satisfied.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
 
@@ -902,7 +909,7 @@ tasks:
       - "application/connection/**"
     owner: coder
     reviewer: reviewer
-    signoff: [reviewer, documenter]
+    signoff: [reviewer, architect, documenter]
     dependencies: [T-027]
     acceptance:
       - "A user can deliver a signal with a delivery ID and payload"
@@ -912,11 +919,12 @@ tasks:
     verification:
       - "cd application && GOWORK=off go test -count=1 ./internal/cli/..."
       - "cd application && GOWORK=off go test -count=1 ./..."
-    status: not_started
+    status: done
     lease: null
-    evidence: []
+    evidence: ["Coordinator dispatched T-029 after T-027 reached done and the full integration gate passed.", "Coder added signal/cancel CLI commands, status-filtered execution listing with wait rendering, client signal/list methods, and stable response-code propagation. Focused and full application tests passed; gofmt and git diff --check clean.", "Independent reviewer PASS on all four criteria with file:line evidence; application focused/full tests and diff-check re-run exit 0. Minor non-blocking notes: raw status query is harmless with current handler, wrapped StatusError is dropped for mapped CLI errors, and --all --target is silently accepted.", "Architect APPROVE: CLI consumes authoritative shared contracts, avoids duplicated protocol/logic, preserves client compatibility, and maps to coherent domain operations. Non-blocking notes on query hardening/comment overlap are recorded.", "Documenter APPROVE: command names/args/help/errors match CLI discipline; T-031 documentation debt recorded for application/README.md command list, cancellation wording, status examples, signal/cancel usage, and response codes.", "Full integration gate `scripts/script.sh` passed after T-029: all Go modules and TypeScript packages built and tested successfully."]
     reports: []
-    open_risks: []
+    commit: d695502
+    open_risks: ["T-031 must update application/README.md for signal/cancel commands, status filtering, wait details, and response-code surfacing."]
 
   - id: T-030
     objective: "Add Phase 5 end-to-end and restart tests for signals, timers, deadlines, idempotency, authorization, and worker occupancy"
@@ -924,7 +932,7 @@ tasks:
     owner: bugfixer
     reviewer: reviewer
     signoff: [reviewer, architect, security]
-    dependencies: [T-025, T-026, T-027, T-028]
+    dependencies: [T-025, T-026, T-027, T-028, T-050]
     acceptance:
       - "R5-22: suspend for approval, restart runtime, deliver signal, resume with payload"
       - "R5-23: durable timer fires after restart, including missed due time"
@@ -1127,3 +1135,24 @@ tasks:
     reports: []
     commit: f4d8b7c
     open_risks: []
+
+  - id: T-058
+    objective: "Mark verified completed Phase 5 items in the product backlog"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [reviewer, documenter]
+    dependencies: [T-025, T-026, T-027, T-028, T-055, T-056, T-057]
+    acceptance:
+      - "Every Phase 5 backlog item whose closing task is done and verified is marked completed with evidence"
+      - "Items blocked by T-029, T-030, T-031, T-050, T-042, Postgres DSN, or unavailable .NET checks remain unchecked"
+      - "No unrelated backlog item or checkbox is changed"
+    verification:
+      - "git diff -- todos/TODO.md"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["Coordinator dispatched a bounded backlog audit after T-025/T-026/T-027/T-028 remediation tasks reached done.", "Documenter closed R5-4/R5-6/R5-8/R5-9/R5-10/R5-14/R5-15/R5-21/F5-5 with task/commit evidence, reworded F5-6 to reflect the still-open end-to-end verification gap, and left dependency-blocked items unchecked. git diff --check clean.", "Independent reviewer PASS: every newly checked item has task/commit evidence and full-gate support; R5-5/R5-7/F5-2 and other dependency-blocked items are correctly left unchecked. Coverage map is phase5-implementation-plan.md:138-165, not the stale ADR 0001 table.", "Full integration gate `scripts/script.sh` passed after T-058: all Go modules and TypeScript packages built and tested successfully."]
+    reports: []
+    commit: 67df4d8
+    open_risks: ["T-031 must resolve traceability for the stale F5-2 wording and use the implementation plan's closure map."]
