@@ -776,9 +776,16 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
       - "cd nore && GOWORK=off go build ./... && GOWORK=off go vet ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
       - "gofmt -l <changed Go files>; git diff --check"
-    status: not_started
-    lease: null
-    evidence: ["Created from architect BLOCK in `.agents/decisions/0007-t050-host-wiring.md`: current ClaimReadyDispatchIntents lists the global dispatch-intent prefix and terminal/cancel cleanup is unverified."]
+    status: in_progress
+    lease:
+      owner: coder
+      paths:
+        - "nore/internal/execution/store.go"
+        - "nore/internal/execution/*_test.go"
+        - "nore/internal/contracts/**"
+        - "nore/internal/storage/**"
+      task: T-060
+    evidence: ["Created from architect BLOCK in `.agents/decisions/0007-t050-host-wiring.md`: current ClaimReadyDispatchIntents lists the global dispatch-intent prefix and terminal/cancel cleanup is unverified.", "Coordinator claimed a scoped execution-store/contracts/storage lease; T-050 remains blocked until this D4 prerequisite is complete."]
     reports: []
     open_risks: ["PostgreSQL DSN is unavailable; parity cannot be claimed.", "Storage/internal contract expansion must be reviewed for compatibility and security."]
 
@@ -1200,3 +1207,37 @@ tasks:
     reports: []
     commit: 9db7023
     open_risks: []
+
+  - id: T-061
+    objective: "Document verified Phase 5 suspend, signal, timer, and configuration behavior in shared documentation"
+    scope:
+      - "docs/**"
+      - "README.md"
+      - "packages/executor-sdks/golang/README.md"
+      - "packages/executor-sdks/dotnet/README.md"
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-026, T-027, T-028, T-029]
+    acceptance:
+      - "Docs describe implemented suspend/resume contracts, signal delivery/idempotency, wait state, and deployment execution-policy settings without claiming unverified host polling or end-to-end restart behavior"
+      - "Docs state that no TypeScript executor SDK exists and the capability protocol change is additive and feature-gated"
+      - "Stale claims that suspended waits/timers are not resumed are corrected to distinguish implemented primitives from pending T-050 host wiring"
+      - "Go and .NET SDK docs reflect verified T-026/T-057 behavior; unavailable .NET validation is recorded as a limitation"
+      - "No TODO checkbox is changed and no PostgreSQL parity claim is added"
+    verification:
+      - "git diff -- docs README.md packages/executor-sdks/golang/README.md packages/executor-sdks/dotnet/README.md"
+      - "git diff --check"
+      - "Manual cross-check of every changed documentation claim against committed code/tests"
+    status: in_progress
+    lease:
+      owner: documenter
+      paths:
+        - "docs/**"
+        - "README.md"
+        - "packages/executor-sdks/golang/README.md"
+        - "packages/executor-sdks/dotnet/README.md"
+      task: T-061
+    evidence: ["Coordinator split final documentation into a bounded pre-T050 task so T-031 can remain dependent on T-030 while disjoint documentation work proceeds in parallel."]
+    reports: []
+    open_risks: ["T-050 and T-030 behavior must not be claimed as complete.", "PostgreSQL parity remains DSN-gated."]
