@@ -11,6 +11,8 @@ var (
 	InstanceList   = "list [instance-id]"
 	InstanceRemove = "remove [instance-id|assembly-key]"
 	InstanceClear  = "clear"
+	InstanceCancel = "cancel <instance-id> <execution-id>"
+	InstanceSignal = "signal <execution-id> <signal-name>"
 
 	Register = "register"
 

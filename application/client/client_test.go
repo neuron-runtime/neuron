@@ -155,3 +155,126 @@ func TestStreamExecutionEventsWSTimeout(t *testing.T) {
 		t.Fatal("expected deadline error")
 	}
 }
+
+func TestSignalExecution(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody protocol.SignalDeliveryRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(protocol.Response{
+			Status:  http.StatusOK,
+			Message: "execution signaled",
+			Data: protocol.SignalDeliveryResponse{
+				DeliveryID: "del_1",
+				SignalName: "approved",
+				Status:     "accepted",
+				Replay:     false,
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewEndpoint(srv.URL)
+	resp, err := c.SignalExecution(context.Background(), "exec_1", "approved", protocol.SignalDeliveryRequest{
+		DeliveryID:     "del_1",
+		Payload:        map[string]any{"status": "approved"},
+		CorrelationKey: "cap-key",
+	})
+	if err != nil {
+		t.Fatalf("SignalExecution: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != protocol.ExecutionSignal("exec_1", "approved") {
+		t.Fatalf("path = %s, want %s", gotPath, protocol.ExecutionSignal("exec_1", "approved"))
+	}
+	if gotBody.DeliveryID != "del_1" || gotBody.CorrelationKey != "cap-key" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if gotBody.Payload["status"] != "approved" {
+		t.Fatalf("payload = %+v", gotBody.Payload)
+	}
+	if resp.DeliveryID != "del_1" || resp.SignalName != "approved" || resp.Replay || resp.Status != "accepted" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestSignalExecutionPropagatesStatusErrorCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(protocol.Response{
+			Status:  http.StatusConflict,
+			Message: "ambiguous wait",
+			Code:    protocol.SignalCodeAmbiguousWait,
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewEndpoint(srv.URL)
+	_, err := c.SignalExecution(context.Background(), "exec_1", "approved", protocol.SignalDeliveryRequest{DeliveryID: "del_1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if connection.StatusCode(err) != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", connection.StatusCode(err))
+	}
+	if connection.ResponseCode(err) != protocol.SignalCodeAmbiguousWait {
+		t.Fatalf("response code = %q, want %q", connection.ResponseCode(err), protocol.SignalCodeAmbiguousWait)
+	}
+}
+
+func TestListInstanceExecutionsWithStatusQuery(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		deadline := int64(123)
+		_ = json.NewEncoder(w).Encode(protocol.Response{
+			Status:  http.StatusOK,
+			Message: "executions",
+			Data: []protocol.ExecutionItem{
+				{
+					ID:     "exec_1",
+					Status: "waiting",
+					Waits: []protocol.WaitItem{
+						{
+							CapabilityID:   "cap_1",
+							WaitType:       "signal",
+							ExpectedSignal: "approved",
+							WaitReason:     "approval required",
+							CorrelationKey: "k1",
+							Deadline:       &deadline,
+						},
+					},
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewEndpoint(srv.URL)
+	items, err := c.ListInstanceExecutions(context.Background(), "inst_1", "?status=waiting")
+	if err != nil {
+		t.Fatalf("ListInstanceExecutions: %v", err)
+	}
+	if gotPath != protocol.InstanceExecutions("inst_1") {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotQuery != "status=waiting" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if len(items) != 1 || items[0].Status != "waiting" || len(items[0].Waits) != 1 {
+		t.Fatalf("items = %+v", items)
+	}
+	wait := items[0].Waits[0]
+	if wait.ExpectedSignal != "approved" || wait.CorrelationKey != "k1" || wait.WaitReason != "approval required" || wait.Deadline == nil || *wait.Deadline != 123 {
+		t.Fatalf("wait = %+v", wait)
+	}
+}

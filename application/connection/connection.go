@@ -158,19 +158,40 @@ func (t *HTTPTransport) Do(ctx context.Context, method, path string, body any, o
 // such execution" and "it already finished" call for completely different
 // messages to an operator, and a client that cannot separate them either reports
 // a false failure or hides a real one.
+//
+// When the server returns the standardized protocol.Response envelope, Message
+// and ResponseCode carry the human-readable message and the stable
+// machine-readable code from that envelope so callers can map outcomes without
+// parsing message text.
 type StatusError struct {
-	Code    int
-	Message string
+	Code         int
+	Message      string
+	ResponseCode string
 }
 
 func (e *StatusError) Error() string {
 	return fmt.Sprintf("nore returned HTTP %d: %s", e.Code, e.Message)
 }
 
-// statusErrorFrom builds the error for a rejected response, preserving the
-// message format callers already surface.
+// statusErrorFrom builds the error for a rejected response. It prefers the
+// standardized protocol response envelope when present so callers can act on
+// stable response codes; otherwise it preserves the raw body as the message.
 func statusErrorFrom(code int, body []byte) error {
-	return &StatusError{Code: code, Message: strings.TrimSpace(string(body))}
+	trimmed := strings.TrimSpace(string(body))
+	status := &StatusError{Code: code, Message: trimmed}
+	if len(trimmed) == 0 {
+		return status
+	}
+
+	var envelope protocol.Response
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		if envelope.Message != "" {
+			status.Message = envelope.Message
+		}
+		status.ResponseCode = strings.TrimSpace(envelope.Code)
+	}
+
+	return status
 }
 
 // StatusCode reports the HTTP status N.O.R.E. returned, or 0 when err did not
@@ -181,6 +202,16 @@ func StatusCode(err error) int {
 		return status.Code
 	}
 	return 0
+}
+
+// ResponseCode reports the stable protocol response code N.O.R.E. returned, or
+// an empty string when the error did not carry one.
+func ResponseCode(err error) string {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.ResponseCode
+	}
+	return ""
 }
 
 func (t *HTTPTransport) Stream(ctx context.Context, method, path string, body any, emit func([]byte) error) error {

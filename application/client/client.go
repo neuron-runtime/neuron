@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/neuron-runtime/neuron/application/connection"
 	wsmessage "github.com/neuron-runtime/neuron/shared/protocol/websocket"
@@ -275,6 +276,14 @@ func (c *Client) StreamExecutionEventsWS(ctx context.Context, instanceID string,
 // ListExecutions retrieves all executions recorded for the instance identified
 // by instanceID. It returns an empty slice when the instance has no executions.
 func (c *Client) ListExecutions(ctx context.Context, instanceID string) ([]protocol.ExecutionItem, error) {
+	return c.ListInstanceExecutions(ctx, instanceID, "")
+}
+
+// ListInstanceExecutions retrieves executions recorded for the instance
+// identified by instanceID. When query is non-empty it is appended to the
+// executions endpoint as-is (including the leading "?"), allowing callers to
+// filter by status or other server-supported query parameters.
+func (c *Client) ListInstanceExecutions(ctx context.Context, instanceID, query string) ([]protocol.ExecutionItem, error) {
 	if instanceID == "" {
 		return nil, fmt.Errorf("instance ID is required")
 	}
@@ -284,9 +293,38 @@ func (c *Client) ListExecutions(ctx context.Context, instanceID string) ([]proto
 	}
 
 	endpoint := protocol.InstanceExecutions(instanceID)
+	if query != "" {
+		if !strings.HasPrefix(query, "?") {
+			query = "?" + query
+		}
+		endpoint += query
+	}
 
 	if err := c.conn.Do(ctx, http.MethodGet, endpoint, nil, &response); err != nil {
 		return nil, err
+	}
+
+	return response.Data, nil
+}
+
+// SignalExecution delivers a signal to a waiting execution through the primary
+// execution-scoped signal route. The server resolves execution ownership from
+// the durable execution record.
+func (c *Client) SignalExecution(ctx context.Context, executionID, signalName string, req protocol.SignalDeliveryRequest) (protocol.SignalDeliveryResponse, error) {
+	if executionID == "" {
+		return protocol.SignalDeliveryResponse{}, fmt.Errorf("execution ID is required")
+	}
+	if signalName == "" {
+		return protocol.SignalDeliveryResponse{}, fmt.Errorf("signal name is required")
+	}
+
+	var response struct {
+		Data protocol.SignalDeliveryResponse `json:"data"`
+	}
+
+	endpoint := protocol.ExecutionSignal(executionID, signalName)
+	if err := c.conn.Do(ctx, http.MethodPost, endpoint, req, &response); err != nil {
+		return protocol.SignalDeliveryResponse{}, err
 	}
 
 	return response.Data, nil

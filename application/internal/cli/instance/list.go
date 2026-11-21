@@ -22,10 +22,10 @@ func newListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("all", "a", false, "List all instances including inactive ones")
-	cmd.Flags().StringP("status", "s", "", "Filter instances by specific status (e.g., running, stopped)")
+	cmd.Flags().StringP("status", "s", "", "Filter instances/executions by status (e.g., running, waiting, completed)")
 	cmd.Flags().StringP("target", "t", "", "List executions of the instance with the given ID")
 
-	cmd.MarkFlagsMutuallyExclusive("all", "status", "target")
+	cmd.MarkFlagsMutuallyExclusive("all", "status")
 
 	return cmd
 }
@@ -41,7 +41,7 @@ func instanceListCmdHandler(cmd *cobra.Command, args []string) error {
 	}
 
 	if instanceID != "" {
-		return listInstanceExecutions(ctx, instanceID)
+		return listInstanceExecutions(ctx, cmd, instanceID)
 	}
 
 	return listInstances(ctx, cmd)
@@ -105,8 +105,10 @@ func listInstances(ctx context.Context, cmd *cobra.Command) error {
 	return nil
 }
 
-// listInstanceExecutions lists all executions recorded for the given instance.
-func listInstanceExecutions(ctx context.Context, instanceID string) error {
+// listInstanceExecutions lists executions recorded for the given instance.
+// When --status is provided it is passed through to the server, allowing
+// operators to list suspended executions with ?status=waiting.
+func listInstanceExecutions(ctx context.Context, cmd *cobra.Command, instanceID string) error {
 	cfg, ok := config.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("configuration not loaded")
@@ -118,16 +120,28 @@ func listInstanceExecutions(ctx context.Context, instanceID string) error {
 	}
 	defer cleanup()
 
-	executions, err := c.ListExecutions(ctx, instanceID)
+	statusFilter, _ := cmd.Flags().GetString("status")
+	query := ""
+	if statusFilter != "" {
+		query = "?status=" + statusFilter
+	}
+
+	executions, err := c.ListInstanceExecutions(ctx, instanceID, query)
 	if err != nil {
 		return fmt.Errorf("failed to list executions for instance %s: %w", instanceID, err)
 	}
 
 	if len(executions) == 0 {
-		fmt.Println("No executions found for instance", instanceID)
+		if statusFilter != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "No %s executions found for instance %s\n", statusFilter, instanceID)
+			return nil
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "No executions found for instance %s\n", instanceID)
 		return nil
 	}
 
-	render.Executions(executions)
+	out := cmd.OutOrStdout()
+	render.Executions(out, executions)
+	render.ExecutionWaits(out, executions)
 	return nil
 }

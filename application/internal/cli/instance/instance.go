@@ -21,6 +21,8 @@ func New() *cobra.Command {
 		newListCmd(),
 		newRemoveCmd(),
 		newClearCmd(),
+		newCancelCmd(),
+		newSignalCmd(),
 	)
 
 	return cmd
