@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
@@ -187,7 +188,13 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 			return err
 		}
 		nextRevision = next
-		return writeDispatchIntents(ctx, tx, pending, createdAt)
+		if err := writeDispatchIntents(ctx, tx, pending, createdAt); err != nil {
+			return err
+		}
+		if execution.IsTerminal() {
+			return clearDispatchReadyIndexInTx(ctx, tx, execution.ID)
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("persist execution %s transition: %w", execution.ID, err)
@@ -219,29 +226,57 @@ func (s *ExecutionStore) Adopt(ctx context.Context, execution *Execution) error 
 	return nil
 }
 
-// ClearDispatchIntents removes every dispatch intent belonging to execution.
+// ClearDispatchIntents removes every dispatch intent belonging to execution,
+// together with its ready-index entries.
 //
 // Recovery calls it before re-deriving intents from the recovered state. A
 // crashed process can leave an intent claimed under a lease that has not yet
 // expired, or an intent for a capability that has since completed; neither is
 // valid work, and the lease would otherwise delay or duplicate dispatch.
 func (s *ExecutionStore) ClearDispatchIntents(ctx context.Context, executionID shared.ID) error {
-	prefix, err := storage.Prefix("dispatch_intents", string(executionID))
+	return s.store.WithTx(ctx, func(tx storage.Tx) error {
+		return clearDispatchIntentsInTx(ctx, tx, executionID)
+	})
+}
+
+// clearDispatchIntentsInTx removes an execution's intent records and their ready
+// index in one transaction. Recovery calls it before re-deriving intents.
+func clearDispatchIntentsInTx(ctx context.Context, tx storage.KV, executionID shared.ID) error {
+	intentPrefix, err := storage.Prefix(dispatchIntentNamespace, string(executionID))
 	if err != nil {
 		return fmt.Errorf("prefix dispatch intents for execution %s: %w", executionID, err)
 	}
-	return s.store.WithTx(ctx, func(tx storage.Tx) error {
-		keys, err := tx.List(ctx, prefix)
-		if err != nil {
-			return fmt.Errorf("list dispatch intents for execution %s: %w", executionID, err)
+	intentKeys, err := tx.List(ctx, intentPrefix)
+	if err != nil {
+		return fmt.Errorf("list dispatch intents for execution %s: %w", executionID, err)
+	}
+	for _, key := range intentKeys {
+		if err := tx.Delete(ctx, key); err != nil {
+			return fmt.Errorf("delete dispatch intent %s: %w", key, err)
 		}
-		for _, key := range keys {
-			if err := tx.Delete(ctx, key); err != nil {
-				return fmt.Errorf("delete dispatch intent %s: %w", key, err)
-			}
+	}
+	return clearDispatchReadyIndexInTx(ctx, tx, executionID)
+}
+
+// clearDispatchReadyIndexInTx removes an execution's ready-index entries while
+// leaving intent records intact. Terminal transitions use it so finished work is
+// no longer discoverable by a batch claim, without invalidating an owner-fenced
+// single-intent operation that raced with the terminal commit.
+func clearDispatchReadyIndexInTx(ctx context.Context, tx storage.KV, executionID shared.ID) error {
+	readyPrefix, err := storage.Prefix(dispatchReadyNamespace, string(executionID))
+	if err != nil {
+		return fmt.Errorf("prefix ready dispatch intents for execution %s: %w", executionID, err)
+	}
+	readyKeys, err := tx.List(ctx, readyPrefix)
+	if err != nil {
+		return fmt.Errorf("list ready dispatch intents for execution %s: %w", executionID, err)
+	}
+	for _, key := range readyKeys {
+		if err := tx.Delete(ctx, key); err != nil {
+			return fmt.Errorf("delete ready dispatch intent %s: %w", key, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // Delete removes the durable record before the in-memory record. A failed
@@ -526,6 +561,9 @@ func writeDispatchIntents(ctx context.Context, tx storage.KV, pending []pendingD
 		if err := tx.Put(ctx, item.key, encoded); err != nil {
 			return fmt.Errorf("write dispatch intent %s: %w", item.key, err)
 		}
+		if err := writeDispatchReadyIndex(ctx, tx, &item.record, item.key); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -552,8 +590,45 @@ type DispatchIntent struct {
 	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
 }
 
+const (
+	dispatchIntentNamespace = "dispatch_intents"
+	dispatchReadyNamespace  = "dispatch_ready"
+)
+
 func dispatchIntentKey(executionID, capabilityID, attemptID shared.ID) (string, error) {
-	return storage.Key("dispatch_intents", string(executionID), string(capabilityID), string(attemptID))
+	return storage.Key(dispatchIntentNamespace, string(executionID), string(capabilityID), string(attemptID))
+}
+
+// dispatchReadyKey is the ready-index counterpart of an intent key. The suffix
+// after the namespace is identical, so discovery can map an indexed key back to
+// its intent without reading an index value. An entry stays in the index while
+// its intent is live, including while claimed: a crashed owner's lease must
+// remain discoverable after it expires. Entries are removed when the intent
+// completes or its execution reaches a terminal state.
+func dispatchReadyKey(executionID, capabilityID, attemptID shared.ID) (string, error) {
+	return storage.Key(dispatchReadyNamespace, string(executionID), string(capabilityID), string(attemptID))
+}
+
+func dispatchReadyPrefix() (string, error) {
+	return storage.Prefix(dispatchReadyNamespace)
+}
+
+func intentKeyFromDispatchReadyKey(readyKey string) string {
+	return dispatchIntentNamespace + strings.TrimPrefix(readyKey, dispatchReadyNamespace)
+}
+
+// writeDispatchReadyIndex maintains the one-to-one ready index for an intent in
+// the same transaction that writes the intent itself. An unready intent has no
+// index entry, so it cannot be discovered before its dependencies resolve.
+func writeDispatchReadyIndex(ctx context.Context, tx storage.KV, intent *DispatchIntent, intentKey string) error {
+	readyKey, err := dispatchReadyKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+	if err != nil {
+		return fmt.Errorf("ready index key for dispatch intent %s: %w", intentKey, err)
+	}
+	if !intent.ReadyToRun {
+		return tx.Delete(ctx, readyKey)
+	}
+	return tx.Put(ctx, readyKey, []byte(intentKey))
 }
 
 // NewDispatchIntent builds the ready dispatch intent for one capability attempt.
@@ -613,7 +688,10 @@ func (s *ExecutionStore) EnqueueDispatchIntent(ctx context.Context, intent *Disp
 		if err != nil {
 			return fmt.Errorf("marshal dispatch intent %s: %w", key, err)
 		}
-		return tx.Put(ctx, key, encoded)
+		if err := tx.Put(ctx, key, encoded); err != nil {
+			return err
+		}
+		return writeDispatchReadyIndex(ctx, tx, &record, key)
 	})
 	if err != nil {
 		return fmt.Errorf("persist dispatch intent %s: %w", key, err)
@@ -778,7 +856,14 @@ func (s *ExecutionStore) CompleteDispatchIntent(ctx context.Context, executionID
 		if intent.Owner != owner {
 			return nil
 		}
-		return tx.Delete(ctx, key)
+		if err := tx.Delete(ctx, key); err != nil {
+			return err
+		}
+		readyKey, err := dispatchReadyKey(intent.ExecutionID, intent.CapabilityID, intent.AttemptID)
+		if err != nil {
+			return err
+		}
+		return tx.Delete(ctx, readyKey)
 	})
 	if err != nil {
 		return fmt.Errorf("complete dispatch intent %s: %w", key, err)
@@ -793,14 +878,17 @@ func (s *ExecutionStore) CompleteDispatchIntent(ctx context.Context, executionID
 const dispatchClaimReleaseTimeout = 5 * time.Second
 
 // ClaimReadyDispatchIntents claims at most limit ready, claimable intents for
-// owner under lease. A batch may be under-filled when candidates are unready or
-// held by a live lease; the caller must treat a returned batch as fully owned.
-// Leases that outlived a crashed owner become claimable once they expire, while
-// intents under a live lease are left untouched.
+// owner under lease. A batch may be under-filled when candidates are held by a
+// live lease; the caller must treat a returned batch as fully owned. Leases that
+// outlived a crashed owner become claimable once they expire, while intents
+// under a live lease are left untouched.
 //
-// limit must be positive and is validated before any discovery. Discovery lists
-// the dispatch-intent prefix, so only the first limit keys are examined; the
-// store imposes no upper bound, leaving batch sizing to deployment policy.
+// limit must be positive and is validated before any discovery. Discovery reads
+// only the dedicated ready index, so historical intent records are never
+// scanned. Every indexed key is examined until limit intents are won, which
+// keeps later ready work discoverable by subsequent batches even when earlier
+// keys in the index are still under a live lease. The store imposes no upper
+// bound on the index, leaving batch sizing to deployment policy.
 //
 // Ownership is all-or-nothing. If any claim fails, every intent already won in
 // this call is released with an owner-fenced write on a bounded detached context
@@ -817,21 +905,22 @@ func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner st
 	if limit <= 0 {
 		return nil, fmt.Errorf("dispatch intent claim limit must be positive")
 	}
-	prefix, err := storage.Prefix("dispatch_intents")
+	readyPrefix, err := dispatchReadyPrefix()
 	if err != nil {
-		return nil, fmt.Errorf("prefix dispatch intents: %w", err)
+		return nil, fmt.Errorf("prefix ready dispatch intents: %w", err)
 	}
-	keys, err := s.store.List(ctx, prefix)
+	readyKeys, err := s.store.List(ctx, readyPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("list dispatch intents: %w", err)
-	}
-	if len(keys) > limit {
-		keys = keys[:limit]
+		return nil, fmt.Errorf("list ready dispatch intents: %w", err)
 	}
 
-	claimed := make([]*DispatchIntent, 0, len(keys))
-	for _, key := range keys {
-		intent, won, err := s.claimDispatchIntent(ctx, key, owner, lease)
+	claimed := make([]*DispatchIntent, 0, limit)
+	for _, readyKey := range readyKeys {
+		if len(claimed) >= limit {
+			break
+		}
+		intentKey := intentKeyFromDispatchReadyKey(readyKey)
+		intent, won, err := s.claimDispatchIntent(ctx, intentKey, owner, lease)
 		if err != nil {
 			if releaseErr := s.releaseClaimedDispatchIntents(ctx, claimed, owner); releaseErr != nil {
 				return nil, fmt.Errorf("claim dispatch intents: %w; release cleanup failed for %d claimed intents, which remain leased until expiry: %w",
@@ -1081,7 +1170,13 @@ func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransit
 			}
 			result.Delivery = &record
 		}
-		return writeDispatchIntents(ctx, tx, pending, createdAt)
+		if err := writeDispatchIntents(ctx, tx, pending, createdAt); err != nil {
+			return err
+		}
+		if execution.IsTerminal() {
+			return clearDispatchReadyIndexInTx(ctx, tx, execution.ID)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("persist wait transition %s: %w", execution.ID, err)
