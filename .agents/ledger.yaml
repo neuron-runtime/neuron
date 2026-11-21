@@ -753,6 +753,35 @@ tasks:
     commit: cf06d0b
     open_risks: ["`KV.List` still materializes all matching keys; T-050 must satisfy the D4 bounded-discovery precondition before enabling a periodic reconciler.", "No PostgreSQL DSN is available; parity cannot be claimed."]
 
+  - id: T-060
+    objective: "Replace global dispatch-intent discovery with a bounded, owner-fenced claim primitive"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+      - "nore/internal/contracts/**"
+      - "nore/internal/storage/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-049]
+    acceptance:
+      - "Ready dispatch intents are discovered through a bounded ready index/queue, not global List(\"dispatch_intents\")"
+      - "Claims remain owner-fenced and lease-bounded; partial failures release successful claims; no completed intent is left ready"
+      - "Terminal and cancelled executions leave no discoverable ready intents"
+      - "Ready intents outside the first batch are discoverable by later bounded calls"
+      - "Backend parity is tested for memory, badger, and sqlite; PostgreSQL parity is explicitly not claimed"
+      - "No contract change is made unless required; any interface change preserves existing callers"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution -run 'DispatchIntent|ClaimReady|Terminal|Cancel'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go vet ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: not_started
+    lease: null
+    evidence: ["Created from architect BLOCK in `.agents/decisions/0007-t050-host-wiring.md`: current ClaimReadyDispatchIntents lists the global dispatch-intent prefix and terminal/cancel cleanup is unverified."]
+    reports: []
+    open_risks: ["PostgreSQL DSN is unavailable; parity cannot be claimed.", "Storage/internal contract expansion must be reviewed for compatibility and security."]
+
   - id: T-050
     objective: "Wire production wait lifecycle, timer polling, and bounded dispatch reconciliation into the host"
     scope:
@@ -776,18 +805,11 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "git diff --check"
-    status: in_progress
-    lease:
-      owner: coder
-      paths:
-        - "nore/internal/execution/reconciler/**"
-        - "nore/internal/execution/scheduler/**"
-        - "nore/internal/instance/**"
-        - "nore/cmd/nore/main.go"
-      task: T-050
-    evidence: ["Coordinator dispatched T-050 after T-025/T-026/T-027/T-028/T-049 all reached done and full integration gates passed."]
-    reports: []
-    open_risks: ["Must not proceed to a periodic production reconciler until the D4 bounded-discovery precondition is satisfied.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
+    status: blocked
+    lease: null
+    evidence: ["Coordinator dispatched T-050 after T-025/T-026/T-027/T-028/T-049 all reached done and full integration gates passed.", "Architect produced `.agents/decisions/0007-t050-host-wiring.md` with a binding design and an explicit BLOCK: current `ClaimReadyDispatchIntents` discovers through global `List(\"dispatch_intents\")` (`store.go:795-848`), and no evidence proves terminal/cancel paths clear stale intents.", "D4 decision: reject both the current global-prefix scan and the unsubstantiated 'keyspace bounded by in-flight executions' measurement; a bounded store discovery/index primitive with sqlite/badger/memory parity tests is required before any periodic reconciler ships.", "PostgreSQL parity: not claimed.", "No source implementation was started; coder lease released pending a coordinator decision on scope expansion into `nore/internal/execution/store.go`, possibly `nore/internal/contracts/**` and `nore/internal/storage/**`."]
+    reports: [".agents/decisions/0007-t050-host-wiring.md"]
+    open_risks: ["BLOCKER: D4 bounded discovery primitive is not implemented; periodic reconciler must remain disabled.", "Scope expansion into execution store/contracts/storage requires explicit coordinator decision and lease update before implementation.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
 
   - id: T-025
     objective: "Wire engine-only consumption of typed suspend outcomes and durable retry waits"
@@ -1156,3 +1178,25 @@ tasks:
     reports: []
     commit: 67df4d8
     open_risks: ["T-031 must resolve traceability for the stale F5-2 wording and use the implementation plan's closure map."]
+
+  - id: T-059
+    objective: "Document the new signal, cancel, and wait-inspection CLI surface"
+    scope: ["application/README.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-029]
+    acceptance:
+      - "README lists instance signal and instance cancel commands with accurate arguments and flags"
+      - "README explains status-filtered execution listing and wait-detail output"
+      - "README states actionable stable response codes and replay behavior"
+      - "No stale claim that cancellation is API-only remains"
+    verification:
+      - "git diff -- application/README.md"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["Coordinator created a bounded T-029 documentation follow-up so T-031 can remain blocked on T-030 while disjoint documentation work proceeds.", "Documenter updated command list and reference sections for signal/cancel/status-filtered listing, wait detail table, stable response codes, replay/conflict, and removed stale API-only cancellation wording. Manual cross-check and git diff --check passed.", "Independent reviewer PASS on all four criteria with file:line evidence; no stale API-only cancellation claim, restart/E2E, or PostgreSQL claim was added.", "Full integration gate `scripts/script.sh` passed after T-029/T-058; T-059 was documentation-only with no subsequent source changes."]
+    reports: []
+    commit: 9db7023
+    open_risks: []
