@@ -111,12 +111,14 @@ func TestSiblingStoppedByAFailureIsRecordedAsCancelled(t *testing.T) {
 		},
 		EntryCapabilityIDs: []core.ID{"broken", "victim"},
 	}
-	exec := startExecution(t, ctx, bus, store, blueprint)
+	exec := newExecution(t, ctx, store, blueprint)
 
 	failures := subscribeToExecution(t, bus, exec.ID)
 	defer func() { _ = failures.Close() }()
 	cancellations := subscribeToExecution(t, bus, exec.ID)
 	defer func() { _ = cancellations.Close() }()
+
+	announceExecution(t, ctx, bus, exec)
 
 	runtime.awaitVictimStart(t)
 	awaitExecutionFailure(t, failures)
@@ -170,12 +172,14 @@ func TestStoppedCapabilityPublishesCancellationNotFailure(t *testing.T) {
 		},
 		EntryCapabilityIDs: []core.ID{"broken", "victim"},
 	}
-	exec := startExecution(t, ctx, bus, store, blueprint)
+	exec := newExecution(t, ctx, store, blueprint)
 
 	failures := subscribeToExecution(t, bus, exec.ID)
 	defer func() { _ = failures.Close() }()
 	cancellations := subscribeToExecution(t, bus, exec.ID)
 	defer func() { _ = cancellations.Close() }()
+
+	announceExecution(t, ctx, bus, exec)
 
 	runtime.awaitVictimStart(t)
 	awaitExecutionFailure(t, failures)

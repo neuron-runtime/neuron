@@ -74,9 +74,12 @@ func singleCapabilityBlueprint(capabilityID core.ID) *types.ExecutionBlueprint {
 	}
 }
 
-// startExecution registers an execution and announces it the way the instance
-// does, which is the scheduler's only entry point into an execution's plan.
-func startExecution(t *testing.T, ctx context.Context, bus *event.Bus, store *executionmodel.MemoryStore, blueprint *types.ExecutionBlueprint) *executionmodel.Execution {
+// newExecution creates and registers an execution without announcing it.
+//
+// The bus delivers only to subscriptions present at publish time, so a test
+// that needs to observe an execution's events must subscribe between
+// newExecution and announceExecution.
+func newExecution(t *testing.T, ctx context.Context, store *executionmodel.MemoryStore, blueprint *types.ExecutionBlueprint) *executionmodel.Execution {
 	t.Helper()
 	exec, err := executionmodel.NewExecution(blueprint, core.NewID("corr_"), "inst_1", "", "", "", "")
 	if err != nil {
@@ -85,9 +88,24 @@ func startExecution(t *testing.T, ctx context.Context, bus *event.Bus, store *ex
 	if err := store.Add(ctx, exec); err != nil {
 		t.Fatalf("store.Add: %v", err)
 	}
+	return exec
+}
+
+// announceExecution publishes the ExecutionStarted event that begins an
+// execution's plan.
+func announceExecution(t *testing.T, ctx context.Context, bus *event.Bus, exec *executionmodel.Execution) {
+	t.Helper()
 	if err := bus.Publish(ctx, event.New(event.ExecutionStarted, exec.ID, exec.CorrelationID, "", event.ExecutionStartedPayload{Params: map[string]any{}})); err != nil {
 		t.Fatalf("publish ExecutionStarted: %v", err)
 	}
+}
+
+// startExecution registers and announces an execution the way the instance
+// does, which is the scheduler's only entry point into an execution's plan.
+func startExecution(t *testing.T, ctx context.Context, bus *event.Bus, store *executionmodel.MemoryStore, blueprint *types.ExecutionBlueprint) *executionmodel.Execution {
+	t.Helper()
+	exec := newExecution(t, ctx, store, blueprint)
+	announceExecution(t, ctx, bus, exec)
 	return exec
 }
 
