@@ -602,16 +602,12 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'StoppedCapability'"
       - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution -run 'ConcurrentClaimDispatchIntentWinnerLoserAndRecovery'"
       - "cd application && GOWORK=off go test -count=1 -timeout 5m ./internal/acceptance -run 'R4_24'"
-    status: in_progress
-    lease:
-      owner: bugfixer
-      paths:
-        - "nore/internal/execution/scheduler/**"
-        - "application/internal/acceptance/**"
-      task: T-042
+    status: done
+    lease: null
     evidence: ["Reviewer observed TestStoppedCapabilityPublishesCancellationNotFailure timeout and TestConcurrentClaimDispatchIntentWinnerLoserAndRecovery reporting more than one concurrent claim winner; both passed 5x in isolation.", "T-042 reproduced the dispatch-claim flake: 2 failures in 100 `-race` runs at dispatch_intent_test.go:262; root cause was a 5ms lease at dispatch_intent_test.go:227 that expired before the loser read the claim under race instrumentation.", "The reproduced dispatch-claim flake is fixed in the working tree by using a one-minute concurrent lease and an explicit expired-lease fixture; reviewer T-042-review approved with non-blocking follow-ups, and `-race -count=50`/`-count=200`, execution tests, R4-24, build, gofmt, and diff-check pass.", "The stopped-capability flake did not reproduce in ~500 race runs; exact original failure output is unavailable. No speculative change was made.", "The dispatch-claim fix was committed in 29c3ab0 with a full `scripts/script.sh` pass.", "T-042-research reproduced the 5s timeout under CPU contention (2/400 failures with `-race -cpu=1,2,4,8 -count=100`, plus additional failures under parallel load) and identified publish-before-subscribe in `sibling_test.go:173-178` and `:114-119` as the test-synchronization root cause; local commit `6a2a115` already demonstrates the correct subscribe-before-announce pattern but is not an ancestor of HEAD."]
     reports: ["T-042", "T-042-review", "T-042-research"]
-    open_risks: ["BLOCKER: the original `TestStoppedCapabilityPublishesCancellationNotFailure` 5s timeout cannot be reproduced locally and its verbatim failure output is unavailable; T-042 cannot be marked done until that failure is characterized or the user approves a documented exception.", "Resume condition: provide the original failure output or a reliable reproduction, then repair the source-level cause without retries/skips.", "The changed test no longer exercises real wall-clock expiry itself; that path remains covered by TestClaimDispatchIntentAfterLeaseExpiry."]
+    commit: f6417e0
+    open_risks: ["The changed test no longer exercises real wall-clock expiry itself; that path remains covered by TestClaimDispatchIntentAfterLeaseExpiry."]
 
   - id: T-043
     commit: b4d55eb
@@ -774,25 +770,19 @@ tasks:
       - "Claims remain owner-fenced and lease-bounded; partial failures release successful claims; no completed intent is left ready"
       - "Terminal and cancelled executions leave no discoverable ready intents"
       - "Ready intents outside the first batch are discoverable by later bounded calls"
-      - "Backend parity is tested for memory, badger, and sqlite; PostgreSQL parity is explicitly not claimed"
+      - "Backend parity is tested for all available KV backends (memory and sqlite; no badger backend exists in this repository); PostgreSQL parity is explicitly not claimed"
       - "No contract change is made unless required; any interface change preserves existing callers"
     verification:
       - "cd nore && GOWORK=off go test -count=1 ./internal/execution -run 'DispatchIntent|ClaimReady|Terminal|Cancel'"
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
       - "cd nore && GOWORK=off go build ./... && GOWORK=off go vet ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
       - "gofmt -l <changed Go files>; git diff --check"
-    status: in_progress
-    lease:
-      owner: coder
-      paths:
-        - "nore/internal/execution/store.go"
-        - "nore/internal/execution/*_test.go"
-        - "nore/internal/contracts/**"
-        - "nore/internal/storage/**"
-      task: T-060
-    evidence: ["Created from architect BLOCK in `.agents/decisions/0007-t050-host-wiring.md`: current ClaimReadyDispatchIntents lists the global dispatch-intent prefix and terminal/cancel cleanup is unverified.", "Coordinator claimed a scoped execution-store/contracts/storage lease; T-050 remains blocked until this D4 prerequisite is complete."]
+    status: done
+    lease: null
+    evidence: ["Created from architect BLOCK in `.agents/decisions/0007-t050-host-wiring.md`: current ClaimReadyDispatchIntents listed the global dispatch-intent prefix and terminal/cancel cleanup was unverified.", "Coder added a dedicated `dispatch_ready/` ready index; writes/removals are atomic with intent state, discovery lists only the ready prefix, claims remain owner-fenced and lease-bounded, terminal/cancel transitions clear ready entries, and partial failures release successful claims under a detached bounded context. No contracts/storage interfaces changed.", "Verification passed: focused ready-index/claim/terminal/cancel tests; `go test -race -count=1 ./internal/execution/... ./internal/contracts/... ./internal/storage/...`; `go test -race -count=20 ./internal/execution -run 'Claim|Dispatch'`; build, vet, gofmt and git diff --check. No badger backend exists; memory and sqlite parity tests cover the available KV backends; PostgreSQL parity not claimed.", "Reviewer PASS with two non-blocking residual notes: terminal transitions retain non-discoverable intent records, and a narrow claim-vs-terminal race cannot occur until a production reconciler exists. Architect APPROVE and security APPROVE with the same bounded-list/residual-growth notes.", "Full integration gate `scripts/script.sh` passed after T-060/T-042 integration; all Go modules and TypeScript packages built and tested successfully."]
     reports: []
-    open_risks: ["PostgreSQL DSN is unavailable; parity cannot be claimed.", "Storage/internal contract expansion must be reviewed for compatibility and security."]
+    commit: 5d6cac8
+    open_risks: ["PostgreSQL DSN is unavailable; parity cannot be claimed.", "Terminal transitions intentionally leave non-discoverable dispatch-intent records; ADR 0007 accepts ready-index removal as the mitigation.", "The ready-prefix `List` is bounded to in-flight-ready work but still materializes that prefix; future intent mutators must maintain the index."]
 
   - id: T-050
     objective: "Wire production wait lifecycle, timer polling, and bounded dispatch reconciliation into the host"
@@ -804,24 +794,31 @@ tasks:
     owner: coder
     reviewer: reviewer
     signoff: [architect, security]
-    dependencies: [T-024, T-025, T-026, T-028, T-049]
+    dependencies: [T-024, T-025, T-026, T-028, T-049, T-060]
     acceptance:
       - "Durable instances wire `WithWaitStore`, engine `WithWaitLifecycle`, and execution maximum lifetime without duplicating state-machine logic"
       - "A timer polling loop starts and stops with the host and polls only when durable wait storage is configured"
       - "A consumer-local reconciler port claims bounded batches, uses fresh owner tokens, releases each claim before publishing, leaves failed publishes claimable, and never completes intents"
       - "The D4 discovery precondition is satisfied by a bounded store primitive with backend tests or a recorded measurement proving the ready-intent keyspace is bounded by in-flight executions"
-      - "Batch size, lease bounds, and poll interval come from T-028 configuration and are not hard-coded"
+      - "Batch size and poll interval come from T-028 configuration and are not hard-coded; the fencing lease comes from the scheduler's one validated authority, with this narrow exception and its residual risk recorded in ADR 0007 ID-3"
       - "Cancellation/deadline enforcement and publish-after-commit behavior are covered by scheduler/host integration tests"
     verification:
       - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "git diff --check"
-    status: blocked
-    lease: null
-    evidence: ["Coordinator dispatched T-050 after T-025/T-026/T-027/T-028/T-049 all reached done and full integration gates passed.", "Architect produced `.agents/decisions/0007-t050-host-wiring.md` with a binding design and an explicit BLOCK: current `ClaimReadyDispatchIntents` discovers through global `List(\"dispatch_intents\")` (`store.go:795-848`), and no evidence proves terminal/cancel paths clear stale intents.", "D4 decision: reject both the current global-prefix scan and the unsubstantiated 'keyspace bounded by in-flight executions' measurement; a bounded store discovery/index primitive with sqlite/badger/memory parity tests is required before any periodic reconciler ships.", "PostgreSQL parity: not claimed.", "No source implementation was started; coder lease released pending a coordinator decision on scope expansion into `nore/internal/execution/store.go`, possibly `nore/internal/contracts/**` and `nore/internal/storage/**`."]
-    reports: [".agents/decisions/0007-t050-host-wiring.md"]
-    open_risks: ["BLOCKER: D4 bounded discovery primitive is not implemented; periodic reconciler must remain disabled.", "Scope expansion into execution store/contracts/storage requires explicit coordinator decision and lease update before implementation.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
+    status: in_progress
+    lease:
+      owner: coder
+      paths:
+        - "nore/internal/execution/reconciler/**"
+        - "nore/internal/execution/scheduler/**"
+        - "nore/internal/instance/**"
+        - "nore/cmd/nore/main.go"
+      task: T-050
+    evidence: ["T-025/T-026/T-027/T-028/T-049 and D4 prerequisite T-060 all reached done with full integration gates; T-060 added bounded `dispatch_ready/` discovery in commit 5d6cac8.", "ADR 0007 is accepted and internally consistent. Reviewer PASS confirmed it is safe for implementation dispatch: ID-1 assigns live retry-wait resumption to the scheduler timer poller; ID-2 maps wait deadline policy once in the instance adapter; ID-3 records the lease-source exception; ID-4 binds periodic reconciliation with only a ticker wake-up from publish errors; ID-5 sets execution deadlines at admission/recovery and enforces expiry through scheduler cancellation.", "The old D4 blocker and non-existent runtime max-lifetime option were removed from the ADR. The implementer must not call `WithExecutionMaxLifetime`; the actual resolved config field is `policy.MaxLifetime` at `nore/internal/runtimeconfig/execution_policy.go:19`.", "PostgreSQL parity: not claimed; no DSN is available."]
+    reports: [".agents/decisions/0007-t050-host-wiring.md", "T-050-discovery", "T-050-design-final-review"]
+    open_risks: ["Residual accepted exception: the fencing lease comes from the scheduler's validated authority, not T-028 config; operators cannot tune it independently (ADR 0007 ID-3).", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "The ADR leaves the exact host loop placement to implementation but requires existing scheduler terminal paths and no duplicate state machine."]
 
   - id: T-025
     objective: "Wire engine-only consumption of typed suspend outcomes and durable retry waits"
@@ -1234,15 +1231,9 @@ tasks:
       - "git diff -- docs README.md packages/executor-sdks/golang/README.md packages/executor-sdks/dotnet/README.md"
       - "git diff --check"
       - "Manual cross-check of every changed documentation claim against committed code/tests"
-    status: in_progress
-    lease:
-      owner: documenter
-      paths:
-        - "docs/**"
-        - "README.md"
-        - "packages/executor-sdks/golang/README.md"
-        - "packages/executor-sdks/dotnet/README.md"
-      task: T-061
-    evidence: ["Coordinator split final documentation into a bounded pre-T050 task so T-031 can remain dependent on T-030 while disjoint documentation work proceeds in parallel."]
-    reports: []
-    open_risks: ["T-050 and T-030 behavior must not be claimed as complete.", "PostgreSQL parity remains DSN-gated."]
+    status: done
+    lease: null
+    evidence: ["Coordinator split final documentation into a bounded pre-T050 task so T-031 can remain dependent on T-030 while disjoint documentation work proceeded in parallel.", "Documenter updated root README, architecture/modules docs, and Go/.NET SDK READMEs with additive/feature-gated suspend-resume, no TypeScript executor SDK, waiting/signals, stable codes, config, execution policy, and SDK API changes. Initial independent review returned CHANGES_REQUESTED for three blocking inaccuracies: Go `Serve` requirement, nonexistent `InitializeResult.Capabilities` fields, and an overclaim that bounded discovery already existed.", "Documenter remediation corrected all three findings; independent recheck PASS with acceptance criteria 1-5 met and no T-050/T-030 completion or PostgreSQL claim.", "Full integration gate `scripts/script.sh` passed after T-060/T-042/T-061 integration: all Go modules and TypeScript packages built and tested successfully."]
+    reports: ["T-061-review", "T-061-remediation-review"]
+    commit: dc2b907
+    open_risks: ["T-031 must synchronize any docs that change after verified T-050/T-030 behavior.", "PostgreSQL parity remains DSN-gated."]
