@@ -864,7 +864,7 @@ tasks:
     lease: null
     evidence: ["Bugfixer added `core.MinTimerPollInterval=100ms` as the single validation authority and wired it through application config, runtime config, and scheduler validation; added deterministic `emptyTestConfigurations` fixture plus timer-consumption assertions to `TestDurableTimerLoopPollsAndStops`; added cancellation guards before and between host poll calls.", "Reproduction evidence recorded in `.agents/reports/T-063.md`: sub-100ms values were previously accepted, the target test SIGSEGVed under race/CPU matrix before the fixture fix, and cancellation tests failed before the guards.", "Coordinator reran build/compile, focused instance/cmd, repeated target test, scheduler race, full nore race suite, and `scripts/script.sh`; all passed on the final tree.", "Architect APPROVE for the integrated T-063/T-064/T-065/T-066 diff; performance APPROVE; security APPROVE. Documenter CHANGES_REQUESTED solely for stale documentation, remediated by T-067/T-071. Reviewer final APPROVE recorded through T050A integrated re-review; remaining T050 rejection is the separate dispatch-reconciler criterion.", "All T-063 acceptance criteria verified; documentation synchronized in T-067/T-071 and full validation green."]
     open_risks: []
-    commit: null
+    commit: 9bb1f1f
 
   - id: T-064
     objective: "Add bounded, instance-scoped deadline and due-wait storage primitives"
@@ -893,7 +893,7 @@ tasks:
     lease: null
     evidence: ["Bugfixer added a time-ordered `execution_deadlines/<instance>/...` index, bounded `DueExecutionDeadlines`, atomic index sync in execution store write paths, backfill on Adopt, instance-stamped wait timers, and bounded `DueWaitTimersForInstance` with an additive due index.", "Coordinator verified build/compile, race tests for execution/contracts/storage, focused deadline/due/wait tests, and `scripts/script.sh`; all passed. `deadline.go` contains no `.List(ctx)` or `Prefix(\"executions\")` discovery.", "Tests include a no-execution-list recording store, batch/limit assertions, instance scoping, SQLite restart, and legacy backfill.", "The initial reviewer recovery-index finding was reproduced, fixed in T-066, and covered by raw-KV restart tests. Architect APPROVE, performance APPROVE, security APPROVE, and final reviewer APPROVE through the T050A integrated re-review are recorded.", "All T-064 acceptance criteria verified; remaining T050 rejection is the separate dispatch-reconciler criterion."]
     open_risks: []
-    commit: null
+    commit: 9bb1f1f
 
   - id: T-065
     objective: "Wire scheduler/host to bounded instance-scoped deadline and timer primitives"
@@ -921,8 +921,8 @@ tasks:
     lease: null
     evidence: ["Coder replaced global expiry discovery with bounded `DueExecutionDeadlines`, switched `PollDueTimers` to `DueWaitTimersForInstance`, passed instance identity from the host, added foreign-payload guards, and preserved the single `CancelExecution` terminal path.", "Coordinator verified build/compile, full nore race suite, focused host/cmd, scheduler race count 50, instance repeated count 25, no global discovery grep, gofmt, git diff --check, and `scripts/script.sh`; all passed. Report: `.agents/reports/T-065.md`.", "Performance sign-off APPROVE: bounded index discovery replaces O(total executions) scanning; ADR 0008 residual prefix-key bound accepted with follow-up condition; PostgreSQL parity not claimed.", "Architect final APPROVE for the integrated diff; non-blocking residuals: instance-scoped wait-due prefix scans all owned entries before applying limit, and leased timers may occupy discovery slots until lease expiry. The initial recovery-index finding was fixed in T-066. Security APPROVE and final reviewer APPROVE recorded through the T050A integrated re-review; remaining T050 rejection is the separate dispatch-reconciler criterion."]
     reports: [".agents/reports/T-050A-review-integration.md", ".agents/reports/T-065.md", ".agents/reports/T-066.md"]
-    open_risks: ["PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "Two intermittent full-race flakes were observed (`TestCancelOnARestoredInstanceReportsTheExecutionAsFinished`, `TestStopPersistsTerminalStateToStorage`), each passing in isolation; record separately and do not attribute to this diff without evidence."]
-    commit: null
+    open_risks: ["PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "Two intermittent full-race flakes were observed (`TestCancelOnARestoredInstanceReportsTheExecutionAsFinished`, `TestStopPersistsTerminalStateToStorage`), each passing in isolation; T-068 fixed the reproducible one and T-070 closed the related index leak."]
+    commit: 9bb1f1f
 
   - id: T-066
     objective: "Resolve the recovery re-stamp and deadline-index reconciliation finding"
@@ -949,8 +949,8 @@ tasks:
     lease: null
     evidence: ["Bugfixer reproduced the stale-index leak deterministically: three restarts of a legacy nil-deadline pending execution produced three deadline index entries on both memory and SQLite backends.", "Fix makes `Adopt` call `reconcileAdoptedDeadlineIndexInTx`, which removes every index entry carrying the adopted execution ID in one transaction, then writes the current key; ordinary transitions keep bounded snapshot-to-snapshot sync. Instance recovery comment corrected.", "Regression tests added at store and instance boundaries read raw durable KV and assert exactly one current index entry after three restarts; both failed before and pass after. Report: `.agents/reports/T-066.md`.", "Coordinator verified no TEMP-REPRO marker remains, no external lease expansion, build/compile PASS, gofmt/diff-check clean. Full race suite had one unrelated transient `TestStopPersistsTerminalStateToStorage` failure, then passed on rerun, 10 isolated runs, and 5 package runs; the unrelated flake was fixed by T-068.", "Architect final APPROVE for the integrated diff; security APPROVE and final reviewer APPROVE recorded through the T050A integrated re-review. Remaining T050 rejection is the separate dispatch-reconciler criterion."]
     reports: [".agents/reports/T-065.md", ".agents/reports/T-066.md"]
-    open_risks: ["Adoption performs a bounded instance-scoped deadline-index sweep on a rare recovery path.", "Durable legacy snapshot retains nil deadline until its next committed transition; discovery relies on the reconciled index by design.", "Two intermittent unrelated test flakes observed in full race runs; separate remediation required before claiming the repository is fully clean."]
-    commit: null
+    open_risks: ["Adoption performs a bounded instance-scoped deadline-index sweep on a rare recovery path.", "Durable legacy snapshot retains nil deadline until its next committed transition; discovery relies on the reconciled index by design.", "The intermittent shutdown flake observed here was reproduced and fixed in T-068; related stale-index cases were closed in T-069/T-070."]
+    commit: 9bb1f1f
 
   - id: T-067
     objective: "Synchronize architecture docs with the implemented durable timer/deadline polling behavior"
@@ -974,7 +974,7 @@ tasks:
     evidence: ["Documenter corrected `docs/ARCHITECTURE.md:592,778,1018,1028,1031` and `README.md:44`: interval bounds are 100ms–1m with 1s default; durable instances run bounded instance-scoped due-timer/deadline polling; non-durable remains event-driven; production dispatch/signal reconcilers and end-to-end restart claims are not overstated.", "Verification: stale-language grep exit 1 with no matches and `git diff --check` exit 0. Report: `.agents/reports/T-067.md`.", "Reviewer T067-SIGN-OFF APPROVE: exact wording verified, no T050/T030/PostgreSQL overclaim, and stale-language grep clean."]
     reports: [".agents/reports/T-067.md"]
     open_risks: []
-    commit: null
+    commit: 9bb1f1f
 
   - id: T-068
     objective: "Establish and remediate the two intermittent instance test flakes"
@@ -996,8 +996,8 @@ tasks:
     lease: null
     evidence: ["Bugfixer reproduced `TestStopPersistsTerminalStateToStorage` under CPU/race load: four failures at `drain_test.go:215` (`persisted status = pending, want failed`). Root cause was `sweepExecutions` skipping terminal in-memory executions whose final transition was not flushed before the cancelled snapshot writer exited.", "Production fix in `nore/internal/instance/drain.go` persists every owned execution during shutdown; terminal executions are re-saved idempotently under the revision guard. Deterministic regression test added in `drain_test.go`; it failed before the fix and passes after.", "Verification: `go test -race -count=10 ./internal/instance/` PASS; `go test -race -count=3 ./internal/execution/scheduler/... ./internal/instance/...` PASS; CPU/race load reproducer `-cpu=1,2,4,8 -count=50` PASS after fix; gofmt clean; `scripts/script.sh` PASS. Report: `.agents/reports/T-068.md`.", "Coordinator independently verified build/compile and diff-check after T-068. Reviewer APPROVE (minor stale comment tracked as T-069), architect APPROVE, security APPROVE. Final integration revalidation pending after T-069."]
     reports: [".agents/reports/T-068.md"]
-    open_risks: ["Minor stale `sweepExecutions` doc comment at `drain.go:70-71`; T-069.", "Security low-severity stale deadline index observation; T-069."]
-    commit: null
+    open_risks: ["Both originally listed follow-ups were closed in T-069/T-070."]
+    commit: 9bb1f1f
 
   - id: T-069
     objective: "Close the final review findings: stale deadline index after recovery re-stamp and inaccurate sweep comment"
@@ -1024,7 +1024,7 @@ tasks:
     evidence: ["Bugfixer reproduced `deadline index entries for terminal exec_… = 1, want 0` on sqlite and memory before the fix with `TestTerminalSaveRemovesAdoptedDeadlineIndexEntry`.", "Fix extracted `executionDeadlineIndexKeyIgnoringTerminal` in `nore/internal/execution/store.go:670-687`, used it in `syncExecutionDeadlineIndexInTx` at `:714-755` to remove an adopted memory-only key on terminal save, and corrected the `sweepExecutions` comment at `nore/internal/instance/drain.go:70-72`.", "Regression test at `nore/internal/execution/deadline_index_test.go:281-345` writes a legacy snapshot, adopts with a stamped deadline, terminalizes, saves, and asserts no deadline index entry for that execution while an unrelated entry remains; it failed before and passes after.", "Verification: focused regression PASS; build/compile PASS; `go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/execution/scheduler/...` PASS; focused Deadline|Recover|Restart|Adopt|StopPersists PASS; gofmt clean; `git diff --check` clean; `scripts/script.sh` exit 0.", "Report: `.agents/reports/T-069.md`. Discovered follow-up: `ExecutionStore.Delete` still derives cleanup only from the durable snapshot; tracked separately as T-070.", "Independent reviewer T069-SIGN-OFF APPROVE: all four criteria met, no blocker/critical/major/minor finding, raw-KV assertion and unchanged unrelated entry verified.", "Architect T069-ARCH-SIGN-OFF APPROVE: store ownership, transactional cleanup, bounded sync, single terminal path, and ADR 0007/0008 boundaries preserved.", "Security T069-SECURITY-SIGN-OFF APPROVE: no unbounded scan, cross-instance leakage, new resource surface, or weakened validation; focused tests PASS."]
     reports: [".agents/reports/T-069.md"]
     open_risks: ["A non-terminal deadline change between Adopt and the next committed transition is not covered; no production caller currently mutates the deadline in that interval.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
-    commit: null
+    commit: 9bb1f1f
 
   - id: T-070
     objective: "Close the discovered adopted-only execution deadline-index leak in ExecutionStore.Delete"
@@ -1050,7 +1050,7 @@ tasks:
     evidence: ["Bugfixer reproduced `deadline index entries for deleted exec_… = 1, want 0` on memory and sqlite before the fix with `TestDeleteRemovesAdoptedDeadlineIndexEntry`.", "Fix in `nore/internal/execution/store.go:326-363` derives the live execution's exact deadline key with `executionDeadlineIndexKeyIgnoringTerminal`; `removeExecutionDeadlineIndexInTx` at `:703-731` deletes persisted and live keys with deduplication inside the delete transaction, with no scan or prefix deletion.", "Regression at `nore/internal/execution/deadline_index_test.go:347-419` checks raw durable KV on memory and sqlite, preserves an unrelated execution with the same due time, verifies the durable record is gone, and verifies discovery returns only the survivor; it failed before and passes after.", "Verification: focused regression PASS; build/compile PASS; `-race` execution/instance/scheduler PASS; focused Deadline|Recover|Restart|Adopt|StopPersists PASS; gofmt clean; `git diff --check` clean; `scripts/script.sh` exit 0.", "Report: `.agents/reports/T-070.md`.", "Reviewer T070-SIGN-OFF APPROVE: all four criteria met; targeted test PASS; prior checks accepted from recorded full validation.", "Architect T070-ARCH-SIGN-OFF APPROVE: exact-key cleanup, store ownership, atomicity, no scan, no duplicated state machine, and meaningful regression verified.", "Security T070-SECURITY-SIGN-OFF APPROVE: exact-key cleanup preserves peer entries, no scan/prefix/cross-instance deletion, no weakened tests; focused test PASS on memory and sqlite. No critical/high/medium/low findings."]
     reports: [".agents/reports/T-070.md"]
     open_risks: ["A non-terminal deadline mutation between the live read and Delete could leave a previously indexed key; no production caller mutates the deadline in that interval.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
-    commit: null
+    commit: 9bb1f1f
 
   - id: T-025
     objective: "Wire engine-only consumption of typed suspend outcomes and durable retry waits"
@@ -1490,4 +1490,4 @@ tasks:
     evidence: ["Documenter checked R5-12, R5-13, R5-17, and R5-20 with closure evidence from T-023/T-026/T-029/T-057/T-059/T-061/T-063/T-064/T-065/T-066; left R5-22..R5-28, F5-3, F5-6, and F5-10 unchecked because T050/T030/T032 remain open.", "F5-3 was reworded to state that the production timer/deadline loop is wired by T-063/T-065 while the bounded dispatch-intent reconciler is still missing; F5-5 and stale R5-10 wording were corrected.", "Independent reviewer T071-REVIEW APPROVED all six criteria with line evidence: only the four authorized checkboxes changed, no unrelated checkbox changed, `git diff --check` clean, and no T050/T030/T032/PostgreSQL overclaim.", "Report: `.agents/reports/T-071-docs.md` (git-ignored)."]
     reports: [".agents/reports/T-071-docs.md"]
     open_risks: []
-    commit: null
+    commit: 9bb1f1f
