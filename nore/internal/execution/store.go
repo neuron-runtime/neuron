@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,6 +68,10 @@ func (s *ExecutionStore) Add(ctx context.Context, execution *Execution) error {
 	if err != nil {
 		return fmt.Errorf("marshal execution: %w", err)
 	}
+	indexKey, hasIndex, err := executionDeadlineIndexKey(execution)
+	if err != nil {
+		return err
+	}
 
 	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
 		if _, err := tx.Get(ctx, key); err == nil {
@@ -74,7 +79,15 @@ func (s *ExecutionStore) Add(ctx context.Context, execution *Execution) error {
 		} else if !errors.Is(err, storage.ErrNotFound) {
 			return fmt.Errorf("read execution %s: %w", execution.ID, err)
 		}
-		return tx.Put(ctx, key, data)
+		if err := tx.Put(ctx, key, data); err != nil {
+			return err
+		}
+		if hasIndex {
+			if err := tx.Put(ctx, indexKey, []byte(execution.ID)); err != nil {
+				return fmt.Errorf("write execution deadline index %s: %w", indexKey, err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("persist execution %s: %w", execution.ID, err)
@@ -82,9 +95,13 @@ func (s *ExecutionStore) Add(ctx context.Context, execution *Execution) error {
 
 	if err := s.mem.Add(ctx, execution); err != nil {
 		// Memory refused the execution after the durable write succeeded. Remove
-		// the durable record so a later restart does not surface an execution the
-		// live store never accepted.
-		if cleanupErr := s.store.Delete(ctx, key); cleanupErr != nil {
+		// the durable record and index so a later restart does not surface an
+		// execution the live store never accepted.
+		cleanupErr := s.store.Delete(ctx, key)
+		if hasIndex {
+			cleanupErr = errors.Join(cleanupErr, s.store.Delete(ctx, indexKey))
+		}
+		if cleanupErr != nil {
 			return errors.Join(err, fmt.Errorf("remove unaccepted execution %s: %w", execution.ID, cleanupErr))
 		}
 		return err
@@ -208,10 +225,12 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 	return nil
 }
 
-// Adopt records an execution as live without writing it back to durable
-// storage. Recovery uses it after loading a snapshot and attaching its
+// Adopt records an execution as live without writing its snapshot back to
+// durable storage. Recovery uses it after loading a snapshot and attaching its
 // recompiled blueprint: the scheduler and engine must share one Execution value,
-// and a fresh Get would otherwise load a second copy from storage.
+// and a fresh Get would otherwise load a second copy from storage. The deadline
+// index is reconciled atomically so a recovered deadline becomes discoverable
+// without leaving entries from earlier recoveries behind.
 //
 // Adopt deliberately does not change the revision. The snapshot it is given is
 // the durable state the caller just read, so the next transition compares
@@ -219,6 +238,29 @@ func (s *ExecutionStore) SaveTransition(ctx context.Context, execution *Executio
 func (s *ExecutionStore) Adopt(ctx context.Context, execution *Execution) error {
 	if execution == nil {
 		return fmt.Errorf("execution is required")
+	}
+	key, err := s.key(execution.ID)
+	if err != nil {
+		return err
+	}
+	// Recovery is the backfill point for snapshots written before the deadline
+	// index existed. The durable snapshot cannot be the only source of the prior
+	// key: recovery may stamp a deadline that the snapshot never recorded, so a
+	// second restart would otherwise write another index entry beside the first.
+	// The execution ID carried by every index entry is the stable identity used
+	// to reconcile all of this execution's entries in one transaction.
+	var oldData []byte
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if err == nil {
+			oldData = data
+		} else if !errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("read execution %s for deadline index: %w", execution.ID, err)
+		}
+		return reconcileAdoptedDeadlineIndexInTx(ctx, tx, oldData, execution)
+	})
+	if err != nil {
+		return fmt.Errorf("adopt execution %s: %w", execution.ID, err)
 	}
 	if err := s.mem.Save(ctx, execution); err != nil {
 		return fmt.Errorf("adopt execution %s: %w", execution.ID, err)
@@ -286,7 +328,36 @@ func (s *ExecutionStore) Delete(ctx context.Context, executionID shared.ID) erro
 	if err != nil {
 		return err
 	}
-	if err := s.store.Delete(ctx, key); err != nil {
+	// Adopt can index a deadline that exists only in memory, so the persisted
+	// snapshot alone cannot name every entry this execution may own. Derive the
+	// live key before opening the transaction; the accessor is mutex-protected.
+	var liveKey string
+	live, err := s.mem.Get(ctx, executionID)
+	switch {
+	case err == nil:
+		liveKey, _, err = executionDeadlineIndexKeyIgnoringTerminal(live)
+		if err != nil {
+			return err
+		}
+	case errors.Is(err, storage.ErrNotFound):
+		// Only a durable record exists; its snapshot supplies the key.
+	default:
+		return fmt.Errorf("read execution %s from memory: %w", executionID, err)
+	}
+
+	err = s.store.WithTx(ctx, func(tx storage.Tx) error {
+		data, err := tx.Get(ctx, key)
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			return err
+		}
+		// Delete is still issued for a missing durable record: callers rely on
+		// backend failures surfacing even when only a live execution exists.
+		if err := tx.Delete(ctx, key); err != nil {
+			return err
+		}
+		return removeExecutionDeadlineIndexInTx(ctx, tx, data, liveKey)
+	})
+	if err != nil {
 		return fmt.Errorf("delete execution %s: %w", executionID, err)
 	}
 	if err := s.mem.Delete(ctx, executionID); err != nil {
@@ -423,12 +494,119 @@ func (s *ExecutionStore) GetSignalDelivery(ctx context.Context, executionID shar
 	return &delivery, nil
 }
 
+// DueExecutionDeadlines returns at most limit execution IDs owned by instanceID
+// whose maximum-lifetime deadline is due at or before now. It reads only the
+// dedicated time-ordered deadline index; it never lists execution records and
+// never mutates the executions it reports. Callers re-read each execution before
+// acting, so a stale entry left by a crashed writer is harmless.
+func (s *ExecutionStore) DueExecutionDeadlines(ctx context.Context, instanceID shared.ID, now time.Time, limit int) ([]shared.ID, error) {
+	if instanceID == "" {
+		return nil, fmt.Errorf("instance ID is required")
+	}
+	if limit <= 0 {
+		return []shared.ID{}, nil
+	}
+	prefix, err := storage.ExecutionDeadlinePrefix(string(instanceID))
+	if err != nil {
+		return nil, err
+	}
+	keys, err := s.store.List(ctx, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("list execution deadlines for instance %s: %w", instanceID, err)
+	}
+	result := make([]shared.ID, 0, limit)
+	seen := make(map[shared.ID]bool, limit)
+	for _, key := range keys {
+		_, dueAt, rawID, err := storage.ParseExecutionDeadlineKey(key)
+		if err != nil {
+			return nil, err
+		}
+		// Keys are ordered by UTC due time, so the first future entry ends the
+		// scan for this instance.
+		if dueAt.After(now) {
+			break
+		}
+		id := shared.ID(rawID)
+		if seen[id] {
+			continue
+		}
+		result = append(result, id)
+		seen[id] = true
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result, nil
+}
+
 // DueWaitTimers returns at most limit due, unleased wait timers ordered by due
 // time then key, including timers whose due time passed while the process was
 // down. It is the discovery half of the scheduler's due-timer poller; the timer
 // substrate owns the due-time query so the poller never scans the timer space.
 func (s *ExecutionStore) DueWaitTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error) {
 	return s.store.DueTimers(ctx, now, limit)
+}
+
+// DueWaitTimersForInstance returns at most limit due wait timers belonging to
+// instanceID, ordered by due time then key. It is additive: the global
+// DueWaitTimers contract remains unchanged while callers migrate to
+// instance-scoped discovery. The index keys are hex ordered rather than time
+// ordered, so this method reads every owned entry, filters by due time, and
+// stops after limit matches. It only reads: claim and lease state are left to
+// ClaimWaitTimer, and a timer under a live lease may still be returned.
+func (s *ExecutionStore) DueWaitTimersForInstance(ctx context.Context, instanceID shared.ID, now time.Time, limit int) ([]storage.Timer, error) {
+	if instanceID == "" {
+		return nil, fmt.Errorf("instance ID is required")
+	}
+	if limit <= 0 {
+		return []storage.Timer{}, nil
+	}
+	prefix, err := storage.WaitDuePrefix(string(instanceID))
+	if err != nil {
+		return nil, err
+	}
+	keys, err := s.store.List(ctx, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("list wait timers for instance %s: %w", instanceID, err)
+	}
+	result := make([]storage.Timer, 0, limit)
+	for _, indexKey := range keys {
+		_, timerKey, err := storage.ParseWaitDueKey(indexKey)
+		if err != nil {
+			return nil, err
+		}
+		encodedDue, err := s.store.Get(ctx, indexKey)
+		if err != nil {
+			return nil, fmt.Errorf("read wait timer due time %s: %w", indexKey, err)
+		}
+		dueAt, err := time.Parse(time.RFC3339Nano, string(encodedDue))
+		if err != nil {
+			return nil, fmt.Errorf("decode wait timer due time %s: %w", indexKey, err)
+		}
+		if dueAt.After(now) {
+			continue
+		}
+		data, err := s.store.GetTimer(ctx, timerKey)
+		if errors.Is(err, storage.ErrTimerNotFound) {
+			// The timer was removed outside a transition that maintained the
+			// index. Treat the stale pointer as absent rather than waking work.
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read wait timer %s: %w", timerKey, err)
+		}
+		result = append(result, storage.Timer{Key: timerKey, DueAt: dueAt.UTC(), Data: data})
+		if len(result) >= limit {
+			break
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].DueAt.Equal(result[j].DueAt) {
+			return result[i].Key < result[j].Key
+		}
+		return result[i].DueAt.Before(result[j].DueAt)
+	})
+	return result, nil
 }
 
 // WaitTimerKeys returns the wait timer keys in one execution, optionally
@@ -494,9 +672,162 @@ func marshalExecutionAt(execution *Execution, revision uint64) ([]byte, error) {
 	return json.Marshal(execution.snapshotAt(revision))
 }
 
+// executionDeadlineIndexKey returns the dedicated index key for an execution's
+// maximum-lifetime deadline. Terminal or deadline-free executions have no key.
+func executionDeadlineIndexKey(execution *Execution) (string, bool, error) {
+	if execution == nil || execution.IsTerminal() {
+		return "", false, nil
+	}
+	return executionDeadlineIndexKeyIgnoringTerminal(execution)
+}
+
+// executionDeadlineIndexKeyIgnoringTerminal derives the deadline index key from
+// the execution's current deadline without consulting its status. Cleanup uses
+// it when the live execution has terminalized: Adopt can index a deadline that
+// exists only in memory, so a terminal snapshot has no key of its own to remove.
+func executionDeadlineIndexKeyIgnoringTerminal(execution *Execution) (string, bool, error) {
+	if execution == nil {
+		return "", false, nil
+	}
+	deadline := execution.ExecutionDeadline()
+	if deadline == nil || deadline.IsZero() {
+		return "", false, nil
+	}
+	key, err := storage.ExecutionDeadlineKey(string(execution.InstanceID), *deadline, string(execution.ID))
+	if err != nil {
+		return "", false, fmt.Errorf("execution deadline index key for %s: %w", execution.ID, err)
+	}
+	return key, true, nil
+}
+
+// removeExecutionDeadlineIndexInTx removes the exact index entries named by the
+// persisted snapshot and by the live execution. The live key is needed when
+// Adopt indexed a deadline stamped only in memory; each key is deleted once so
+// a shared key is harmless. Missing entries are tolerated so delete is
+// idempotent.
+func removeExecutionDeadlineIndexInTx(ctx context.Context, tx storage.KV, data []byte, liveKey string) error {
+	oldKey := ""
+	if len(data) > 0 {
+		old, err := UnmarshalExecution(data)
+		if err != nil {
+			return fmt.Errorf("decode persisted execution for deadline index: %w", err)
+		}
+		oldKey, _, err = executionDeadlineIndexKey(old)
+		if err != nil {
+			return err
+		}
+	}
+	deleted := ""
+	for _, key := range []string{oldKey, liveKey} {
+		if key == "" || key == deleted {
+			continue
+		}
+		if err := tx.Delete(ctx, key); err != nil {
+			return fmt.Errorf("remove execution deadline index %s: %w", key, err)
+		}
+		deleted = key
+	}
+	return nil
+}
+
+// syncExecutionDeadlineIndexInTx atomically replaces the index entry from the
+// old snapshot with the one from the new execution. A crashed or legacy store
+// with no entry is backfilled by the write; a stale entry is removed when the
+// deadline changes, clears, or the execution reaches a terminal state.
+func syncExecutionDeadlineIndexInTx(ctx context.Context, tx storage.KV, oldData []byte, execution *Execution) error {
+	newKey, hasNew, err := executionDeadlineIndexKey(execution)
+	if err != nil {
+		return err
+	}
+	// Adopt can write an index entry for a deadline stamped only in memory. Once
+	// the live execution is terminal there is no new key to write, and the
+	// persisted snapshot still has no deadline, so derive the live key regardless
+	// of status to remove the adopted entry.
+	liveKey, _, err := executionDeadlineIndexKeyIgnoringTerminal(execution)
+	if err != nil {
+		return err
+	}
+	oldKey := ""
+	if len(oldData) > 0 {
+		old, err := UnmarshalExecution(oldData)
+		if err != nil {
+			return fmt.Errorf("decode persisted execution for deadline index: %w", err)
+		}
+		oldKey, _, err = executionDeadlineIndexKey(old)
+		if err != nil {
+			return err
+		}
+	}
+	deleted := ""
+	for _, staleKey := range []string{oldKey, liveKey} {
+		if staleKey == "" || staleKey == newKey || staleKey == deleted {
+			continue
+		}
+		if err := tx.Delete(ctx, staleKey); err != nil {
+			return fmt.Errorf("remove stale execution deadline index %s: %w", staleKey, err)
+		}
+		deleted = staleKey
+	}
+	// Put is unconditional: an adopted legacy snapshot can have the same
+	// deadline as the live execution while its index entry is still missing.
+	if hasNew {
+		if err := tx.Put(ctx, newKey, []byte(execution.ID)); err != nil {
+			return fmt.Errorf("write execution deadline index %s: %w", newKey, err)
+		}
+	}
+	return nil
+}
+
+// reconcileAdoptedDeadlineIndexInTx makes execution the sole owner of its
+// deadline index entries. Adopt does not persist the snapshot, so a legacy
+// deadline-less snapshot is re-stamped from the current clock on every restart
+// and cannot identify the key written by an earlier recovery. The execution ID
+// encoded in each index key is the stable anchor: every entry for this execution
+// in its instance scope is removed unless it is the current key. Entries for
+// other executions are left untouched.
+//
+// This sweep belongs to adoption only. Ordinary transitions keep using the
+// bounded snapshot-to-snapshot sync and never scan the index namespace.
+func reconcileAdoptedDeadlineIndexInTx(ctx context.Context, tx storage.KV, oldData []byte, execution *Execution) error {
+	// The persisted snapshot may name a key outside this instance's scope, so
+	// remove it first rather than relying on the scoped sweep below.
+	if err := syncExecutionDeadlineIndexInTx(ctx, tx, oldData, execution); err != nil {
+		return err
+	}
+	newKey, _, err := executionDeadlineIndexKey(execution)
+	if err != nil {
+		return err
+	}
+	prefix, err := storage.ExecutionDeadlinePrefix(string(execution.InstanceID))
+	if err != nil {
+		return err
+	}
+	keys, err := tx.List(ctx, prefix)
+	if err != nil {
+		return fmt.Errorf("list execution deadlines for %s: %w", execution.ID, err)
+	}
+	for _, key := range keys {
+		if key == newKey {
+			continue
+		}
+		_, _, ownerID, err := storage.ParseExecutionDeadlineKey(key)
+		if err != nil {
+			return err
+		}
+		if shared.ID(ownerID) != execution.ID {
+			continue
+		}
+		if err := tx.Delete(ctx, key); err != nil {
+			return fmt.Errorf("remove stale execution deadline index %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
 // writeExecutionRevision compares execution's revision with the persisted one
-// and writes its next snapshot inside tx. It is the single implementation of
-// the compare-and-swap precondition shared by every transition path.
+// and writes its next snapshot and deadline index inside tx. It is the single
+// implementation of the compare-and-swap precondition shared by every
+// transition path.
 func writeExecutionRevision(ctx context.Context, tx storage.KV, key string, execution *Execution) (uint64, error) {
 	old, currentRevision, err := storedExecution(ctx, tx, key)
 	if err != nil {
@@ -512,6 +843,9 @@ func writeExecutionRevision(ctx context.Context, tx storage.KV, key string, exec
 		return 0, err
 	}
 	if err := tx.CompareAndSwap(ctx, key, old, data); err != nil {
+		return 0, err
+	}
+	if err := syncExecutionDeadlineIndexInTx(ctx, tx, old, execution); err != nil {
 		return 0, err
 	}
 	return nextRevision, nil
@@ -971,6 +1305,9 @@ type WaitTimerPayload struct {
 	CapabilityID shared.ID `json:"capability_id"`
 	WaitType     WaitType  `json:"wait_type,omitempty"`
 	AttemptID    shared.ID `json:"attempt_id,omitempty"`
+	// InstanceID is stamped by ExecutionStore.SaveWaitTransition from the
+	// execution, so scheduler writers need not know instance identity.
+	InstanceID shared.ID `json:"instance_id,omitempty"`
 }
 
 // EncodeWaitTimer serializes a wait timer payload. There is one encoding so
@@ -994,6 +1331,78 @@ func DecodeWaitTimer(data []byte) (*WaitTimerPayload, error) {
 		return nil, fmt.Errorf("wait timer payload requires execution and capability IDs")
 	}
 	return &payload, nil
+}
+
+// stampWaitTimerPayload records instance identity in the timer payload so a
+// discovered timer can be attributed without editing scheduler writers.
+func stampWaitTimerPayload(data []byte, instanceID shared.ID) ([]byte, error) {
+	payload, err := DecodeWaitTimer(data)
+	if err != nil {
+		return nil, err
+	}
+	payload.InstanceID = instanceID
+	stamped, err := EncodeWaitTimer(*payload)
+	if err != nil {
+		return nil, err
+	}
+	return stamped, nil
+}
+
+// putWaitDueIndexInTx records one timer in the instance-scoped due index and
+// the lookup pointer used by exact deletion. A re-put of the same timer key
+// removes its previous index entry in the same transaction.
+func putWaitDueIndexInTx(ctx context.Context, tx storage.KV, instanceID shared.ID, timerKey string, dueAt time.Time) error {
+	indexKey, err := storage.WaitDueKey(string(instanceID), timerKey)
+	if err != nil {
+		return err
+	}
+	lookupKey, err := storage.WaitDueLookupKey(timerKey)
+	if err != nil {
+		return err
+	}
+	previous, err := tx.Get(ctx, lookupKey)
+	if err == nil {
+		if string(previous) != indexKey {
+			if err := tx.Delete(ctx, string(previous)); err != nil {
+				return fmt.Errorf("remove previous wait due index %s: %w", previous, err)
+			}
+		}
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("read wait due lookup %s: %w", lookupKey, err)
+	}
+	if err := tx.Put(ctx, indexKey, []byte(dueAt.UTC().Format(time.RFC3339Nano))); err != nil {
+		return fmt.Errorf("write wait due index %s: %w", indexKey, err)
+	}
+	if err := tx.Put(ctx, lookupKey, []byte(indexKey)); err != nil {
+		return fmt.Errorf("write wait due lookup %s: %w", lookupKey, err)
+	}
+	return nil
+}
+
+// deleteWaitDueIndexInTx removes the index entry and pointer for one timer key.
+// A missing pointer is a no-op so cleanup paths remain idempotent.
+func deleteWaitDueIndexInTx(ctx context.Context, tx storage.KV, timerKey string) error {
+	lookupKey, err := storage.WaitDueLookupKey(timerKey)
+	if err != nil {
+		return err
+	}
+	indexKey, err := tx.Get(ctx, lookupKey)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read wait due lookup %s: %w", lookupKey, err)
+	}
+	if _, _, err := storage.ParseWaitDueKey(string(indexKey)); err != nil {
+		return fmt.Errorf("decode wait due lookup %s: %w", lookupKey, err)
+	}
+	if err := tx.Delete(ctx, string(indexKey)); err != nil {
+		return fmt.Errorf("remove wait due index %s: %w", indexKey, err)
+	}
+	if err := tx.Delete(ctx, lookupKey); err != nil {
+		return fmt.Errorf("remove wait due lookup %s: %w", lookupKey, err)
+	}
+	return nil
 }
 
 // WaitTimerWrite is one timer index entry to upsert as part of a transition.
@@ -1058,6 +1467,9 @@ func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransit
 	execution := req.Execution
 	if execution == nil {
 		return nil, fmt.Errorf("execution is required")
+	}
+	if execution.InstanceID == "" {
+		return nil, fmt.Errorf("execution instance ID is required for wait transitions")
 	}
 	execution.saveMu.Lock()
 	defer execution.saveMu.Unlock()
@@ -1128,12 +1540,20 @@ func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransit
 				if !deleted {
 					return ErrWaitTimerLeaseLost
 				}
+				if err := deleteWaitDueIndexInTx(ctx, tx, del.Key); err != nil {
+					return err
+				}
 				continue
 			}
 			_, err := tx.GetTimer(ctx, del.Key)
 			if errors.Is(err, storage.ErrTimerNotFound) {
 				if del.RequireExisting {
 					return ErrWaitTimerMissing
+				}
+				// A missing timer can still have a stale index entry after an
+				// interrupted cleanup; remove it as part of this transition.
+				if err := deleteWaitDueIndexInTx(ctx, tx, del.Key); err != nil {
+					return err
 				}
 				continue
 			}
@@ -1142,6 +1562,9 @@ func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransit
 			}
 			if err := tx.DeleteTimer(ctx, del.Key); err != nil {
 				return fmt.Errorf("delete wait timer %s: %w", del.Key, err)
+			}
+			if err := deleteWaitDueIndexInTx(ctx, tx, del.Key); err != nil {
+				return err
 			}
 		}
 
@@ -1152,8 +1575,15 @@ func (s *ExecutionStore) SaveWaitTransition(ctx context.Context, req WaitTransit
 		nextRevision = next
 
 		for _, write := range req.Effects.PutTimers {
-			if err := tx.PutTimer(ctx, write.Key, write.DueAt, write.Data); err != nil {
+			stamped, err := stampWaitTimerPayload(write.Data, execution.InstanceID)
+			if err != nil {
+				return fmt.Errorf("stamp wait timer %s: %w", write.Key, err)
+			}
+			if err := tx.PutTimer(ctx, write.Key, write.DueAt, stamped); err != nil {
 				return fmt.Errorf("write wait timer %s: %w", write.Key, err)
+			}
+			if err := putWaitDueIndexInTx(ctx, tx, execution.InstanceID, write.Key, write.DueAt); err != nil {
+				return err
 			}
 		}
 		if delivery != nil {
@@ -1244,5 +1674,18 @@ func (s *ExecutionStore) DeleteWaitTimerOwned(ctx context.Context, key, owner st
 	if owner == "" {
 		return false, storage.ErrTimerOwnerEmpty
 	}
-	return s.store.DeleteTimerOwned(ctx, key, owner)
+	deleted := false
+	err := s.store.WithTimer(ctx, func(tx storage.TimerTx) error {
+		ok, err := tx.DeleteTimerOwned(ctx, key, owner)
+		if err != nil || !ok {
+			deleted = ok
+			return err
+		}
+		if err := deleteWaitDueIndexInTx(ctx, tx, key); err != nil {
+			return err
+		}
+		deleted = true
+		return nil
+	})
+	return deleted, err
 }

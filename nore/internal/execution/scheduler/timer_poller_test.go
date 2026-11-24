@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,27 @@ func enterDueWait(t *testing.T, h *waitHarness, sched *Scheduler, waitType execu
 	}
 	if err := sched.EnterWait(h.ctx, WaitEntryRequest{Execution: h.exec, CapabilityID: "cap", Spec: spec}); err != nil {
 		t.Fatalf("EnterWait: %v", err)
+	}
+}
+
+// indexRawWaitTimer publishes a directly written timer through the instance's
+// due index. Tests that inject stale timers must write both records because the
+// instance-scoped poller discovers by index, not by scanning the timer space.
+func indexRawWaitTimer(t *testing.T, h *waitHarness, timerKey string, due time.Time) {
+	t.Helper()
+	indexKey, err := storage.WaitDueKey(string(h.exec.InstanceID), timerKey)
+	if err != nil {
+		t.Fatalf("WaitDueKey: %v", err)
+	}
+	lookupKey, err := storage.WaitDueLookupKey(timerKey)
+	if err != nil {
+		t.Fatalf("WaitDueLookupKey: %v", err)
+	}
+	if err := h.raw.Put(h.ctx, indexKey, []byte(due.UTC().Format(time.RFC3339Nano))); err != nil {
+		t.Fatalf("Put wait-due index: %v", err)
+	}
+	if err := h.raw.Put(h.ctx, lookupKey, []byte(indexKey)); err != nil {
+		t.Fatalf("Put wait-due lookup: %v", err)
 	}
 }
 
@@ -89,7 +111,7 @@ func TestPollDueTimersResumesElapsedTimer(t *testing.T) {
 	}
 	defer func() { _ = ready.Close() }()
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 1 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (1, nil)", count, err)
 	}
@@ -142,7 +164,7 @@ func TestPollDueTimersAppliesDeadlinePolicy(t *testing.T) {
 			}
 			defer func() { _ = sub.Close() }()
 
-			count, err := sched.PollDueTimers(h.ctx)
+			count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 			if err != nil || count != 1 {
 				t.Fatalf("PollDueTimers = (%d, %v), want (1, nil)", count, err)
 			}
@@ -167,7 +189,7 @@ func TestPollDueTimersDoesNotWakeFutureOrAbsentDeadlines(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("EnterWait: %v", err)
 		}
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		if err != nil || count != 0 {
 			t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 		}
@@ -189,7 +211,7 @@ func TestPollDueTimersDoesNotWakeFutureOrAbsentDeadlines(t *testing.T) {
 		snapshot.States["cap"] = state
 		h.exec.Restore(snapshot)
 
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		if err != nil || count != 0 {
 			t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 		}
@@ -225,7 +247,7 @@ func TestPollDueTimersAbortsSafelyOnLeaseLoss(t *testing.T) {
 		enterDueWait(t, h, sched, executionmodel.WaitTypeTimer, "", due)
 		sched.waitStore = &faultWaitStore{ExecutionStore: h.store, renewErr: executionmodel.ErrWaitTimerLeaseLost}
 
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		if err != nil || count != 0 {
 			t.Fatalf("PollDueTimers = (%d, %v), want (0, nil) after lease loss", count, err)
 		}
@@ -253,7 +275,7 @@ func TestPollDueTimersAbortsSafelyOnLeaseLoss(t *testing.T) {
 		defer func() { _ = sub.Close() }()
 		sched.waitStore = &commitFaultStore{ExecutionStore: h.store, err: executionmodel.ErrWaitTimerLeaseLost}
 
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		if err != nil || count != 0 {
 			t.Fatalf("PollDueTimers = (%d, %v), want (0, nil) after lease loss", count, err)
 		}
@@ -270,13 +292,15 @@ func TestPollDueTimersAbortsSafelyOnLeaseLoss(t *testing.T) {
 
 type ownerRecordingStore struct {
 	*executionmodel.ExecutionStore
-	due      []storage.Timer
-	owners   []string
-	leases   []time.Duration
-	gotLimit int
+	due           []storage.Timer
+	owners        []string
+	leases        []time.Duration
+	gotLimit      int
+	gotInstanceID core.ID
 }
 
-func (s *ownerRecordingStore) DueWaitTimers(_ context.Context, _ time.Time, limit int) ([]storage.Timer, error) {
+func (s *ownerRecordingStore) DueWaitTimersForInstance(_ context.Context, instanceID core.ID, _ time.Time, limit int) ([]storage.Timer, error) {
+	s.gotInstanceID = instanceID
 	s.gotLimit = limit
 	return s.due, nil
 }
@@ -302,12 +326,15 @@ func TestPollDueTimersUsesFreshOwnersAndBoundedBatch(t *testing.T) {
 	h.waitStore = recorder
 	sched := h.scheduler(t, func(s *Scheduler) { s.pollConfig.BatchSize = 2; s.pollConfig.Lease = 10 * time.Second })
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
 	if recorder.gotLimit != 2 {
 		t.Fatalf("due query limit = %d, want configured batch 2", recorder.gotLimit)
+	}
+	if recorder.gotInstanceID != h.exec.InstanceID {
+		t.Fatalf("due query instance = %q, want %q", recorder.gotInstanceID, h.exec.InstanceID)
 	}
 	if len(recorder.owners) != 2 {
 		t.Fatalf("recorded %d claims, want 2", len(recorder.owners))
@@ -334,7 +361,7 @@ func TestPollDueTimersRejectsMalformedPayload(t *testing.T) {
 	}
 	h.waitStore = recorder
 	sched := h.scheduler(t)
-	if _, err := sched.PollDueTimers(h.ctx); err == nil {
+	if _, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID); err == nil {
 		t.Fatal("malformed timer payload was accepted")
 	}
 	if len(recorder.owners) != 0 {
@@ -363,8 +390,9 @@ func TestPollDueTimersDiscardsTimerForMissingExecution(t *testing.T) {
 	if err := h.raw.PutTimer(h.ctx, key, due, data); err != nil {
 		t.Fatalf("PutTimer: %v", err)
 	}
+	indexRawWaitTimer(t, h, key, due)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -383,8 +411,9 @@ func TestPollDueTimersDiscardsTimerForTerminalExecution(t *testing.T) {
 	}
 	due := time.Now().UTC().Add(-time.Minute)
 	key := putWaitTimer(t, h, "cap", string(h.exec.AttemptID), due)
+	indexRawWaitTimer(t, h, key, due)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -414,8 +443,9 @@ func TestPollDueTimersDiscardsTimerForCapabilityNoLongerWaiting(t *testing.T) {
 	// A leftover timer from a superseded attempt of the now-resolved capability.
 	due := time.Now().UTC().Add(-time.Minute)
 	key := putWaitTimer(t, h, "cap", "stale_attempt", due)
+	indexRawWaitTimer(t, h, key, due)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -436,8 +466,9 @@ func TestPollDueTimersLeavesRetryWaitTimerIntact(t *testing.T) {
 		t.Fatalf("BeginRetryWait: %v", err)
 	}
 	key := putWaitTimer(t, h, "cap", string(h.exec.AttemptID), due)
+	indexRawWaitTimer(t, h, key, due)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil error)", count, err)
 	}
@@ -477,9 +508,10 @@ func TestPollDueTimersStaleCleanupLeaseLossIsSafeNoOp(t *testing.T) {
 	// A capability that is not waiting makes the timer stale, so cleanup reaches
 	// the fenced delete.
 	due := time.Now().UTC().Add(-time.Minute)
-	putWaitTimer(t, h, "cap", "stale_attempt", due)
+	key := putWaitTimer(t, h, "cap", "stale_attempt", due)
+	indexRawWaitTimer(t, h, key, due)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil) after lease loss", count, err)
 	}
@@ -511,7 +543,7 @@ func TestPollDueTimersKeepsTimerForFutureSnapshotDeadline(t *testing.T) {
 	snapshot.States["cap"] = state
 	h.exec.Restore(snapshot)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -545,7 +577,7 @@ func TestPollDueTimersDiscardsStaleTimerWhenWaitUntilNil(t *testing.T) {
 	snapshot.States["cap"] = state
 	h.exec.Restore(snapshot)
 
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -554,5 +586,277 @@ func TestPollDueTimersDiscardsStaleTimerWhenWaitUntilNil(t *testing.T) {
 	}
 	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
 		t.Fatal("stale claimed timer with nil WaitUntil survived poll")
+	}
+}
+
+// retryCaptureStore records the fencing and commit order for a retry wake-up
+// in one place, so a single scheduler poll can be checked end to end.
+type retryCaptureStore struct {
+	*executionmodel.ExecutionStore
+	log          *orderLog
+	claimOwner   string
+	deleteOwners []string
+}
+
+func (s *retryCaptureStore) ClaimWaitTimer(ctx context.Context, key, owner string, lease time.Duration) (bool, error) {
+	claimed, err := s.ExecutionStore.ClaimWaitTimer(ctx, key, owner, lease)
+	if claimed {
+		s.claimOwner = owner
+	}
+	return claimed, err
+}
+
+func (s *retryCaptureStore) SaveWaitTransition(ctx context.Context, req executionmodel.WaitTransitionRequest) (*executionmodel.WaitTransitionResult, error) {
+	s.log.add("commit")
+	for _, del := range req.Effects.DeleteTimers {
+		s.deleteOwners = append(s.deleteOwners, del.Owner)
+	}
+	return s.ExecutionStore.SaveWaitTransition(ctx, req)
+}
+
+// TestPollDueTimersResumesElapsedRetryWait proves live retry resumption: an
+// elapsed NextAttemptAt becomes ready exactly once, its claimed timer is deleted
+// under the same fence, a fresh dispatch intent is committed, and readiness is
+// published only after the commit.
+func TestPollDueTimersResumesElapsedRetryWait(t *testing.T) {
+	h := newWaitHarness(t)
+	log := &orderLog{}
+	capture := &retryCaptureStore{ExecutionStore: h.store, log: log}
+	h.waitStore = capture
+	h.eventBus = &recordingBus{Bus: h.bus, log: log}
+	sched := h.scheduler(t)
+	next := time.Now().UTC().Add(-time.Minute)
+	if err := sched.BeginRetryWait(h.ctx, RetryWaitRequest{
+		Execution: h.exec, CapabilityID: "cap", NextAttemptAt: next,
+	}); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	log.reset()
+
+	ready, err := h.bus.SubscribeExecution(h.exec.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution: %v", err)
+	}
+	defer func() { _ = ready.Close() }()
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 1 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (1, nil)", count, err)
+	}
+	state := h.exec.CapabilityState("cap")
+	if state.Status != executionmodel.CapabilityReady || state.NextAttemptAt != nil {
+		t.Fatalf("retry state = %+v, want ready with NextAttemptAt cleared", state)
+	}
+	if evt := expectReadyEvent(t, ready); evt.Type != event.CapabilityReady {
+		t.Fatalf("published event = %s, want %s", evt.Type, event.CapabilityReady)
+	}
+
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("claimed retry timer was not removed by the committed transition")
+	}
+	if len(capture.deleteOwners) != 1 || capture.deleteOwners[0] != capture.claimOwner {
+		t.Fatalf("fenced delete owners = %v, want the claimed owner %q", capture.deleteOwners, capture.claimOwner)
+	}
+
+	items := log.snapshot()
+	if len(items) != 2 || items[0] != "commit" || !strings.HasPrefix(items[1], "publish:") {
+		t.Fatalf("commit/publication order = %v, want commit then publish", items)
+	}
+
+	intent, ok, err := h.store.ClaimDispatchIntent(h.ctx, executionmodel.NewDispatchIntent(h.exec.ID, "cap", h.exec.AttemptID), "probe", time.Minute)
+	if err != nil || !ok || intent == nil {
+		t.Fatalf("retry resume intent was not committed: intent=%v ok=%v err=%v", intent, ok, err)
+	}
+
+	// The wake-up is one-shot: once the timer is gone a second poll does nothing.
+	count, err = sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 0 {
+		t.Fatalf("second PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+}
+
+// TestPollDueTimersLeavesFutureRetryWaitIntact proves a timer that is due by
+// its own record but whose NextAttemptAt is still in the future is not consumed.
+func TestPollDueTimersLeavesFutureRetryWaitIntact(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	next := time.Now().UTC().Add(time.Hour)
+	if err := sched.BeginRetryWait(h.ctx, RetryWaitRequest{
+		Execution: h.exec, CapabilityID: "cap", NextAttemptAt: next,
+	}); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	state := h.exec.CapabilityState("cap")
+	if state.Status != executionmodel.CapabilityRetryWait || state.NextAttemptAt == nil || !state.NextAttemptAt.Equal(next) {
+		t.Fatalf("retry state = %+v, want unchanged retry wait at %v", state, next)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err != nil {
+		t.Fatalf("future retry timer was removed: %v", err)
+	}
+}
+
+// TestPollDueTimersDiscardsRetryWaitWithoutNextAttempt proves a malformed retry
+// wait is fenced-cleaned instead of being resumed without a schedule.
+func TestPollDueTimersDiscardsRetryWaitWithoutNextAttempt(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	if err := sched.BeginRetryWait(h.ctx, RetryWaitRequest{
+		Execution: h.exec, CapabilityID: "cap", NextAttemptAt: time.Now().UTC().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+
+	snapshot := h.exec.Snapshot()
+	state := snapshot.States["cap"]
+	if state.Status != executionmodel.CapabilityRetryWait {
+		t.Fatalf("test setup: status = %s, want retry wait", state.Status)
+	}
+	state.NextAttemptAt = nil
+	snapshot.States["cap"] = state
+	h.exec.Restore(snapshot)
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityRetryWait || state.NextAttemptAt != nil {
+		t.Fatalf("retry state = %+v, want unchanged retry wait without a schedule", state)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("retry timer without NextAttemptAt was not fenced-deleted")
+	}
+}
+
+// TestPollDueTimersIsInstanceScoped proves two instances sharing one store each
+// consume only their own due timers. Instance A's poll leaves B's timer claimable
+// and B's capability waiting until B polls.
+func TestPollDueTimersIsInstanceScoped(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	otherInstance := core.ID("inst_2")
+	other, err := executionmodel.NewExecution(singleCapabilityBlueprint("cap"), core.NewID("corr_"), otherInstance, "", "", "", "")
+	if err != nil {
+		t.Fatalf("NewExecution: %v", err)
+	}
+	if err := h.store.Add(h.ctx, other); err != nil {
+		t.Fatalf("store.Add: %v", err)
+	}
+	if err := other.Start(map[string]any{}, 1); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := other.MarkCapabilityReady("cap", map[string]any{}); err != nil {
+		t.Fatalf("MarkCapabilityReady: %v", err)
+	}
+	if err := other.MarkCapabilityRunning("cap"); err != nil {
+		t.Fatalf("MarkCapabilityRunning: %v", err)
+	}
+
+	due := time.Now().UTC().Add(-time.Minute)
+	enterDueWait(t, h, sched, executionmodel.WaitTypeTimer, "", due)
+	if err := sched.EnterWait(h.ctx, WaitEntryRequest{
+		Execution: other, CapabilityID: "cap",
+		Spec: executionmodel.WaitSpec{Type: executionmodel.WaitTypeTimer, Reason: "test", WaitUntil: &due},
+	}); err != nil {
+		t.Fatalf("EnterWait(B): %v", err)
+	}
+	otherKey, err := executionmodel.WaitTimerKey(other.ID, "cap", other.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey(B): %v", err)
+	}
+
+	subA, err := h.bus.SubscribeExecution(h.exec.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution(A): %v", err)
+	}
+	defer func() { _ = subA.Close() }()
+	subB, err := h.bus.SubscribeExecution(other.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution(B): %v", err)
+	}
+	defer func() { _ = subB.Close() }()
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 1 {
+		t.Fatalf("poll instance A = (%d, %v), want (1, nil)", count, err)
+	}
+	if evt := expectReadyEvent(t, subA); evt.Type != event.CapabilityReady {
+		t.Fatalf("instance A event = %s, want %s", evt.Type, event.CapabilityReady)
+	}
+	if state := other.CapabilityState("cap"); state.Status != executionmodel.CapabilityWaiting {
+		t.Fatalf("instance B capability = %s, want waiting", state.Status)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, otherKey); err != nil {
+		t.Fatalf("instance B timer was consumed by instance A's poll: %v", err)
+	}
+
+	count, err = sched.PollDueTimers(h.ctx, otherInstance)
+	if err != nil || count != 1 {
+		t.Fatalf("poll instance B = (%d, %v), want (1, nil)", count, err)
+	}
+	if evt := expectReadyEvent(t, subB); evt.Type != event.CapabilityReady {
+		t.Fatalf("instance B event = %s, want %s", evt.Type, event.CapabilityReady)
+	}
+	if state := other.CapabilityState("cap"); state.Status != executionmodel.CapabilityReady {
+		t.Fatalf("instance B capability = %s, want ready", state.Status)
+	}
+}
+
+// foreignTimerWaitStore injects a stamped timer owned by another instance into
+// one instance's discovery result, proving the payload check runs before claim.
+type foreignTimerWaitStore struct {
+	*executionmodel.ExecutionStore
+	timer   storage.Timer
+	claimed bool
+}
+
+func (s *foreignTimerWaitStore) DueWaitTimersForInstance(context.Context, core.ID, time.Time, int) ([]storage.Timer, error) {
+	return []storage.Timer{s.timer}, nil
+}
+
+func (s *foreignTimerWaitStore) ClaimWaitTimer(context.Context, string, string, time.Duration) (bool, error) {
+	s.claimed = true
+	return false, nil
+}
+
+func TestPollDueTimersSkipsForeignStampedTimer(t *testing.T) {
+	h := newWaitHarness(t)
+	data, err := executionmodel.EncodeWaitTimer(executionmodel.WaitTimerPayload{
+		InstanceID: "inst_other", ExecutionID: h.exec.ID, CapabilityID: "cap", WaitType: executionmodel.WaitTypeTimer,
+	})
+	if err != nil {
+		t.Fatalf("EncodeWaitTimer: %v", err)
+	}
+	foreign := &foreignTimerWaitStore{
+		ExecutionStore: h.store,
+		timer:          storage.Timer{Key: "foreign", DueAt: time.Now().UTC().Add(-time.Minute), Data: data},
+	}
+	sched, err := New(h.eventBus, h.store, h.scopes, WithWaitStore(foreign, TimerPollConfig{}))
+	if err != nil {
+		t.Fatalf("New scheduler: %v", err)
+	}
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 0 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
+	}
+	if foreign.claimed {
+		t.Fatal("foreign stamped timer was claimed")
 	}
 }

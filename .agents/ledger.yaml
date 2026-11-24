@@ -807,18 +807,250 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "git diff --check"
-    status: in_progress
-    lease:
-      owner: coder
-      paths:
-        - "nore/internal/execution/reconciler/**"
-        - "nore/internal/execution/scheduler/**"
-        - "nore/internal/instance/**"
-        - "nore/cmd/nore/main.go"
-      task: T-050
-    evidence: ["T-025/T-026/T-027/T-028/T-049 and D4 prerequisite T-060 all reached done with full integration gates; T-060 added bounded `dispatch_ready/` discovery in commit 5d6cac8.", "ADR 0007 is accepted and internally consistent. Reviewer PASS confirmed it is safe for implementation dispatch: ID-1 assigns live retry-wait resumption to the scheduler timer poller; ID-2 maps wait deadline policy once in the instance adapter; ID-3 records the lease-source exception; ID-4 binds periodic reconciliation with only a ticker wake-up from publish errors; ID-5 sets execution deadlines at admission/recovery and enforces expiry through scheduler cancellation.", "The old D4 blocker and non-existent runtime max-lifetime option were removed from the ADR. The implementer must not call `WithExecutionMaxLifetime`; the actual resolved config field is `policy.MaxLifetime` at `nore/internal/runtimeconfig/execution_policy.go:19`.", "PostgreSQL parity: not claimed; no DSN is available."]
-    reports: [".agents/decisions/0007-t050-host-wiring.md", "T-050-discovery", "T-050-design-final-review"]
-    open_risks: ["Residual accepted exception: the fencing lease comes from the scheduler's validated authority, not T-028 config; operators cannot tune it independently (ADR 0007 ID-3).", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "The ADR leaves the exact host loop placement to implementation but requires existing scheduler terminal paths and no duplicate state machine."]
+    status: blocked
+    lease: null
+    evidence: ["T-025/T-026/T-027/T-028/T-049 and D4 prerequisite T-060 all reached done with full integration gates; T-060 added bounded `dispatch_ready/` discovery in commit 5d6cac8.", "ADR 0007 is accepted and internally consistent. Reviewer PASS confirmed it is safe for implementation dispatch: ID-1 assigns live retry-wait resumption to the scheduler timer poller; ID-2 maps wait deadline policy once in the instance adapter; ID-3 records the lease-source exception; ID-4 binds periodic reconciliation with only a ticker wake-up from publish errors; ID-5 sets execution deadlines at admission/recovery and enforces expiry through scheduler cancellation.", "The old D4 blocker and non-existent runtime max-lifetime option were removed from the ADR. The implementer must not call `WithExecutionMaxLifetime`; the actual resolved config field is `policy.MaxLifetime` at `nore/internal/runtimeconfig/execution_policy.go:19`.", "T-062 chose bounded instance-scoped deadline discovery in ADR 0008; T-063/T-064/T-065/T-066/T-068/T-069/T-070 implemented and verified all previously reported timer-loop, unbounded discovery, cross-instance polling, minimum-interval, stale-index, and shutdown-flake blockers. Architect APPROVE for the wired scope; security APPROVE on T-070; reviewer APPROVE on T-070 but final T050 acceptance CHANGES_REQUESTED.", "Final integrated recheck found the remaining blocker at acceptance item 3: no production consumer-local dispatch reconciler package or caller of `ClaimReadyDispatchIntents` exists (`nore/internal/execution/store.go:1232` is test-only). The bounded ready-index primitive satisfies D4, and the production timer/deadline loop is wired, but dispatch intents are not claimed/released/published by a host loop.", "T071-RESEARCH mapped the reconciler scope: ADR 0006 places a consumer-local port in `nore/internal/execution/reconciler`; the host should reuse the durable poll cadence and avoid `CompleteDispatchIntent`; cross-instance dispatch routing is unresolved because `DispatchIntent` and `dispatch_ready/` keys carry no instance ID while instances share a store.", "PostgreSQL parity: not claimed; no DSN is available."]
+    reports: [".agents/decisions/0007-t050-host-wiring.md", "T-050-discovery", "T-050-design-final-review", ".agents/reports/T-050A-review-integration.md"]
+    open_risks: ["Residual accepted exception: the fencing lease comes from the scheduler's validated authority, not T-028 config; operators cannot tune it independently (ADR 0007 ID-3).", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "BLOCKED: T050 acceptance item 3 remains unmet — no production dispatch-intent reconciler exists. Implementation requires an architect decision on instance-scoped dispatch routing before wiring, because dispatch intents and ready keys are not instance-scoped while the manager shares one store across instances.", "The ADR leaves the exact host loop placement to implementation but requires existing scheduler terminal paths and no duplicate state machine."]
+
+  - id: T-062
+    objective: "Choose a bounded, instance-safe deadline discovery design and resolve T-050A review blockers"
+    scope: [".agents/decisions/**"]
+    owner: architect
+    reviewer: reviewer
+    signoff: []
+    dependencies: [T-050]
+    acceptance:
+      - "ADR 0008 records a bounded due-deadline discovery design with batch size applied at the discovery boundary"
+      - "ADR 0008 decides whether deadline and due-wait discovery must be instance-scoped in T-050 or explicitly defers it with owner, condition, and residual risk"
+      - "ADR 0008 decides whether a minimum timer poll interval is required in code or is explicitly deferred with evidence and residual risk"
+      - "ADR 0008 records how the flaky timer-loop test should be corrected without weakening behavior"
+    verification:
+      - "Read ADR 0007 and the T-050A review report; cite exact file:line evidence"
+      - "Coordinator checks the written ADR and sign-off recommendation"
+    status: done
+    lease: null
+    evidence: ["Architect wrote `.agents/decisions/0008-bounded-deadline-discovery.md` with D1-D6: a bounded `execution_deadlines/` due index owned by ExecutionStore; recording/no-scan and backend tests; required instance scoping for due timers and deadlines; `MinTimerPollInterval=100ms`; deterministic flaky-test fixture repair; and no polling work after cancellation.", "Coordinator reviewed all four T-062 acceptance criteria and required one mechanical correction: replace an unavailable `rg` example with `grep`. Architect accepted the ADR for T-063 implementation on 2026-11-22; no substantive decision changed."]
+    open_risks: []
+    commit: null
+
+  - id: T-063
+    objective: "Apply ADR 0008 D4-D6: minimum poll interval, deterministic test fixture, and clean shutdown"
+    scope:
+      - "shared/types/core/runtimeconfig.go"
+      - "shared/types/core/*_test.go"
+      - "nore/internal/runtimeconfig/**"
+      - "application/config/**"
+      - "nore/internal/execution/scheduler/wait.go"
+      - "nore/internal/execution/scheduler/wait_test.go"
+      - "nore/internal/instance/instance.go"
+      - "nore/internal/instance/wait_lifecycle_test.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security, performance, documenter]
+    dependencies: [T-062]
+    acceptance:
+      - "`MinTimerPollInterval=100ms` is the single authority enforced by core validation, application config, and scheduler `TimerPollConfig.validated()`; default remains 1s"
+      - "`TestDurableTimerLoopPollsAndStops` deterministically verifies timer consumption/publication and clean stop without nil-configuration dispatch or weakened assertions"
+      - "`Instance.pollTimers` does not start new poll/expiry work after cancellation and normal shutdown emits no spurious cancelled-context errors"
+      - "Focused interval, target-test, race, build, and diff checks pass"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd shared && GOWORK=off go test -count=1 ./..."
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/instance -run '^TestDurableTimerLoopPollsAndStops$'"
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Bugfixer added `core.MinTimerPollInterval=100ms` as the single validation authority and wired it through application config, runtime config, and scheduler validation; added deterministic `emptyTestConfigurations` fixture plus timer-consumption assertions to `TestDurableTimerLoopPollsAndStops`; added cancellation guards before and between host poll calls.", "Reproduction evidence recorded in `.agents/reports/T-063.md`: sub-100ms values were previously accepted, the target test SIGSEGVed under race/CPU matrix before the fixture fix, and cancellation tests failed before the guards.", "Coordinator reran build/compile, focused instance/cmd, repeated target test, scheduler race, full nore race suite, and `scripts/script.sh`; all passed on the final tree.", "Architect APPROVE for the integrated T-063/T-064/T-065/T-066 diff; performance APPROVE; security APPROVE. Documenter CHANGES_REQUESTED solely for stale documentation, remediated by T-067/T-071. Reviewer final APPROVE recorded through T050A integrated re-review; remaining T050 rejection is the separate dispatch-reconciler criterion.", "All T-063 acceptance criteria verified; documentation synchronized in T-067/T-071 and full validation green."]
+    open_risks: []
+    commit: null
+
+  - id: T-064
+    objective: "Add bounded, instance-scoped deadline and due-wait storage primitives"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+      - "nore/internal/contracts/**"
+      - "nore/internal/storage/**"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security, performance]
+    dependencies: [T-062]
+    acceptance:
+      - "`ExecutionStore` owns an `execution_deadlines/` due index and bounded `DueExecutionDeadlines(ctx, instanceID, now, limit)` discovery that never lists `executions/`"
+      - "Deadline index writes/deletes are atomic with snapshot writes, including admission, terminal transitions, clear/replace, and bounded startup backfill"
+      - "Due wait-timer discovery is instance-scoped before claim/mutation with a bounded key-prefix or equivalent design; cross-instance shared-store tests pass"
+      - "Memory and sqlite backend tests cover deadline index lifecycle, bounded discovery, no-scan proof, restart backfill, and cross-instance isolation"
+      - "No PostgreSQL parity claim; no wait-timer representation is introduced for execution max lifetime"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/contracts/... ./internal/storage/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution -run 'Deadline|Due|WaitTimer|Instance|Ready|Terminal'"
+      - "grep -R -n -E '\\.List\\(ctx\\)|Prefix\\(\"executions\"\\)' nore/internal/execution/scheduler/deadline.go"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Bugfixer added a time-ordered `execution_deadlines/<instance>/...` index, bounded `DueExecutionDeadlines`, atomic index sync in execution store write paths, backfill on Adopt, instance-stamped wait timers, and bounded `DueWaitTimersForInstance` with an additive due index.", "Coordinator verified build/compile, race tests for execution/contracts/storage, focused deadline/due/wait tests, and `scripts/script.sh`; all passed. `deadline.go` contains no `.List(ctx)` or `Prefix(\"executions\")` discovery.", "Tests include a no-execution-list recording store, batch/limit assertions, instance scoping, SQLite restart, and legacy backfill.", "The initial reviewer recovery-index finding was reproduced, fixed in T-066, and covered by raw-KV restart tests. Architect APPROVE, performance APPROVE, security APPROVE, and final reviewer APPROVE through the T050A integrated re-review are recorded.", "All T-064 acceptance criteria verified; remaining T050 rejection is the separate dispatch-reconciler criterion."]
+    open_risks: []
+    commit: null
+
+  - id: T-065
+    objective: "Wire scheduler/host to bounded instance-scoped deadline and timer primitives"
+    scope:
+      - "nore/internal/execution/scheduler/**"
+      - "nore/internal/instance/**"
+      - "nore/cmd/nore/main.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security, performance]
+    dependencies: [T-063, T-064]
+    acceptance:
+      - "`ExpireExecutionDeadlines` uses the bounded store primitive and expires at most `BatchSize` due execution deadlines without listing all executions"
+      - "`PollDueTimers` uses instance-scoped due discovery; two instances sharing a store handle only their own timers and deadlines"
+      - "Deadline expiry still calls only the existing `Scheduler.CancelExecution` path with commit-before-publish and one terminal event"
+      - "All ADR 0008 D1-D6 decisions are reflected and all T-050A verification commands pass deterministically"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
+      - "cd nore && GOWORK=off go test -race -count=50 ./internal/execution/scheduler -run 'Retry|WaitUntilNil|Timer|Deadline'"
+      - "cd nore && GOWORK=off go test -count=25 ./internal/instance/ -run '^TestDurableTimerLoopPollsAndStops$'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Coder replaced global expiry discovery with bounded `DueExecutionDeadlines`, switched `PollDueTimers` to `DueWaitTimersForInstance`, passed instance identity from the host, added foreign-payload guards, and preserved the single `CancelExecution` terminal path.", "Coordinator verified build/compile, full nore race suite, focused host/cmd, scheduler race count 50, instance repeated count 25, no global discovery grep, gofmt, git diff --check, and `scripts/script.sh`; all passed. Report: `.agents/reports/T-065.md`.", "Performance sign-off APPROVE: bounded index discovery replaces O(total executions) scanning; ADR 0008 residual prefix-key bound accepted with follow-up condition; PostgreSQL parity not claimed.", "Architect final APPROVE for the integrated diff; non-blocking residuals: instance-scoped wait-due prefix scans all owned entries before applying limit, and leased timers may occupy discovery slots until lease expiry. The initial recovery-index finding was fixed in T-066. Security APPROVE and final reviewer APPROVE recorded through the T050A integrated re-review; remaining T050 rejection is the separate dispatch-reconciler criterion."]
+    reports: [".agents/reports/T-050A-review-integration.md", ".agents/reports/T-065.md", ".agents/reports/T-066.md"]
+    open_risks: ["PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "Two intermittent full-race flakes were observed (`TestCancelOnARestoredInstanceReportsTheExecutionAsFinished`, `TestStopPersistsTerminalStateToStorage`), each passing in isolation; record separately and do not attribute to this diff without evidence."]
+    commit: null
+
+  - id: T-066
+    objective: "Resolve the recovery re-stamp and deadline-index reconciliation finding"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+      - "nore/internal/instance/instance.go"
+      - "nore/internal/instance/*_test.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-063, T-064, T-065]
+    acceptance:
+      - "A recovered execution re-stamped with a max-lifetime deadline has its durable snapshot updated atomically with the deadline index, or the index is reconciled without relying on the durable snapshot deadline"
+      - "Repeated restarts of a legacy deadline-less snapshot do not create duplicate or stale deadline index entries"
+      - "The misleading recovery comment is corrected and the persistence test reads durable state, not only the in-memory adopted object"
+      - "All T-065 verification commands still pass"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Deadline|Recover|Restart|Restart|Adopt'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Bugfixer reproduced the stale-index leak deterministically: three restarts of a legacy nil-deadline pending execution produced three deadline index entries on both memory and SQLite backends.", "Fix makes `Adopt` call `reconcileAdoptedDeadlineIndexInTx`, which removes every index entry carrying the adopted execution ID in one transaction, then writes the current key; ordinary transitions keep bounded snapshot-to-snapshot sync. Instance recovery comment corrected.", "Regression tests added at store and instance boundaries read raw durable KV and assert exactly one current index entry after three restarts; both failed before and pass after. Report: `.agents/reports/T-066.md`.", "Coordinator verified no TEMP-REPRO marker remains, no external lease expansion, build/compile PASS, gofmt/diff-check clean. Full race suite had one unrelated transient `TestStopPersistsTerminalStateToStorage` failure, then passed on rerun, 10 isolated runs, and 5 package runs; the unrelated flake was fixed by T-068.", "Architect final APPROVE for the integrated diff; security APPROVE and final reviewer APPROVE recorded through the T050A integrated re-review. Remaining T050 rejection is the separate dispatch-reconciler criterion."]
+    reports: [".agents/reports/T-065.md", ".agents/reports/T-066.md"]
+    open_risks: ["Adoption performs a bounded instance-scoped deadline-index sweep on a rare recovery path.", "Durable legacy snapshot retains nil deadline until its next committed transition; discovery relies on the reconciled index by design.", "Two intermittent unrelated test flakes observed in full race runs; separate remediation required before claiming the repository is fully clean."]
+    commit: null
+
+  - id: T-067
+    objective: "Synchronize architecture docs with the implemented durable timer/deadline polling behavior"
+    scope:
+      - "docs/ARCHITECTURE.md"
+      - "README.md"
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-065, T-066]
+    acceptance:
+      - "`docs/ARCHITECTURE.md` states the timer poll interval minimum is 100ms and maximum is 1m"
+      - "Stale statements claiming the due-timer poll loop is unwired or that timer settings do not produce periodic resumes are corrected to describe the durable-only host loop and deadline expiry"
+      - "Documentation does not claim the production due-timer reconciler or full restart/signal dispatch is wired if it is not"
+      - "Public docs match verified T-063/T-065/T-066 behavior"
+    verification:
+      - "grep -R -n -E 'unwired|do not yet produce periodic|greater than zero' docs README.md"
+      - "Review exact diff for wording accuracy"
+    status: done
+    lease: null
+    evidence: ["Documenter corrected `docs/ARCHITECTURE.md:592,778,1018,1028,1031` and `README.md:44`: interval bounds are 100ms–1m with 1s default; durable instances run bounded instance-scoped due-timer/deadline polling; non-durable remains event-driven; production dispatch/signal reconcilers and end-to-end restart claims are not overstated.", "Verification: stale-language grep exit 1 with no matches and `git diff --check` exit 0. Report: `.agents/reports/T-067.md`.", "Reviewer T067-SIGN-OFF APPROVE: exact wording verified, no T050/T030/PostgreSQL overclaim, and stale-language grep clean."]
+    reports: [".agents/reports/T-067.md"]
+    open_risks: []
+    commit: null
+
+  - id: T-068
+    objective: "Establish and remediate the two intermittent instance test flakes"
+    scope:
+      - "nore/internal/instance/**"
+      - "nore/internal/execution/scheduler/**"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: []
+    acceptance:
+      - "`TestCancelOnARestoredInstanceReportsTheExecutionAsFinished` and `TestStopPersistsTerminalStateToStorage` are reproduced or explicitly classified as environment/load-only with reproducible evidence"
+      - "Any actual race or ordering defect is fixed without weakening assertions or suppressing diagnostics"
+      - "Both tests pass under repeated full-package race execution"
+    verification:
+      - "cd nore && GOWORK=off go test -race -count=10 ./internal/instance/"
+      - "cd nore && GOWORK=off go test -race -count=3 ./internal/execution/scheduler/... ./internal/instance/..."
+    status: done
+    lease: null
+    evidence: ["Bugfixer reproduced `TestStopPersistsTerminalStateToStorage` under CPU/race load: four failures at `drain_test.go:215` (`persisted status = pending, want failed`). Root cause was `sweepExecutions` skipping terminal in-memory executions whose final transition was not flushed before the cancelled snapshot writer exited.", "Production fix in `nore/internal/instance/drain.go` persists every owned execution during shutdown; terminal executions are re-saved idempotently under the revision guard. Deterministic regression test added in `drain_test.go`; it failed before the fix and passes after.", "Verification: `go test -race -count=10 ./internal/instance/` PASS; `go test -race -count=3 ./internal/execution/scheduler/... ./internal/instance/...` PASS; CPU/race load reproducer `-cpu=1,2,4,8 -count=50` PASS after fix; gofmt clean; `scripts/script.sh` PASS. Report: `.agents/reports/T-068.md`.", "Coordinator independently verified build/compile and diff-check after T-068. Reviewer APPROVE (minor stale comment tracked as T-069), architect APPROVE, security APPROVE. Final integration revalidation pending after T-069."]
+    reports: [".agents/reports/T-068.md"]
+    open_risks: ["Minor stale `sweepExecutions` doc comment at `drain.go:70-71`; T-069.", "Security low-severity stale deadline index observation; T-069."]
+    commit: null
+
+  - id: T-069
+    objective: "Close the final review findings: stale deadline index after recovery re-stamp and inaccurate sweep comment"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+      - "nore/internal/instance/drain.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-066, T-068]
+    acceptance:
+      - "A legacy recovered execution re-stamped only in memory and then terminalized before a non-terminal committed transition leaves no stale deadline-index entry"
+      - "Deadline index cleanup derives the live execution's key when the durable snapshot has no deadline and the live execution has become terminal"
+      - "`sweepExecutions` documentation states that all owned non-skipped executions are persisted and terminal ones are re-saved idempotently"
+      - "Regression tests fail before the fix and pass after; all prior T-063/T-064/T-065/T-066/T-068 checks remain green"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/execution/scheduler/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/instance/... -run 'Deadline|Recover|Restart|Adopt|StopPersists'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Bugfixer reproduced `deadline index entries for terminal exec_… = 1, want 0` on sqlite and memory before the fix with `TestTerminalSaveRemovesAdoptedDeadlineIndexEntry`.", "Fix extracted `executionDeadlineIndexKeyIgnoringTerminal` in `nore/internal/execution/store.go:670-687`, used it in `syncExecutionDeadlineIndexInTx` at `:714-755` to remove an adopted memory-only key on terminal save, and corrected the `sweepExecutions` comment at `nore/internal/instance/drain.go:70-72`.", "Regression test at `nore/internal/execution/deadline_index_test.go:281-345` writes a legacy snapshot, adopts with a stamped deadline, terminalizes, saves, and asserts no deadline index entry for that execution while an unrelated entry remains; it failed before and passes after.", "Verification: focused regression PASS; build/compile PASS; `go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/execution/scheduler/...` PASS; focused Deadline|Recover|Restart|Adopt|StopPersists PASS; gofmt clean; `git diff --check` clean; `scripts/script.sh` exit 0.", "Report: `.agents/reports/T-069.md`. Discovered follow-up: `ExecutionStore.Delete` still derives cleanup only from the durable snapshot; tracked separately as T-070.", "Independent reviewer T069-SIGN-OFF APPROVE: all four criteria met, no blocker/critical/major/minor finding, raw-KV assertion and unchanged unrelated entry verified.", "Architect T069-ARCH-SIGN-OFF APPROVE: store ownership, transactional cleanup, bounded sync, single terminal path, and ADR 0007/0008 boundaries preserved.", "Security T069-SECURITY-SIGN-OFF APPROVE: no unbounded scan, cross-instance leakage, new resource surface, or weakened validation; focused tests PASS."]
+    reports: [".agents/reports/T-069.md"]
+    open_risks: ["A non-terminal deadline change between Adopt and the next committed transition is not covered; no production caller currently mutates the deadline in that interval.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
+    commit: null
+
+  - id: T-070
+    objective: "Close the discovered adopted-only execution deadline-index leak in ExecutionStore.Delete"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-069]
+    acceptance:
+      - "Deleting an adopted execution whose durable snapshot has no persisted deadline removes the recovery-stamped deadline-index entry"
+      - "Delete cleanup remains exact-key and does not remove another execution's deadline index entry"
+      - "A regression test fails before the fix and passes after on available KV backends"
+      - "All prior T-063/T-064/T-065/T-066/T-068/T-069 checks remain green"
+    verification:
+      - "cd nore && GOWORK=off go test -count=1 -run 'TestDeleteRemovesAdoptedDeadlineIndexEntry' -v ./internal/execution/"
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/execution/scheduler/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Bugfixer reproduced `deadline index entries for deleted exec_… = 1, want 0` on memory and sqlite before the fix with `TestDeleteRemovesAdoptedDeadlineIndexEntry`.", "Fix in `nore/internal/execution/store.go:326-363` derives the live execution's exact deadline key with `executionDeadlineIndexKeyIgnoringTerminal`; `removeExecutionDeadlineIndexInTx` at `:703-731` deletes persisted and live keys with deduplication inside the delete transaction, with no scan or prefix deletion.", "Regression at `nore/internal/execution/deadline_index_test.go:347-419` checks raw durable KV on memory and sqlite, preserves an unrelated execution with the same due time, verifies the durable record is gone, and verifies discovery returns only the survivor; it failed before and passes after.", "Verification: focused regression PASS; build/compile PASS; `-race` execution/instance/scheduler PASS; focused Deadline|Recover|Restart|Adopt|StopPersists PASS; gofmt clean; `git diff --check` clean; `scripts/script.sh` exit 0.", "Report: `.agents/reports/T-070.md`.", "Reviewer T070-SIGN-OFF APPROVE: all four criteria met; targeted test PASS; prior checks accepted from recorded full validation.", "Architect T070-ARCH-SIGN-OFF APPROVE: exact-key cleanup, store ownership, atomicity, no scan, no duplicated state machine, and meaningful regression verified.", "Security T070-SECURITY-SIGN-OFF APPROVE: exact-key cleanup preserves peer entries, no scan/prefix/cross-instance deletion, no weakened tests; focused test PASS on memory and sqlite. No critical/high/medium/low findings."]
+    reports: [".agents/reports/T-070.md"]
+    open_risks: ["A non-terminal deadline mutation between the live read and Delete could leave a previously indexed key; no production caller mutates the deadline in that interval.", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN."]
+    commit: null
 
   - id: T-025
     objective: "Wire engine-only consumption of typed suspend outcomes and durable retry waits"
@@ -1237,3 +1469,25 @@ tasks:
     reports: ["T-061-review", "T-061-remediation-review"]
     commit: dc2b907
     open_risks: ["T-031 must synchronize any docs that change after verified T-050/T-030 behavior.", "PostgreSQL parity remains DSN-gated."]
+
+  - id: T-071
+    objective: "Mark backlog items whose Phase 5 work is now implemented and verified"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter, reviewer]
+    dependencies: [T-063, T-064, T-065, T-066, T-067, T-068, T-069, T-070]
+    acceptance:
+      - "Only backlog items whose closing tasks are implemented, signed off, and fully validated are checked"
+      - "Items still blocked by the T050 dispatch reconciler, T030 end-to-end restart validation, or T032 final validation remain unchecked"
+      - "F5-3 is corrected to distinguish the now-wired production timer loop from the still-missing dispatch reconciler"
+      - "No unrelated backlog item or checkbox changes"
+    verification:
+      - "git diff -- todos/TODO.md"
+      - "git diff --check"
+    status: done
+    lease: null
+    evidence: ["Documenter checked R5-12, R5-13, R5-17, and R5-20 with closure evidence from T-023/T-026/T-029/T-057/T-059/T-061/T-063/T-064/T-065/T-066; left R5-22..R5-28, F5-3, F5-6, and F5-10 unchecked because T050/T030/T032 remain open.", "F5-3 was reworded to state that the production timer/deadline loop is wired by T-063/T-065 while the bounded dispatch-intent reconciler is still missing; F5-5 and stale R5-10 wording were corrected.", "Independent reviewer T071-REVIEW APPROVED all six criteria with line evidence: only the four authorized checkboxes changed, no unrelated checkbox changed, `git diff --check` clean, and no T050/T030/T032/PostgreSQL overclaim.", "Report: `.agents/reports/T-071-docs.md` (git-ignored)."]
+    reports: [".agents/reports/T-071-docs.md"]
+    open_risks: []
+    commit: null

@@ -67,8 +67,10 @@ func sweepAbandonedExecutions(ctx context.Context, store contracts.ExecutionRepo
 	})
 }
 
-// sweepExecutions persists a terminal failure for every unfinished execution of an
-// instance, skipping those that skip reports as not the instance's to abandon.
+// sweepExecutions persists every owned execution that skip does not exclude:
+// unfinished ones are marked failed first, while terminal ones are re-saved
+// idempotently so a final transition committed before the event writer stopped
+// is not lost.
 //
 // The snapshot is written straight to the repository rather than published as an
 // event. Both call sites run after the instance's event bus has stopped serving:
@@ -86,17 +88,22 @@ func sweepExecutions(ctx context.Context, store contracts.ExecutionRepository, i
 
 	var failures []error
 	for _, exec := range executions {
-		if exec.IsTerminal() {
-			continue
-		}
 		if skip != nil && skip(exec) {
 			continue
 		}
-		if !exec.MarkFailed(reason) {
+		if !exec.IsTerminal() && !exec.MarkFailed(reason) {
 			// Another transition won the race, which is a valid outcome: the
 			// execution reached a terminal state of its own accord.
 			continue
 		}
+		// Persist every execution we own, including ones already terminal in
+		// memory. The event-driven snapshot writer serves the instance context;
+		// when shutdown cancels it, a terminal transition committed just before
+		// cancellation can remain only in memory. Skipping such an execution
+		// leaves a stale running or pending durable record that a restart would
+		// offer for cancellation or recovery. Saving here is idempotent and the
+		// store's revision guard still rejects a genuinely newer snapshot.
+		//
 		// The instance context is already cancelled, so persistence cannot be
 		// bounded by it. Callers pass a bounded background context for shutdown
 		// sweeps; restore passes the live startup context.

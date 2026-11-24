@@ -12,6 +12,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
+	"github.com/neuron-runtime/neuron/nore/internal/runtimeconfig"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
@@ -43,6 +44,10 @@ type Manager struct {
 	// "durable"). It decides whether interrupted executions are failed on
 	// restart or left for recovery to resume.
 	durability string
+
+	// executionPolicy is the resolved deployment policy every instance created
+	// by this manager applies to waits, timers, and execution lifetime.
+	executionPolicy runtimeconfig.ExecutionPolicy
 }
 
 // ErrActiveExecutions reports a destructive operation refused because an
@@ -66,6 +71,15 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 	if err != nil {
 		return nil, err
 	}
+	executionPolicy := optsApplied.executionPolicy
+	if !optsApplied.executionPolicySet {
+		// Resolve the same canonical defaults instance.New would use, so every
+		// instance receives a fully populated policy rather than a zero value.
+		executionPolicy, err = runtimeconfig.ResolveExecutionPolicy(runtimeconfig.ExecutionPolicyInput{})
+		if err != nil {
+			return nil, fmt.Errorf("resolve default execution policy: %w", err)
+		}
+	}
 	m := &Manager{
 		instancesByKey:       make(map[protocol.InstanceKey]*Instance),
 		instancesByID:        make(map[string]*Instance),
@@ -77,6 +91,7 @@ func NewManager(parent context.Context, workers int, detachedDrainTimeout time.D
 		detachedDrainTimeout: detachedDrainTimeout,
 		builtinPolicy:        optsApplied.builtinPolicy,
 		durability:           durability,
+		executionPolicy:      executionPolicy,
 	}
 	if err := m.reconcile(parent); err != nil {
 		return nil, err
@@ -256,6 +271,7 @@ func (m *Manager) recoverInstance(
 		WithDetachedDrainTimeout(m.detachedDrainTimeout),
 		WithBuiltinPolicy(m.builtinPolicy),
 		WithDurability(m.durability),
+		WithExecutionPolicy(m.executionPolicy),
 	)
 	if err != nil {
 		return fmt.Errorf("create recovery instance %s: %w", rec.ID, err)
@@ -400,7 +416,8 @@ func (m *Manager) GetOrCreate(ctx context.Context, key protocol.InstanceKey) (*I
 		return nil, false, err
 	}
 	i, err := New(m.parent, string(id), canonical, &reg.Assembly, m.workers, m.store,
-		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy), WithDurability(m.durability))
+		execOpt, WithDetachedDrainTimeout(m.detachedDrainTimeout), WithBuiltinPolicy(m.builtinPolicy), WithDurability(m.durability),
+		WithExecutionPolicy(m.executionPolicy))
 	if err != nil {
 		return nil, false, err
 	}

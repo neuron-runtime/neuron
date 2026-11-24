@@ -182,7 +182,7 @@ func main() {
 	if projectMode {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge, retentionMaxPerVersion, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy)
+		runProjectMode(ctx, host, port, projectRoot, workers, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge, retentionMaxPerVersion, capabilityStore, detachedDrainTimeout, tokenArg, builtinPolicy, executionPolicy)
 		return
 	}
 
@@ -239,7 +239,8 @@ func main() {
 
 	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
 		instance.WithBuiltinPolicy(builtinPolicy),
-		instance.WithDurability(durability))
+		instance.WithDurability(durability),
+		instance.WithExecutionPolicy(executionPolicy))
 	if err != nil {
 		log.Fatalf("init instance manager: %v", err)
 	}
@@ -544,7 +545,7 @@ func defaultCapabilityRuntimeStore() string {
 
 // runProjectMode runs N.O.R.E. as a foreground project runtime with auto port
 // allocation and discovery metadata.
-func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge string, retentionMaxPerVersion int, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy) {
+func runProjectMode(ctx context.Context, host, port, projectRoot string, workers int, dataDir, storageDriver, storagePath, storageDSN, durability, retentionMaxAge string, retentionMaxPerVersion int, capabilityStore string, detachedDrainTimeout time.Duration, tokenArg string, builtinPolicy builtins.Policy, executionPolicy runtimeconfig.ExecutionPolicy) {
 	if projectRoot == "" {
 		log.Fatal("--project-root is required when --project is set")
 	}
@@ -631,7 +632,8 @@ func runProjectMode(ctx context.Context, host, port, projectRoot string, workers
 
 	inst, err := instance.NewManager(ctx, workers, detachedDrainTimeout, store, assemblies,
 		instance.WithBuiltinPolicy(builtinPolicy),
-		instance.WithDurability(durability))
+		instance.WithDurability(durability),
+		instance.WithExecutionPolicy(executionPolicy))
 	if err != nil {
 		log.Fatalf("init instance manager: %v", err)
 	}

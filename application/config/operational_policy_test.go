@@ -126,6 +126,10 @@ func TestOperationalPolicyInvalidValuesFailWithActionableMessages(t *testing.T) 
 			cli:  map[string]any{"runtime.execution.timerPoll.interval": "often"},
 			want: []string{"runtime.execution.timerPoll.interval", "timer poll interval", "often"},
 		},
+		"sub-minimum poll interval": {
+			cli:  map[string]any{"runtime.execution.timerPoll.interval": "1ns"},
+			want: []string{"runtime.execution.timerPoll.interval", "at least", core.MinTimerPollInterval.String()},
+		},
 		"excessive poll interval": {
 			cli:  map[string]any{"runtime.execution.timerPoll.interval": "2m"},
 			want: []string{"runtime.execution.timerPoll.interval", "must not exceed"},

@@ -40,14 +40,15 @@ const (
 	defaultTimerPollBatchSize = 256
 	defaultTimerPollLease     = 30 * time.Second
 
-	maxTimerPollInterval  = time.Minute
 	maxTimerPollBatchSize = 4096
 	minTimerPollLease     = 5 * time.Second
 	maxTimerPollLease     = 5 * time.Minute
 )
 
 // validated fills defaults and rejects values that would make polling either
-// ineffective (zero batch, sub-clock-margin lease) or unbounded.
+// ineffective (sub-floor interval, zero batch, sub-clock-margin lease) or
+// unbounded. The interval bounds come from the core contract so the scheduler
+// holds no second authority for the minimum poll cadence.
 func (c TimerPollConfig) validated() (TimerPollConfig, error) {
 	if c.Interval == 0 {
 		c.Interval = defaultTimerPollInterval
@@ -58,8 +59,8 @@ func (c TimerPollConfig) validated() (TimerPollConfig, error) {
 	if c.Lease == 0 {
 		c.Lease = defaultTimerPollLease
 	}
-	if c.Interval < 0 || c.Interval > maxTimerPollInterval {
-		return c, fmt.Errorf("invalid wait timer poll interval %s", c.Interval)
+	if c.Interval < core.MinTimerPollInterval || c.Interval > core.MaxTimerPollInterval {
+		return c, fmt.Errorf("invalid wait timer poll interval %s: must be between %s and %s", c.Interval, core.MinTimerPollInterval, core.MaxTimerPollInterval)
 	}
 	if c.BatchSize < 0 || c.BatchSize > maxTimerPollBatchSize {
 		return c, fmt.Errorf("invalid wait timer poll batch size %d", c.BatchSize)
@@ -77,7 +78,10 @@ func (c TimerPollConfig) validated() (TimerPollConfig, error) {
 // every storage backend capability.
 type WaitStore interface {
 	contracts.WaitCommitter
-	DueWaitTimers(ctx context.Context, now time.Time, limit int) ([]storage.Timer, error)
+	// DueWaitTimersForInstance discovers at most limit due timers owned by one
+	// instance. Instance scope is applied before any claim or mutation so a
+	// shared store cannot wake another instance's execution.
+	DueWaitTimersForInstance(ctx context.Context, instanceID core.ID, now time.Time, limit int) ([]storage.Timer, error)
 	// WaitTimerKeys lists timer keys scoped to one execution, optionally narrowed
 	// to one capability (empty capabilityID means the whole execution). Callers
 	// use it for cancellation (remove every timer an execution owns) and scoped
@@ -202,6 +206,89 @@ func (s *Scheduler) EnterWait(ctx context.Context, req WaitEntryRequest) error {
 			}
 			req.Execution.Restore(before)
 			return fmt.Errorf("persist wait for capability %s: %w", req.CapabilityID, err)
+		}
+		return nil
+	})
+}
+
+// RetryWaitRequest describes one capability deferring its next attempt.
+// AttemptID may be empty; it then defaults to the execution's current attempt.
+type RetryWaitRequest struct {
+	Execution     *executionmodel.Execution
+	CapabilityID  core.ID
+	AttemptID     core.ID
+	NextAttemptAt time.Time
+}
+
+// BeginRetryWait records a capability's transition into a durable retry wait.
+// The state change and the wake-up timer are committed as one transition. No
+// event is published: the capability is not runnable until NextAttemptAt
+// elapses, at which point the due-timer poller resumes it through the same
+// commit path used for timer and deadline continuations.
+//
+// Without a wait store the operation fails closed rather than silently
+// falling back to a non-durable retry the host did not agree to.
+func (s *Scheduler) BeginRetryWait(ctx context.Context, req RetryWaitRequest) error {
+	if s.waitStore == nil {
+		return ErrWaitStoreUnavailable
+	}
+	if req.Execution == nil {
+		return fmt.Errorf("execution is required")
+	}
+	if req.CapabilityID == "" {
+		return fmt.Errorf("capability ID is required")
+	}
+	if req.NextAttemptAt.IsZero() {
+		return fmt.Errorf("retry wait for capability %s requires a next attempt time", req.CapabilityID)
+	}
+	attemptID := req.AttemptID
+	if attemptID == "" {
+		attemptID = req.Execution.AttemptID
+	}
+	if attemptID == "" {
+		return fmt.Errorf("retry wait timer requires an attempt ID for capability %s", req.CapabilityID)
+	}
+
+	key, err := executionmodel.WaitTimerKey(req.Execution.ID, req.CapabilityID, attemptID)
+	if err != nil {
+		return err
+	}
+	encoded, err := executionmodel.EncodeWaitTimer(executionmodel.WaitTimerPayload{
+		ExecutionID:  req.Execution.ID,
+		CapabilityID: req.CapabilityID,
+		WaitType:     executionmodel.WaitTypeTimer,
+		AttemptID:    attemptID,
+	})
+	if err != nil {
+		return err
+	}
+	effects := executionmodel.WaitEffects{
+		PutTimers: []executionmodel.WaitTimerWrite{{
+			Key:   key,
+			DueAt: req.NextAttemptAt.UTC(),
+			Data:  encoded,
+		}},
+	}
+
+	// The domain mutation, its `before` snapshot, and the commit share one
+	// transition guard so no other driver can commit between them.
+	return req.Execution.RunTransition(func() error {
+		before := req.Execution.Snapshot()
+		if err := req.Execution.BeginRetryWait(req.CapabilityID, req.NextAttemptAt); err != nil {
+			return err
+		}
+		if _, err := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
+			Execution: req.Execution,
+			Effects:   effects,
+		}); err != nil {
+			if isDurableRace(err) {
+				if reloadErr := s.reloadInto(ctx, req.Execution); reloadErr != nil {
+					return errors.Join(err, reloadErr)
+				}
+				return fmt.Errorf("persist retry wait for capability %s: %w", req.CapabilityID, err)
+			}
+			req.Execution.Restore(before)
+			return fmt.Errorf("persist retry wait for capability %s: %w", req.CapabilityID, err)
 		}
 		return nil
 	})

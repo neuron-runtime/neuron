@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -210,6 +211,63 @@ func TestStopPersistsTerminalStateToStorage(t *testing.T) {
 	reloaded, err := execution.NewExecutionStore(store).Get(context.Background(), exec.ID)
 	if err != nil {
 		t.Fatalf("execution %s not found in storage after the instance stopped: %v", exec.ID, err)
+	}
+	if got := reloaded.Status(); got != execution.StatusFailed {
+		t.Fatalf("persisted status = %s, want %s", got, execution.StatusFailed)
+	}
+	if got := reloaded.InFlight(); got != 0 {
+		t.Fatalf("persisted in flight = %d, want 0", got)
+	}
+}
+
+// A terminal in-memory state is not enough. The event-driven snapshot writer
+// serves the instance context and can exit on cancellation before flushing a
+// transition committed moments earlier. Stop is the last writer, so it must
+// close that gap rather than skipping an execution that already looks terminal
+// in memory.
+//
+// This fixes that state directly: the execution is persisted while pending and
+// then marked failed only in memory. New builds the components but does not
+// start the runtime goroutines, so no persister can flush the transition before
+// Stop sweeps it. The dropped flush is therefore deterministic rather than a
+// race against a background writer.
+func TestStopPersistsTerminalStatesMarkedDuringShutdown(t *testing.T) {
+	store := newTestStore(t)
+	assembly := blockingAssembly()
+	i, err := New(context.Background(), "inst_shutdown_flush", protocol.InstanceKey{
+		AssemblyID: "sys_blocking", Version: "1.0.0",
+	}, &assembly, 2, store)
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	exec, err := execution.NewExecution(i.Blueprint, shared.NewID("request_"), shared.ID(i.ID), i.Key.AssemblyID, i.Key.Version, i.Key.Hash, i.Key.Env)
+	if err != nil {
+		t.Fatalf("new execution: %v", err)
+	}
+	if err := i.store.Add(context.Background(), exec); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if !exec.MarkFailed(errors.New("failed while the instance was stopping")) {
+		t.Fatalf("fixture: could not mark the pending execution failed (status %s)", exec.Status())
+	}
+
+	fresh := execution.NewExecutionStore(store)
+	before, err := fresh.Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("read durable execution before stop: %v", err)
+	}
+	if before.IsTerminal() {
+		t.Fatalf("fixture: durable execution is already %s; the dropped flush was not modelled", before.Status())
+	}
+
+	if err := i.Stop(); err != nil {
+		t.Fatalf("stop instance: %v", err)
+	}
+
+	reloaded, err := fresh.Get(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("read durable execution after stop: %v", err)
 	}
 	if got := reloaded.Status(); got != execution.StatusFailed {
 		t.Fatalf("persisted status = %s, want %s", got, execution.StatusFailed)

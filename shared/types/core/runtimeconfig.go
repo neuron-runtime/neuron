@@ -275,6 +275,11 @@ const (
 	DefaultTimerPollInterval    = time.Second
 	DefaultTimerPollBatchSize   = 256
 
+	// MinTimerPollInterval is the smallest permitted due-timer poll cadence.
+	// It is the single authority for the floor shared by operator config
+	// validation and the scheduler's timer-poll validation; a shorter interval
+	// would turn periodic discovery into a hot loop.
+	MinTimerPollInterval  = 100 * time.Millisecond
 	MaxTimerPollInterval  = time.Minute
 	MaxTimerPollBatchSize = 4096
 )
@@ -313,8 +318,9 @@ func ValidateExecutionMaxLifetime(value string) (time.Duration, error) {
 }
 
 // ValidateTimerPollInterval parses and bounds the due-timer poll interval. An
-// empty value applies the default; an explicit non-positive or excessive value
-// is rejected so polling cannot become a busy loop or an unbounded scan.
+// empty value applies the default; an explicit value below MinTimerPollInterval
+// or above MaxTimerPollInterval is rejected so polling cannot become a hot loop
+// or an unbounded scan.
 func ValidateTimerPollInterval(value string) (time.Duration, error) {
 	if strings.TrimSpace(value) == "" {
 		return DefaultTimerPollInterval, nil
@@ -323,8 +329,8 @@ func ValidateTimerPollInterval(value string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid timer poll interval: %w", err)
 	}
-	if parsed <= 0 {
-		return 0, fmt.Errorf("invalid timer poll interval %q: must be greater than 0", value)
+	if parsed < MinTimerPollInterval {
+		return 0, fmt.Errorf("invalid timer poll interval %s: must be at least %s", parsed, MinTimerPollInterval)
 	}
 	if parsed > MaxTimerPollInterval {
 		return 0, fmt.Errorf("invalid timer poll interval %s: must not exceed %s", parsed, MaxTimerPollInterval)

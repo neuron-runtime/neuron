@@ -152,12 +152,13 @@ func TestTimerPollConfigDefaultsAndValidation(t *testing.T) {
 	}
 
 	bad := map[string]TimerPollConfig{
-		"negative interval": {Interval: -time.Second},
-		"huge interval":     {Interval: 2 * time.Minute},
-		"negative batch":    {BatchSize: -1},
-		"huge batch":        {BatchSize: maxTimerPollBatchSize + 1},
-		"short lease":       {Lease: time.Second},
-		"long lease":        {Lease: 10 * time.Minute},
+		"negative interval":    {Interval: -time.Second},
+		"sub-minimum interval": {Interval: core.MinTimerPollInterval - time.Nanosecond},
+		"huge interval":        {Interval: 2 * time.Minute},
+		"negative batch":       {BatchSize: -1},
+		"huge batch":           {BatchSize: maxTimerPollBatchSize + 1},
+		"short lease":          {Lease: time.Second},
+		"long lease":           {Lease: 10 * time.Minute},
 	}
 	for name, cfg := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -165,6 +166,28 @@ func TestTimerPollConfigDefaultsAndValidation(t *testing.T) {
 				t.Fatalf("config %+v was accepted, want rejection", cfg)
 			}
 		})
+	}
+}
+
+// TestTimerPollConfigEnforcesCoreMinimumInterval proves the scheduler does not
+// keep a second authority for the poll-interval bounds: the core contract is
+// the floor and ceiling, inclusive values are valid, and the 1s default is safe.
+func TestTimerPollConfigEnforcesCoreMinimumInterval(t *testing.T) {
+	if core.MinTimerPollInterval != 100*time.Millisecond {
+		t.Fatalf("core minimum = %s, want 100ms", core.MinTimerPollInterval)
+	}
+	validated, err := (TimerPollConfig{Interval: core.MinTimerPollInterval}).validated()
+	if err != nil || validated.Interval != core.MinTimerPollInterval {
+		t.Fatalf("config at the minimum = (%+v, %v), want it accepted", validated, err)
+	}
+	if _, err := (TimerPollConfig{Interval: core.MinTimerPollInterval - time.Nanosecond}).validated(); err == nil {
+		t.Fatal("config one nanosecond below the core minimum was accepted")
+	}
+	if _, err := (TimerPollConfig{Interval: core.MaxTimerPollInterval + time.Nanosecond}).validated(); err == nil {
+		t.Fatal("config one nanosecond above the core maximum was accepted")
+	}
+	if defaults, err := (TimerPollConfig{}).validated(); err != nil || defaults.Interval != core.DefaultTimerPollInterval {
+		t.Fatalf("default config = (%+v, %v), want core default %s", defaults, err, core.DefaultTimerPollInterval)
 	}
 }
 
@@ -183,7 +206,7 @@ func TestNonDurableSchedulerRefusesWaits(t *testing.T) {
 	if _, err := sched.ResolveSignal(h.ctx, signalRequest(h.exec, "del_1", map[string]any{"ok": true})); !errors.Is(err, ErrWaitStoreUnavailable) {
 		t.Fatalf("ResolveSignal error = %v, want %v", err, ErrWaitStoreUnavailable)
 	}
-	count, err := sched.PollDueTimers(h.ctx)
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	if err != nil || count != 0 {
 		t.Fatalf("PollDueTimers = (%d, %v), want (0, nil)", count, err)
 	}
@@ -224,7 +247,7 @@ func TestEnterWaitWritesTimerOnlyWithDeadline(t *testing.T) {
 			if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityWaiting {
 				t.Fatalf("capability status = %s, want waiting", state.Status)
 			}
-			timers, err := h.store.DueWaitTimers(h.ctx, time.Now().UTC().Add(time.Hour), 16)
+			timers, err := h.store.DueWaitTimersForInstance(h.ctx, h.exec.InstanceID, time.Now().UTC().Add(time.Hour), 16)
 			if err != nil {
 				t.Fatalf("DueWaitTimers: %v", err)
 			}

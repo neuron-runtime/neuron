@@ -141,7 +141,7 @@ func TestConcurrentWaitDriverRollbackCannotPoisonCommittedPeer(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _ = sched.PollDueTimers(h.ctx)
+		_, _ = sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 	}()
 	select {
 	case <-fault.second:
@@ -218,7 +218,7 @@ func TestConcurrentSignalVsPollerCommitsOnce(t *testing.T) {
 	}()
 	go func() {
 		<-start
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		results <- outcome{name: "poller", count: count, err: err}
 	}()
 	close(start)
@@ -505,7 +505,7 @@ func TestConcurrentSignalVsDeadlineFailPublishesOnlyFailure(t *testing.T) {
 	results := make(chan outcome, 2)
 
 	go func() {
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		results <- outcome{name: "poller", count: count, err: err}
 	}()
 	select {
@@ -621,7 +621,7 @@ func TestConcurrentSignalVsDeadlineFailDistinctCapabilities(t *testing.T) {
 	results := make(chan outcome, 2)
 
 	go func() {
-		count, err := sched.PollDueTimers(h.ctx)
+		count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
 		results <- outcome{name: "poller", count: count, err: err}
 	}()
 	select {

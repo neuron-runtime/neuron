@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/neuron-runtime/neuron/nore/internal/assembly"
+	"github.com/neuron-runtime/neuron/nore/internal/runtimeconfig"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 )
 
@@ -60,5 +62,38 @@ func TestRemoveRefusesUnfinishedExecutionsWithoutForce(t *testing.T) {
 	}
 	if !removed {
 		t.Fatal("forced Remove() did not remove the instance")
+	}
+}
+
+// TestManagerPassesExecutionPolicyToCreatedInstance proves the manager carries
+// the resolved deployment policy into every instance it constructs.
+func TestManagerPassesExecutionPolicyToCreatedInstance(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	key := protocol.InstanceKey{AssemblyID: "sys_policy_manager", Version: "1.0.0", Hash: "policy_manager_hash"}
+	registerRecoveryAssembly(t, store, key, "cap")
+	policy := runtimeconfig.ExecutionPolicy{
+		WaitDeadlinePolicy: "continue",
+		MaxLifetime:        2 * time.Hour,
+		TimerPollInterval:  25 * time.Millisecond,
+		TimerPollBatchSize: 7,
+	}
+
+	manager, err := NewManager(ctx, 1, 0, store, assembly.NewRepository(store),
+		WithDurability(DurabilityNone), WithExecutionPolicy(policy))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	inst, created, err := manager.GetOrCreate(ctx, key)
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	if !created || inst == nil {
+		t.Fatalf("GetOrCreate returned created=%v instance=%v", created, inst)
+	}
+	defer func() { _ = inst.Stop() }()
+
+	if inst.executionPolicy != policy {
+		t.Fatalf("instance policy = %+v, want %+v", inst.executionPolicy, policy)
 	}
 }

@@ -68,6 +68,7 @@ func TestSaveWaitTransitionCommitsAllEffects(t *testing.T) {
 		CapabilityID: capabilityID,
 		WaitType:     WaitTypeSignal,
 		AttemptID:    attemptID,
+		InstanceID:   exec.InstanceID,
 	})
 	if err != nil {
 		t.Fatalf("EncodeWaitTimer: %v", err)

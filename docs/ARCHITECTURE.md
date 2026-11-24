@@ -589,7 +589,7 @@ flowchart LR
 3. registers a runtime adapter for every frozen external capability runtime (`plugin.RegisterResolvedCapabilityRuntimes`), and
 4. compiles the blueprint for the assembly.
 
-**Start.** `Instance.Start` sets the status to `running` and launches five concurrent loops: analytics, scheduler, capability runtime engine, event persistence, and execution persistence. Until this point nothing is listening.
+**Start.** `Instance.Start` sets the status to `running` and launches five concurrent loops: analytics, scheduler, capability runtime engine, event persistence, and either execution persistence (non-durable modes) or the durable-only due-timer and deadline poll loop (durable mode). Until this point nothing is listening.
 
 **Stop.** `Instance.Stop` cancels the instance context, waits for in-flight work to drain, closes the capability runtime registry (which closes every registered adapter, releasing runtime-backed resources), and persists the stopped status.
 
@@ -775,7 +775,7 @@ Signal error responses carry a stable `code` alongside the HTTP status so caller
 `GET /v1/instances/{id}/executions` accepts `?status=waiting` and projects each suspended capability's wait type, expected signal, wait reason, correlation key, and deadline. The projection reads persisted wait state, so restored executions expose the same details as live ones.
 
 > [!NOTE]
-> These are implemented contracts and primitives, not a complete hosted suspend/resume lifecycle. The store exposes a limit-bounded claim over the dispatch-intent prefix, but bounded discovery is in progress as T-060, and production host reconciliation — the due-timer poll loop and dispatch-intent reconciler — remains unwired until T-050. Durable restart/end-to-end acceptance tests are not yet complete. A timer whose due time passes with no consumer running is therefore not yet guaranteed to fire. Signal delivery, wait state, retry waits, and recovery of restored waits are implemented and tested at their respective boundaries. PostgreSQL parity is not claimed without a test DSN.
+> These are implemented contracts and primitives, not a complete hosted suspend/resume lifecycle. Durable instances now run an instance-scoped, bounded poll loop that resumes elapsed timer waits and expires execution deadlines on the configured `timerPoll` cadence; non-durable instances remain event-driven. Bounded dispatch-intent discovery is implemented (T-060), but the production dispatch-intent and signal-dispatch reconcilers are not wired, so full durable restart acceptance is not claimed. Signal delivery, wait state, retry waits, timer polling, deadline expiry, and recovery of restored waits are implemented and tested at their respective boundaries. PostgreSQL parity is not claimed without a test DSN.
 
 ## Event streaming
 
@@ -1015,7 +1015,7 @@ The policy surface names three modes, configured at `runtime.execution.durabilit
 
 All three modes are wired through the CLI, daemon, and project launch paths. Recovery restores pending and running root executions, recorded joins, detached tasks, durable retry waits, and suspended waits against the execution's immutable artifact; snapshots carry wait state and the execution deadline. The capability-level suspend/resume contract and the state machine that resumes restored waits are implemented and tested at their boundaries.
 
-The store (`nore/internal/execution/store.go`) exposes a limit-bounded claim over the dispatch-intent prefix, but that is neither bounded discovery nor host reconciliation. Bounded discovery is in progress as T-060, and the production due-timer poll loop and dispatch-intent reconciler are not wired into the daemon until T-050; durable restart/end-to-end acceptance tests are still incomplete. PostgreSQL parity remains unverified without a test DSN.
+The store (`nore/internal/execution/store.go`) exposes a bounded, owner-fenced claim over a `dispatch_ready/` ready index, and durable instances run an instance-scoped poll loop over bounded due-wait and deadline indexes. The production dispatch-intent reconciler (T-050) is still not wired into the daemon, and end-to-end signal dispatch and durable restart acceptance tests remain incomplete. PostgreSQL parity remains unverified without a test DSN.
 
 ### Execution policy
 
@@ -1025,10 +1025,10 @@ Wait and timer behavior is also governed by deployment-level settings under `run
 | --- | --- | --- |
 | `runtime.execution.waitDeadlinePolicy` | `fail` | Action when a wait deadline expires: `fail` (capability fails with `wait_timeout`), `cancel`, or `continue` (resume as though satisfied). |
 | `runtime.execution.maxLifetime` | `720h` (30 days) | Bound on the whole execution; `0` disables it. Distinct from a capability's `execution.timeout`. |
-| `runtime.execution.timerPoll.interval` | `1s` | Cadence of a due-timer consumer; must be greater than zero and at most `1m`. |
+| `runtime.execution.timerPoll.interval` | `1s` | Cadence of the durable-only due-timer and deadline poll loop; must be at least `100ms` and at most `1m`. |
 | `runtime.execution.timerPoll.batchSize` | `256` | Maximum due timers claimed in one pass; must be between 1 and `4096`. |
 
-The short environment names are `NEURON_WAIT_DEADLINE_POLICY`, `NEURON_EXECUTION_MAX_LIFETIME`, `NEURON_TIMER_POLL_INTERVAL`, and `NEURON_TIMER_POLL_BATCH_SIZE`. Invalid values fail configuration load rather than falling back silently. These settings are parsed, validated, and forwarded, but the host does not yet start the due-timer poll loop that would consume the interval and batch size, so they do not yet produce periodic timer-driven resumes. See [Waiting and signals](#waiting-and-signals).
+The short environment names are `NEURON_WAIT_DEADLINE_POLICY`, `NEURON_EXECUTION_MAX_LIFETIME`, `NEURON_TIMER_POLL_INTERVAL`, and `NEURON_TIMER_POLL_BATCH_SIZE`. Invalid values fail configuration load rather than falling back silently. Durable instances start a due-timer and deadline poll loop that consumes the interval and batch size at the configured cadence, producing periodic timer-driven resumes and deadline expiry; non-durable instances remain event-driven and start no such loop. See [Waiting and signals](#waiting-and-signals).
 
 ### Artifact retention
 

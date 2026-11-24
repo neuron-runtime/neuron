@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestRuntimeConfigValidateAcceptsUnsetFields(t *testing.T) {
 	cases := map[string]*RuntimeConfig{
@@ -65,6 +69,41 @@ func TestRuntimeConfigValidateRejectsUnknownValues(t *testing.T) {
 				t.Fatal("expected an invalid runtime config to be rejected")
 			}
 		})
+	}
+}
+
+// TestValidateTimerPollIntervalEnforcesMinimum protects the shared contract:
+// 100ms is the single authoritative floor, the 1s default remains valid, and
+// sub-floor positive values cannot be smuggled through config as hot loops.
+func TestValidateTimerPollIntervalEnforcesMinimum(t *testing.T) {
+	if MinTimerPollInterval != 100*time.Millisecond {
+		t.Fatalf("MinTimerPollInterval = %s, want 100ms", MinTimerPollInterval)
+	}
+	if DefaultTimerPollInterval < MinTimerPollInterval {
+		t.Fatalf("default interval %s is below the minimum %s", DefaultTimerPollInterval, MinTimerPollInterval)
+	}
+
+	for _, value := range []string{"1ns", "99ms", "0"} {
+		t.Run("reject "+value, func(t *testing.T) {
+			_, err := ValidateTimerPollInterval(value)
+			if err == nil {
+				t.Fatalf("ValidateTimerPollInterval(%q) accepted a sub-minimum interval", value)
+			}
+			if !strings.Contains(err.Error(), MinTimerPollInterval.String()) {
+				t.Fatalf("error %q does not name the minimum bound %s", err, MinTimerPollInterval)
+			}
+		})
+	}
+	for _, value := range []string{"100ms", "1s", "1m"} {
+		t.Run("accept "+value, func(t *testing.T) {
+			if _, err := ValidateTimerPollInterval(value); err != nil {
+				t.Fatalf("ValidateTimerPollInterval(%q): %v", value, err)
+			}
+		})
+	}
+	got, err := ValidateTimerPollInterval("")
+	if err != nil || got != DefaultTimerPollInterval {
+		t.Fatalf("empty interval = (%s, %v), want default %s", got, err, DefaultTimerPollInterval)
 	}
 }
 

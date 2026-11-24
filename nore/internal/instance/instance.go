@@ -19,6 +19,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
 	"github.com/neuron-runtime/neuron/nore/internal/registry"
 	"github.com/neuron-runtime/neuron/nore/internal/resolver"
+	"github.com/neuron-runtime/neuron/nore/internal/runtimeconfig"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/stream"
 	"github.com/neuron-runtime/neuron/nore/internal/types"
@@ -56,6 +57,11 @@ type options struct {
 
 	// durability is the execution durability mode. Controls recovery behavior.
 	Durability string
+
+	// executionPolicy is the deployment-level policy for waits, their due
+	// timers, and execution lifetime. When unset the canonical defaults are used.
+	executionPolicy    runtimeconfig.ExecutionPolicy
+	executionPolicySet bool
 }
 
 // WithResolvedCapabilityRuntimes supplies the frozen capability runtime set persisted with the
@@ -98,6 +104,17 @@ func WithDurability(d string) Option {
 	}
 }
 
+// WithExecutionPolicy supplies the resolved deployment policy governing wait
+// deadlines, due-timer cadence, and maximum execution lifetime. It is set by
+// the host from runtimeconfig.ResolveExecutionPolicy; callers must not build a
+// policy from unvalidated input.
+func WithExecutionPolicy(policy runtimeconfig.ExecutionPolicy) Option {
+	return func(o *options) {
+		o.executionPolicy = policy
+		o.executionPolicySet = true
+	}
+}
+
 type Instance struct {
 	ID        string
 	Key       protocol.InstanceKey
@@ -130,6 +147,20 @@ type Instance struct {
 	// execution persister persists snapshots; in "durable" mode the scheduler
 	// owns transition persistence.
 	durability string
+
+	// executionPolicy is the resolved deployment policy this instance applies.
+	// It is stored so the host owns wait deadlines and maximum lifetimes without
+	// leaking configuration into the engine or the scheduler.
+	executionPolicy runtimeconfig.ExecutionPolicy
+
+	// timerPollInterval is the cadence of the durable-only timer poll loop. It
+	// comes from the resolved policy; the scheduler keeps its own fencing lease
+	// so only one authority owns that safety bound.
+	timerPollInterval time.Duration
+
+	// waitLifecycle is the instance-owned engine wait port. It is nil outside
+	// durable mode, where waits remain event-driven.
+	waitLifecycle *waitLifecycle
 }
 
 func New(
@@ -164,6 +195,20 @@ func New(
 		return nil, err
 	}
 	optsApplied.Durability = durability
+
+	executionPolicy := optsApplied.executionPolicy
+	if !optsApplied.executionPolicySet {
+		// The resolver is the single authority for defaults. An empty input
+		// resolves every field to its canonical value without adding an
+		// operator override the caller did not declare.
+		var err error
+		executionPolicy, err = runtimeconfig.ResolveExecutionPolicy(runtimeconfig.ExecutionPolicyInput{})
+		if err != nil {
+			cancel()
+			bus.Close()
+			return nil, fmt.Errorf("resolve default execution policy: %w", err)
+		}
+	}
 
 	// "none" retains no history. Swap in a process-local store so execution and
 	// event persistence still work for in-flight observability, while instance
@@ -204,9 +249,17 @@ func New(
 		// The wait store is the scheduler's authoritative wait/signal/delivery
 		// boundary. It is supplied only in durable mode so non-durable behavior
 		// stays event-driven and unchanged.
+		//
+		// The cadence and batch come from the resolved policy. The fencing lease
+		// is deliberately omitted: scheduler.TimerPollConfig.validated() is the
+		// single authority for it, so a deployment cannot weaken it (ADR ID-3).
+		pollConfig := scheduler.TimerPollConfig{
+			Interval:  executionPolicy.TimerPollInterval,
+			BatchSize: executionPolicy.TimerPollBatchSize,
+		}
 		schedOpts = append(schedOpts,
 			scheduler.WithTransitionCommitter(store),
-			scheduler.WithWaitStore(store, scheduler.DefaultTimerPollConfig()),
+			scheduler.WithWaitStore(store, pollConfig),
 		)
 		engineOpts = append(engineOpts, engine.WithTransitionCommitter(store))
 	}
@@ -216,6 +269,20 @@ func New(
 		cancel()
 		bus.Close()
 		return nil, fmt.Errorf("create scheduler: %w", err)
+	}
+
+	var lifecycle *waitLifecycle
+	if durable {
+		// The instance owns the wait lifecycle port. It applies the operator's
+		// deadline policy and delegates all state and durability decisions to
+		// the scheduler. Non-durable instances deliberately keep no lifecycle:
+		// a suspend there fails closed and a retry still sleeps inline.
+		lifecycle = &waitLifecycle{
+			executions:     store,
+			scheduler:      sched,
+			deadlinePolicy: waitDeadlinePolicy(executionPolicy.WaitDeadlinePolicy),
+		}
+		engineOpts = append(engineOpts, engine.WithWaitLifecycle(lifecycle))
 	}
 
 	celCompiler, err := resolver.NewCELCompiler(resolver.DefaultCELConfig())
@@ -267,23 +334,26 @@ func New(
 	}
 
 	i := &Instance{
-		ID:            id,
-		Key:           key,
-		Blueprint:     blueprint,
-		status:        StatusStarting,
-		ctx:           ctx,
-		cancel:        cancel,
-		bus:           bus,
-		createdAt:     time.Now().UTC(),
-		store:         store,
-		eventStore:    evtStore,
-		scopes:        scopes,
-		scheduler:     sched,
-		engine:        execEngine,
-		registry:      reg,
-		analytics:     anly,
-		execPersister: persister,
-		durability:    optsApplied.Durability,
+		ID:                id,
+		Key:               key,
+		Blueprint:         blueprint,
+		status:            StatusStarting,
+		ctx:               ctx,
+		cancel:            cancel,
+		bus:               bus,
+		createdAt:         time.Now().UTC(),
+		store:             store,
+		eventStore:        evtStore,
+		scopes:            scopes,
+		scheduler:         sched,
+		engine:            execEngine,
+		registry:          reg,
+		analytics:         anly,
+		execPersister:     persister,
+		durability:        optsApplied.Durability,
+		executionPolicy:   executionPolicy,
+		timerPollInterval: executionPolicy.TimerPollInterval,
+		waitLifecycle:     lifecycle,
 	}
 
 	return i, nil
@@ -309,8 +379,12 @@ func (i *Instance) Start() error {
 	i.status = StatusRunning
 	i.mu.Unlock()
 
+	durable := i.durability == DurabilityDurable
 	routines := 4
 	if i.execPersister != nil {
+		routines++
+	}
+	if durable {
 		routines++
 	}
 	i.wg.Add(routines)
@@ -343,8 +417,56 @@ func (i *Instance) Start() error {
 			_ = i.execPersister.Run(i.ctx)
 		}()
 	}
+	if durable {
+		go func() {
+			defer i.wg.Done()
+			i.pollTimers(i.ctx)
+		}()
+	}
 
 	return nil
+}
+
+// pollTimers drives the durable wait-timer consumer on the cadence from the
+// resolved execution policy. It owns no state: discovery, fencing, commit and
+// publication all belong to the scheduler, which bounds every pass. One
+// goroutine performs both polls synchronously, so passes cannot overlap, and a
+// slow pass simply defers the next tick. Both polls carry this instance's
+// identity: even when instances share a store backend, neither can consume
+// another's timers or deadlines. The loop exits on context cancellation so Stop
+// can await it before closing the store and bus.
+func (i *Instance) pollTimers(ctx context.Context) {
+	interval := i.timerPollInterval
+	if interval <= 0 {
+		interval = runtimeconfig.DefaultExecutionPolicy().TimerPollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// A tick and cancellation can become ready together: the select may
+			// choose this branch after Stop cancelled the context. Never start
+			// fresh discovery with an already-cancelled context, because Stop is
+			// waiting for this goroutine before it closes the store and bus.
+			if ctx.Err() != nil {
+				return
+			}
+			if _, err := i.scheduler.PollDueTimers(ctx, shared.ID(i.ID)); err != nil {
+				slog.Warn("poll due wait timers",
+					slog.String("instance", i.ID), slog.String("error", err.Error()))
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if _, err := i.scheduler.ExpireExecutionDeadlines(ctx, shared.ID(i.ID)); err != nil {
+				slog.Warn("expire execution deadlines",
+					slog.String("instance", i.ID), slog.String("error", err.Error()))
+			}
+		}
+	}
 }
 
 func (i *Instance) fail(err error) {
@@ -434,6 +556,13 @@ func (i *Instance) Execute(ctx context.Context, input map[string]any) (*executio
 	// execution before it is persisted. Recovery starts a pending execution from
 	// this snapshot rather than losing the input that only existed in the event.
 	exec.SeedInitialParams(input)
+	// The maximum-lifetime deadline is an operator policy, stamped before the
+	// first persist so it survives recovery with its original value. Zero means
+	// the deployment disabled the limit.
+	if i.executionPolicy.MaxLifetime > 0 {
+		deadline := time.Now().UTC().Add(i.executionPolicy.MaxLifetime)
+		exec.SetExecutionDeadline(&deadline)
+	}
 	if err := i.store.Add(ctx, exec); err != nil {
 		return nil, err
 	}
@@ -481,6 +610,17 @@ func (i *Instance) RecoverExecution(ctx context.Context, exec *execution.Executi
 
 	if exec.Status() == execution.StatusPending && len(pendingInput) > 0 {
 		exec.SeedInitialParams(pendingInput)
+	}
+	// A deadline stamped at admission survives in the snapshot. Only executions
+	// that predate the policy (or were admitted with the limit disabled) need one
+	// here; re-stamping an existing deadline would extend total lifetime on every
+	// restart. Set it before Adopt so the deadline index and the live scheduler
+	// see the same value. Adopt does not write the snapshot back, so the durable
+	// record keeps its original deadline until the next committed transition;
+	// Adopt reconciles index entries by execution identity on every restart.
+	if exec.ExecutionDeadline() == nil && i.executionPolicy.MaxLifetime > 0 {
+		deadline := time.Now().UTC().Add(i.executionPolicy.MaxLifetime)
+		exec.SetExecutionDeadline(&deadline)
 	}
 	exec.AttachBlueprint(blueprint)
 

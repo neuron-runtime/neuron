@@ -12,6 +12,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
+	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
 // newTimerOwnerToken returns a fresh 32-byte random fencing token for one timer
@@ -25,20 +26,25 @@ func newTimerOwnerToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-// PollDueTimers processes one bounded batch of due wait timers. It is callable
-// rather than self-scheduling so the host owns concurrency, cancellation, and
-// the poll cadence. It returns the number of timers whose processing reached a
-// durable commit, plus any per-timer errors joined together; one bad timer does
-// not block the rest of the batch.
+// PollDueTimers processes one bounded batch of due wait timers owned by
+// instanceID. It is callable rather than self-scheduling so the host owns
+// concurrency, cancellation, and the poll cadence. It returns the number of
+// timers whose processing reached a durable commit, plus any per-timer errors
+// joined together; one bad timer does not block the rest of the batch.
 //
-// Without a wait store the poller is a no-op, preserving non-durable behavior.
-func (s *Scheduler) PollDueTimers(ctx context.Context) (int, error) {
+// Discovery is instance-scoped at the store call, so a shared store cannot make
+// one instance consume another's timers. Without a wait store the poller is a
+// no-op, preserving non-durable behavior.
+func (s *Scheduler) PollDueTimers(ctx context.Context, instanceID core.ID) (int, error) {
 	if s.waitStore == nil {
 		return 0, nil
 	}
-	due, err := s.waitStore.DueWaitTimers(ctx, time.Now().UTC(), s.pollConfig.BatchSize)
+	if instanceID == "" {
+		return 0, fmt.Errorf("instance ID is required for due timer polling")
+	}
+	due, err := s.waitStore.DueWaitTimersForInstance(ctx, instanceID, time.Now().UTC(), s.pollConfig.BatchSize)
 	if err != nil {
-		return 0, fmt.Errorf("list due wait timers: %w", err)
+		return 0, fmt.Errorf("discover due wait timers for instance %s: %w", instanceID, err)
 	}
 	processed := 0
 	var errs []error
@@ -46,7 +52,7 @@ func (s *Scheduler) PollDueTimers(ctx context.Context) (int, error) {
 		if ctx.Err() != nil {
 			break
 		}
-		n, err := s.processDueTimer(ctx, timer)
+		n, err := s.processDueTimer(ctx, instanceID, timer)
 		processed += n
 		if err != nil {
 			errs = append(errs, err)
@@ -58,10 +64,17 @@ func (s *Scheduler) PollDueTimers(ctx context.Context) (int, error) {
 // processDueTimer claims one due timer, applies the wait's expiry rule, commits
 // the resulting state with a fenced delete of the claimed timer, and only then
 // publishes the event that announces the outcome.
-func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (int, error) {
+func (s *Scheduler) processDueTimer(ctx context.Context, instanceID core.ID, timer storage.Timer) (int, error) {
 	payload, err := executionmodel.DecodeWaitTimer(timer.Data)
 	if err != nil {
 		return 0, fmt.Errorf("decode wait timer %s: %w", timer.Key, err)
+	}
+	// The store stamps the instance on every timer it writes through a wait
+	// transition. A stamped timer from another instance must never be claimed,
+	// even if a stale index entry places it in this instance's candidate set;
+	// an unstamped legacy timer remains claimable.
+	if payload.InstanceID != "" && payload.InstanceID != instanceID {
+		return 0, nil
 	}
 	if timer.Key == "" || timer.DueAt.IsZero() {
 		return 0, fmt.Errorf("due wait timer has no key or due time")
@@ -119,85 +132,96 @@ func (s *Scheduler) processDueTimer(ctx context.Context, timer storage.Timer) (i
 	var outcome dueTimerOutcome
 	err = execution.RunTransition(func() error {
 		state := execution.CapabilityState(payload.CapabilityID)
-		switch state.Status {
-		case executionmodel.CapabilityWaiting:
-			// Handled below.
-		case executionmodel.CapabilityRetryWait:
-			// Retry resumption is a separate transition and is not driven by this
-			// poller. Such a timer cannot be consumed here and its deadline may
-			// still be needed, so leave it intact and report the condition.
-			slog.Warn("due wait timer belongs to a retry wait; leaving timer intact",
-				slog.String("execution_id", string(payload.ExecutionID)),
-				slog.String("capability_id", string(payload.CapabilityID)),
-				slog.String("timer", timer.Key),
-			)
-			return nil
-		default:
+		if state.Status != executionmodel.CapabilityWaiting && state.Status != executionmodel.CapabilityRetryWait {
 			// The capability is no longer waiting, so this timer can never wake it.
 			return s.discardClaimedTimer(ctx, timer.Key, owner)
-		}
-
-		// The snapshot is authoritative about whether a timer is still needed.
-		if state.WaitUntil == nil {
-			// The wait has no deadline, so no timer should exist; this one is stale.
-			return s.discardClaimedTimer(ctx, timer.Key, owner)
-		}
-		if state.WaitUntil.After(now) {
-			// The snapshot still needs a timer for a future deadline, and this
-			// entry cannot be proven to be a different, stale one. Deleting it
-			// would strip the wait of the timer it still needs, so leave it in
-			// place and report the mismatch for reconciliation instead.
-			slog.Warn("due wait timer conflicts with a future snapshot deadline; leaving timer intact",
-				slog.String("execution_id", string(payload.ExecutionID)),
-				slog.String("capability_id", string(payload.CapabilityID)),
-				slog.String("timer", timer.Key),
-				slog.Time("timer_due", timer.DueAt),
-				slog.Time("snapshot_wait_until", *state.WaitUntil),
-			)
-			return nil
 		}
 
 		before := execution.Snapshot()
 		var publish func() error
 		needsIntent := false
-		switch state.WaitType {
-		case executionmodel.WaitTypeTimer, executionmodel.WaitTypeDeadline:
-			if err := execution.ResolveWait(payload.CapabilityID, nil); err != nil {
+		switch state.Status {
+		case executionmodel.CapabilityRetryWait:
+			// Live retry resumption belongs to this poller. Only a retry whose
+			// next attempt time has elapsed is woken. A timer due by its own
+			// record but whose NextAttemptAt is still in the future is the T-043
+			// reconciliation case and must be left intact.
+			if state.NextAttemptAt == nil {
+				return s.discardClaimedTimer(ctx, timer.Key, owner)
+			}
+			if state.NextAttemptAt.After(now) {
+				slog.Warn("due wait timer belongs to a retry whose next attempt is in the future; leaving timer intact",
+					slog.String("execution_id", string(payload.ExecutionID)),
+					slog.String("capability_id", string(payload.CapabilityID)),
+					slog.String("timer", timer.Key),
+					slog.Time("next_attempt_at", *state.NextAttemptAt),
+				)
+				return nil
+			}
+			if err := execution.ResumeRetryWait(payload.CapabilityID); err != nil {
 				return err
 			}
 			publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
 			needsIntent = true
-		case executionmodel.WaitTypeSignal:
-			policy, err := execution.ExpireWait(payload.CapabilityID, now)
-			if err != nil {
-				return err
+		case executionmodel.CapabilityWaiting:
+			// The snapshot is authoritative about whether a timer is still needed.
+			if state.WaitUntil == nil {
+				// The wait has no deadline, so no timer should exist; this one is stale.
+				return s.discardClaimedTimer(ctx, timer.Key, owner)
 			}
-			switch policy {
-			case executionmodel.WaitDeadlinePolicyContinue:
+			if state.WaitUntil.After(now) {
+				// The snapshot still needs a timer for a future deadline, and this
+				// entry cannot be proven to be a different, stale one. Deleting it
+				// would strip the wait of the timer it still needs, so leave it in
+				// place and report the mismatch for reconciliation instead.
+				slog.Warn("due wait timer conflicts with a future snapshot deadline; leaving timer intact",
+					slog.String("execution_id", string(payload.ExecutionID)),
+					slog.String("capability_id", string(payload.CapabilityID)),
+					slog.String("timer", timer.Key),
+					slog.Time("timer_due", timer.DueAt),
+					slog.Time("snapshot_wait_until", *state.WaitUntil),
+				)
+				return nil
+			}
+			switch state.WaitType {
+			case executionmodel.WaitTypeTimer, executionmodel.WaitTypeDeadline:
+				if err := execution.ResolveWait(payload.CapabilityID, nil); err != nil {
+					return err
+				}
 				publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
 				needsIntent = true
-			case executionmodel.WaitDeadlinePolicyFail:
-				reason := fmt.Errorf("wait deadline exceeded for capability %s", payload.CapabilityID)
-				execution.MarkFailed(reason)
-				publish = func() error {
-					return s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{
-						Message: reason.Error(),
-					}))
+			case executionmodel.WaitTypeSignal:
+				policy, err := execution.ExpireWait(payload.CapabilityID, now)
+				if err != nil {
+					return err
 				}
-			case executionmodel.WaitDeadlinePolicyCancel:
-				reason := fmt.Errorf("wait deadline cancelled for capability %s", payload.CapabilityID)
-				execution.MarkCancelled(reason)
-				s.scopes.Release(execution.ID)
-				publish = func() error {
-					return s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
-						Message: reason.Error(),
-					}))
+				switch policy {
+				case executionmodel.WaitDeadlinePolicyContinue:
+					publish = func() error { return s.publishReady(ctx, execution, payload.CapabilityID) }
+					needsIntent = true
+				case executionmodel.WaitDeadlinePolicyFail:
+					reason := fmt.Errorf("wait deadline exceeded for capability %s", payload.CapabilityID)
+					execution.MarkFailed(reason)
+					publish = func() error {
+						return s.bus.Publish(ctx, event.New(event.ExecutionFailed, execution.ID, execution.CorrelationID, "", event.ExecutionFailedPayload{
+							Message: reason.Error(),
+						}))
+					}
+				case executionmodel.WaitDeadlinePolicyCancel:
+					reason := fmt.Errorf("wait deadline cancelled for capability %s", payload.CapabilityID)
+					execution.MarkCancelled(reason)
+					s.scopes.Release(execution.ID)
+					publish = func() error {
+						return s.bus.Publish(ctx, event.New(event.ExecutionCancelled, execution.ID, execution.CorrelationID, "", event.ExecutionCancelledPayload{
+							Message: reason.Error(),
+						}))
+					}
+				default:
+					return fmt.Errorf("unknown wait deadline policy %q", policy)
 				}
 			default:
-				return fmt.Errorf("unknown wait deadline policy %q", policy)
+				return fmt.Errorf("wait timer %s has unknown wait type %q", timer.Key, state.WaitType)
 			}
-		default:
-			return fmt.Errorf("wait timer %s has unknown wait type %q", timer.Key, state.WaitType)
 		}
 
 		// The fenced delete is an effect of SaveWaitTransition, so it runs inside

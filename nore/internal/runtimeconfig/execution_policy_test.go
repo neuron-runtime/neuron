@@ -108,7 +108,11 @@ func TestResolveExecutionPolicyRejectsInvalidValues(t *testing.T) {
 		},
 		"zero poll interval": {
 			input: ExecutionPolicyInput{TimerPollInterval: "0"},
-			want:  []string{"timer poll interval", "greater than 0"},
+			want:  []string{"timer poll interval", "at least", core.MinTimerPollInterval.String()},
+		},
+		"sub-minimum poll interval": {
+			input: ExecutionPolicyInput{TimerPollInterval: "1ns"},
+			want:  []string{"timer poll interval", "at least", core.MinTimerPollInterval.String()},
 		},
 		"excessive poll interval": {
 			input: ExecutionPolicyInput{TimerPollInterval: "2m"},
