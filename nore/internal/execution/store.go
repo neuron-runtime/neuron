@@ -1211,25 +1211,35 @@ func (s *ExecutionStore) CompleteDispatchIntent(ctx context.Context, executionID
 // until their leases expire.
 const dispatchClaimReleaseTimeout = 5 * time.Second
 
-// ClaimReadyDispatchIntents claims at most limit ready, claimable intents for
-// owner under lease. A batch may be under-filled when candidates are held by a
-// live lease; the caller must treat a returned batch as fully owned. Leases that
-// outlived a crashed owner become claimable once they expire, while intents
-// under a live lease are left untouched.
+// ClaimReadyDispatchIntents claims at most limit ready, claimable intents that
+// belong to instanceID, assigning them to owner under lease. A batch may be
+// under-filled: limit caps the ready-index keys examined and the execution reads
+// performed in one pass, and foreign or live-lease candidates count against it.
+// Later passes reach work this pass skipped. The caller must treat a returned
+// batch as fully owned.
 //
-// limit must be positive and is validated before any discovery. Discovery reads
-// only the dedicated ready index, so historical intent records are never
-// scanned. Every indexed key is examined until limit intents are won, which
-// keeps later ready work discoverable by subsequent batches even when earlier
-// keys in the index are still under a live lease. The store imposes no upper
-// bound on the index, leaving batch sizing to deployment policy.
+// Execution.InstanceID is the durable ownership authority. For each examined
+// key the store reads the intent and its execution and skips the candidate
+// before any claim when the execution belongs to another instance, cannot be
+// loaded, or has no instance recorded. Foreign intents are never written.
+// Discovery reads only the dedicated ready index, so historical intent records
+// are never scanned. The store imposes no upper bound on the index, leaving
+// batch sizing to deployment policy.
 //
-// Ownership is all-or-nothing. If any claim fails, every intent already won in
-// this call is released with an owner-fenced write on a bounded detached context
-// and the method returns (nil, err). If a release also fails, the returned error
-// names both the original failure and the leaked claims; those claims remain
-// lease-bounded and become claimable again when their leases expire.
-func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner string, lease time.Duration, limit int) ([]*DispatchIntent, error) {
+// instanceID, owner, lease and limit are validated before any discovery. Leases
+// that outlived a crashed owner become claimable once they expire, while
+// intents under a live lease are left untouched.
+//
+// Ownership is all-or-nothing. If any inspection or claim fails, every intent
+// already won in this call is released with an owner-fenced write on a bounded
+// detached context and the method returns (nil, err). If a release also fails,
+// the returned error names both the original failure and the leaked claims;
+// those claims remain lease-bounded and become claimable again when their
+// leases expire.
+func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, instanceID shared.ID, owner string, lease time.Duration, limit int) ([]*DispatchIntent, error) {
+	if instanceID == "" {
+		return nil, fmt.Errorf("instance ID is required")
+	}
 	if owner == "" {
 		return nil, fmt.Errorf("dispatch intent owner is required")
 	}
@@ -1249,24 +1259,72 @@ func (s *ExecutionStore) ClaimReadyDispatchIntents(ctx context.Context, owner st
 	}
 
 	claimed := make([]*DispatchIntent, 0, limit)
+	examined := 0
+	var batchErr error
 	for _, readyKey := range readyKeys {
-		if len(claimed) >= limit {
+		if examined >= limit {
 			break
 		}
+		examined++
+
 		intentKey := intentKeyFromDispatchReadyKey(readyKey)
+		owned, err := s.dispatchIntentBelongsToInstance(ctx, intentKey, instanceID)
+		if err != nil {
+			batchErr = fmt.Errorf("claim dispatch intents: inspect %s: %w", intentKey, err)
+			break
+		}
+		if !owned {
+			continue
+		}
+
 		intent, won, err := s.claimDispatchIntent(ctx, intentKey, owner, lease)
 		if err != nil {
-			if releaseErr := s.releaseClaimedDispatchIntents(ctx, claimed, owner); releaseErr != nil {
-				return nil, fmt.Errorf("claim dispatch intents: %w; release cleanup failed for %d claimed intents, which remain leased until expiry: %w",
-					err, len(claimed), releaseErr)
-			}
-			return nil, fmt.Errorf("claim dispatch intents: %w", err)
+			batchErr = fmt.Errorf("claim dispatch intents: %w", err)
+			break
 		}
 		if won {
 			claimed = append(claimed, intent)
 		}
 	}
+	if batchErr != nil {
+		if releaseErr := s.releaseClaimedDispatchIntents(ctx, claimed, owner); releaseErr != nil {
+			return nil, fmt.Errorf("%w; release cleanup failed for %d claimed intents, which remain leased until expiry: %w",
+				batchErr, len(claimed), releaseErr)
+		}
+		return nil, batchErr
+	}
 	return claimed, nil
+}
+
+// dispatchIntentBelongsToInstance reports whether the intent at intentKey has a
+// durable execution owned by instanceID. It is a pre-claim ownership check: a
+// foreign intent is skipped before any compare-and-swap, so no owner or lease
+// field is written to another instance's intent. A missing intent or execution
+// cannot be attributed and is treated as foreign; read and decode failures are
+// returned so a transient error never silently drops ready work.
+func (s *ExecutionStore) dispatchIntentBelongsToInstance(ctx context.Context, intentKey string, instanceID shared.ID) (bool, error) {
+	data, err := s.store.Get(ctx, intentKey)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read dispatch intent %s: %w", intentKey, err)
+	}
+	var intent DispatchIntent
+	if err := json.Unmarshal(data, &intent); err != nil {
+		return false, fmt.Errorf("decode dispatch intent %s: %w", intentKey, err)
+	}
+	if intent.ExecutionID == "" {
+		return false, nil
+	}
+	exec, err := s.Get(ctx, intent.ExecutionID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read execution %s for dispatch intent %s: %w", intent.ExecutionID, intentKey, err)
+	}
+	return exec.InstanceID == instanceID, nil
 }
 
 // releaseClaimedDispatchIntents releases every intent in claimed behind owner's

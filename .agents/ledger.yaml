@@ -1491,3 +1491,80 @@ tasks:
     reports: [".agents/reports/T-071-docs.md"]
     open_risks: []
     commit: 9bb1f1f
+
+  - id: T-072
+    objective: "Decide instance-safe dispatch reconciler routing before T050 implementation"
+    scope: [".agents/decisions/0009-dispatch-reconciler-routing.md"]
+    owner: architect
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-050, T-060, T-071]
+    acceptance:
+      - "ADR 0009 chooses how a host-local reconciler avoids claiming or publishing another instance's ready dispatch intents"
+      - "ADR 0009 resolves fresh owner tokens in the ledger against stable owner identity in ADR 0007"
+      - "ADR 0009 defines the minimal implementation boundary, tests, and rollback/compatibility impact"
+      - "Any storage key or public contract change is explicitly marked as requiring user authorization before implementation"
+    verification:
+      - "Coordinator reviews ADR 0009 against ADR 0006/0007 and T050 acceptance"
+      - "Security and reviewer records are captured by the coordinator"
+    status: done
+    lease: null
+    evidence: ["Architect wrote ADR 0009 and coordinator adopted D1(b), the no-schema-change instance-filtered claim: `ClaimReadyDispatchIntents` gains an internal instance ID and skips foreign durable executions before CAS; persisted `DispatchIntent` JSON and ready keys stay unchanged; no `contracts` change; D1(a) migration is unauthorized and out of scope.", "ADR 0009 binds a fresh fencing token per claim pass with a stable identity prefix, own-bus-only publication, store-level pre-CAS foreign filtering as the sole filter authority, and `limit` as a cap on examined ready keys and execution reads with under-filled batches allowed.", "Reviewer and security initially returned CHANGES_REQUESTED for the limit/ownership ambiguity; architect corrected ADR 0009. Reviewer T072-REVIEW-RECHECK APPROVE and security T072-SECURITY-RECHECK APPROVE confirmed all six criteria with residual risks recorded.", "Residual risks: fixed-order prefix scanning may let foreign entries crowd out an instance's own work; engine's construction-time stable owner remains out of T050 scope; multi-process shared store requires the owning process to be live; PostgreSQL parity remains unavailable."]
+    reports: [".agents/decisions/0009-dispatch-reconciler-routing.md"]
+    open_risks: ["Fixed-order prefix scanning may delay an instance's ready work under sustained foreign-entry imbalance; measure before adding cursor/rotation.", "Engine's construction-time stable owner remains a separate pre-existing fence weakness.", "Multi-process shared store has no cross-process bus; work stays durable until the owning instance runs.", "PostgreSQL parity remains unavailable."]
+    commit: null
+
+  - id: T-073
+    objective: "Make bounded dispatch-intent claims instance-safe without a durable schema change"
+    scope:
+      - "nore/internal/execution/store.go"
+      - "nore/internal/execution/*_test.go"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security, performance]
+    dependencies: [T-072]
+    acceptance:
+      - "`ClaimReadyDispatchIntents` accepts the claiming instance ID and skips foreign durable executions before any CAS/owner write"
+      - "The number of examined ready keys and execution reads is capped by `limit`; foreign and live-lease skips count against it; under-filled batches are allowed"
+      - "Ready-prefix-only discovery, all-or-nothing ownership, expired-lease rediscovery, partial-release cleanup, and owner/lease validation are preserved"
+      - "No durable JSON/key migration, `contracts` change, or public SDK change"
+      - "Memory and sqlite tests prove cross-instance isolation, foreign fields are never written, and examination is bounded"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution -run 'Dispatch|ClaimReady|Ready'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["Coder added durable instance fixtures and changed `ClaimReadyDispatchIntents(ctx, instanceID, owner, lease, limit)` at `nore/internal/execution/store.go:1239`; pre-CAS ownership inspection is at `:1305`; ready-index/execution-read counters and memory+sqlite regressions are at `dispatch_ready_test.go:39-62,277,351,388,415,427,441,480`.", "Verification: `cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./...` passed; `go test -count=1 ./internal/execution -run 'Dispatch|ClaimReady|Ready'` ok 0.613s; `go test -race -count=1 ./internal/execution/...` ok; `./scripts/script.sh` printed `All modules built and tested successfully.`; `gofmt -l` and `git diff --check` clean.", "Security T073-SECURITY APPROVE: foreign/unattributed intents are skipped before CAS with no owner/lease write, reads/examination capped by limit, fenced release preserved, no contracts/schema change. Performance T073-PERFORMANCE APPROVE with non-blocking notes: deterministic read counters 2/5/8 across ten runs, no new goroutines/timers, ready-prefix materialization is the documented residual bound.", "First coder attempt failed before verification with missing instanceID arguments in tests; bounded continuation repaired all call sites and completed verification. No production caller exists yet; T074 must propagate the real instance ID and own bus.", "Reviewer T073-REVIEW-FRESH APPROVE with two minor non-blocking notes: inspection-error cleanup is not separately fault-injected and batch owner/lease validation is preserved but not directly asserted at the batch boundary; exact `git diff --check`, focused test, race test, build/compile, and gofmt outcomes were clean.", "Architect T073-ARCH-FRESH APPROVE: D1(b) no migration, no contracts/public SDK change, consumer-local signature, pre-CAS filter sole authority, limit caps examination/reads, no boundary drift. Non-blocking residual: full ready-prefix materialization, immutable execution identity assumption, fixed-order starvation, PostgreSQL parity unverified, no production caller until T074."]
+    reports: [".agents/reports/T-073.md", ".agents/reports/T073-REVIEW-FRESH-review.md"]
+    open_risks: ["Initial ready-prefix list still materializes the full ready index; accepted in ADR 0008/0009.", "Fixed-order prefix scanning may let foreign or live-lease keys crowd out an instance's own work within a pass.", "PostgreSQL parity is not covered."]
+    commit: null
+
+  - id: T-074
+    objective: "Wire the instance-safe bounded dispatch reconciler into the durable host"
+    scope:
+      - "nore/internal/execution/reconciler/**"
+      - "nore/internal/instance/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security, performance]
+    dependencies: [T-073]
+    acceptance:
+      - "A consumer-local reconciler port in `nore/internal/execution/reconciler` claims bounded per-instance batches with a fresh fencing token per pass and releases before publishing"
+      - "The reconciler never calls `CompleteDispatchIntent`; failed publishes leave intents discoverable; it publishes only on its own bound instance bus"
+      - "Durable instances alone start/stop one reconciler loop with resolved policy interval/batch and scheduler lease; cancellation is clean"
+      - "Cross-instance integration tests prove no foreign claim mutation, no foreign-bus publication, and clean shutdown without post-close store access"
+      - "All T050 acceptance criteria are met after this task"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/reconciler/... ./internal/instance/... ./internal/execution/... -run 'Dispatch|Reconcil|Timer|Shutdown'"
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: not_started
+    lease: null
+    evidence: []
+    reports: []
+    open_risks: []
+    commit: null

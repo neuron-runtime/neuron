@@ -12,6 +12,7 @@ import (
 
 	"github.com/neuron-runtime/neuron/nore/internal/storage"
 	"github.com/neuron-runtime/neuron/nore/internal/storage/postgres"
+	"github.com/neuron-runtime/neuron/nore/internal/types"
 	shared "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -22,6 +23,32 @@ func newDispatchIntent() *DispatchIntent {
 		AttemptID:    shared.NewID("att_"),
 		ReadyToRun:   true,
 	}
+}
+
+// dispatchIntentForInstance adds a durable execution owned by instanceID and
+// returns a ready intent for it. Batch claims use Execution.InstanceID as the
+// ownership authority, so every intent a batch test expects to claim needs a
+// matching execution record.
+func dispatchIntentForInstance(t *testing.T, s *ExecutionStore, instanceID shared.ID) *DispatchIntent {
+	t.Helper()
+	exec := newTestExecution(t, &types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, instanceID)
+	if err := s.Add(context.Background(), exec); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	return NewDispatchIntent(exec.ID, shared.NewID("cap_"), shared.NewID("att_"))
+}
+
+// dispatchIntentForInstanceID is dispatchIntentForInstance with a fixed
+// execution ID, so tests can control ready-index key order without depending on
+// generated ID ordering.
+func dispatchIntentForInstanceID(t *testing.T, s *ExecutionStore, id shared.ID, instanceID shared.ID) *DispatchIntent {
+	t.Helper()
+	exec := newTestExecution(t, &types.ExecutionBlueprint{Nodes: map[shared.ID]types.ExecutionNode{}}, instanceID)
+	exec.ID = id
+	if err := s.Add(context.Background(), exec); err != nil {
+		t.Fatalf("add execution %s: %v", id, err)
+	}
+	return NewDispatchIntent(id, shared.NewID("cap_"), shared.NewID("att_"))
 }
 
 func readDispatchIntent(t *testing.T, store storage.Store, intent *DispatchIntent) (*DispatchIntent, error) {
@@ -347,11 +374,11 @@ func TestClaimReadyDispatchIntents(t *testing.T) {
 	s := NewExecutionStore(store)
 	ctx := context.Background()
 
-	ready := newDispatchIntent()
-	live := newDispatchIntent()
-	unready := newDispatchIntent()
+	ready := dispatchIntentForInstance(t, s, "inst_test")
+	live := dispatchIntentForInstance(t, s, "inst_test")
+	unready := dispatchIntentForInstance(t, s, "inst_test")
 	unready.ReadyToRun = false
-	expired := newDispatchIntent()
+	expired := dispatchIntentForInstance(t, s, "inst_test")
 	expired.Owner = "stale-owner"
 	past := time.Now().Add(-time.Minute)
 	expired.LeaseExpiresAt = &past
@@ -365,7 +392,7 @@ func TestClaimReadyDispatchIntents(t *testing.T) {
 		t.Fatalf("claim live intent = won %v, err %v; want success", won, err)
 	}
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler", time.Minute, 10)
 	if err != nil {
 		t.Fatalf("claim ready dispatch intents: %v", err)
 	}
@@ -423,7 +450,7 @@ func TestClaimReadyDispatchIntentsRejectsNonPositiveLimit(t *testing.T) {
 			}}
 			s := NewExecutionStore(store)
 
-			claimed, err := s.ClaimReadyDispatchIntents(context.Background(), "reconciler", time.Minute, tc.limit)
+			claimed, err := s.ClaimReadyDispatchIntents(context.Background(), "inst_test", "reconciler", time.Minute, tc.limit)
 			if claimed != nil {
 				t.Fatalf("claimed = %v, want nil", claimed)
 			}
@@ -444,13 +471,13 @@ func TestClaimReadyDispatchIntentsRespectsLimit(t *testing.T) {
 
 	intents := make([]*DispatchIntent, 5)
 	for i := range intents {
-		intents[i] = newDispatchIntent()
+		intents[i] = dispatchIntentForInstance(t, s, "inst_test")
 		if err := s.EnqueueDispatchIntent(ctx, intents[i]); err != nil {
 			t.Fatalf("enqueue dispatch intent %d: %v", i, err)
 		}
 	}
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 2)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler", time.Minute, 2)
 	if err != nil {
 		t.Fatalf("claim ready dispatch intents: %v", err)
 	}
@@ -470,7 +497,7 @@ func TestClaimReadyDispatchIntentsRespectsLimit(t *testing.T) {
 	}
 
 	// The keys the bounded batch never examined must stay claimable.
-	remaining, err := s.ClaimReadyDispatchIntents(ctx, "reconciler-2", time.Minute, 10)
+	remaining, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler-2", time.Minute, 10)
 	if err != nil {
 		t.Fatalf("claim remaining dispatch intents: %v", err)
 	}
@@ -484,8 +511,8 @@ func TestClaimReadyDispatchIntentsUnderfilledBatch(t *testing.T) {
 	s := NewExecutionStore(store)
 	ctx := context.Background()
 
-	ready := newDispatchIntent()
-	unready := newDispatchIntent()
+	ready := dispatchIntentForInstance(t, s, "inst_test")
+	unready := dispatchIntentForInstance(t, s, "inst_test")
 	unready.ReadyToRun = false
 	for _, intent := range []*DispatchIntent{ready, unready} {
 		if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
@@ -493,7 +520,7 @@ func TestClaimReadyDispatchIntentsUnderfilledBatch(t *testing.T) {
 		}
 	}
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler", time.Minute, 10)
 	if err != nil {
 		t.Fatalf("claim ready dispatch intents: %v", err)
 	}
@@ -528,7 +555,11 @@ func TestClaimReadyDispatchIntentsPartialFailureReleasesClaims(t *testing.T) {
 	defer cancel()
 	store.cancelOnClaimFail = cancel
 
-	intents := []*DispatchIntent{newDispatchIntent(), newDispatchIntent(), newDispatchIntent()}
+	intents := []*DispatchIntent{
+		dispatchIntentForInstance(t, s, "inst_test"),
+		dispatchIntentForInstance(t, s, "inst_test"),
+		dispatchIntentForInstance(t, s, "inst_test"),
+	}
 	for _, intent := range intents {
 		if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
 			t.Fatalf("enqueue dispatch intent: %v", err)
@@ -536,7 +567,7 @@ func TestClaimReadyDispatchIntentsPartialFailureReleasesClaims(t *testing.T) {
 	}
 	store.armed = true
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler", time.Minute, 10)
 	if claimed != nil {
 		t.Fatalf("claimed = %v, want nil on partial failure", claimed)
 	}
@@ -563,7 +594,7 @@ func TestClaimReadyDispatchIntentsPartialFailureReleasesClaims(t *testing.T) {
 		}
 	}
 
-	reclaimed, err := NewExecutionStore(base).ClaimReadyDispatchIntents(context.Background(), "reconciler-2", time.Minute, 10)
+	reclaimed, err := NewExecutionStore(base).ClaimReadyDispatchIntents(context.Background(), "inst_test", "reconciler-2", time.Minute, 10)
 	if err != nil {
 		t.Fatalf("reclaim after partial failure: %v", err)
 	}
@@ -586,13 +617,14 @@ func TestClaimReadyDispatchIntentsReleaseFailureNamesLeak(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 2; i++ {
-		if err := s.EnqueueDispatchIntent(ctx, newDispatchIntent()); err != nil {
+		intent := dispatchIntentForInstance(t, s, "inst_test")
+		if err := s.EnqueueDispatchIntent(ctx, intent); err != nil {
 			t.Fatalf("enqueue dispatch intent: %v", err)
 		}
 	}
 	store.armed = true
 
-	claimed, err := s.ClaimReadyDispatchIntents(ctx, "reconciler", time.Minute, 10)
+	claimed, err := s.ClaimReadyDispatchIntents(ctx, "inst_test", "reconciler", time.Minute, 10)
 	if claimed != nil {
 		t.Fatalf("claimed = %v, want nil on partial failure", claimed)
 	}
