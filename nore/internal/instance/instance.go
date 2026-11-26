@@ -14,6 +14,7 @@ import (
 	"github.com/neuron-runtime/neuron/nore/internal/event"
 	"github.com/neuron-runtime/neuron/nore/internal/execution"
 	"github.com/neuron-runtime/neuron/nore/internal/execution/engine"
+	"github.com/neuron-runtime/neuron/nore/internal/execution/reconciler"
 	"github.com/neuron-runtime/neuron/nore/internal/execution/scheduler"
 	"github.com/neuron-runtime/neuron/nore/internal/planner"
 	"github.com/neuron-runtime/neuron/nore/internal/plugin"
@@ -161,6 +162,11 @@ type Instance struct {
 	// waitLifecycle is the instance-owned engine wait port. It is nil outside
 	// durable mode, where waits remain event-driven.
 	waitLifecycle *waitLifecycle
+
+	// dispatchReconciler is the durable-only consumer of ready dispatch intents.
+	// It is bound to this instance's bus and started with the host loop; non-durable
+	// instances leave it nil because they have no durable intents to republish.
+	dispatchReconciler *reconciler.Reconciler
 }
 
 func New(
@@ -264,6 +270,34 @@ func New(
 		engineOpts = append(engineOpts, engine.WithTransitionCommitter(store))
 	}
 
+	// The reconciler shares the durable poll cadence and batch from the resolved
+	// policy, but takes its fencing lease from the scheduler's validated authority
+	// (ADR 0007 ID-3). Partial policies use the same default authority as the
+	// timer loop rather than a host-local literal.
+	var dispatchReconciler *reconciler.Reconciler
+	if durable {
+		defaults := runtimeconfig.DefaultExecutionPolicy()
+		interval := executionPolicy.TimerPollInterval
+		if interval <= 0 {
+			interval = defaults.TimerPollInterval
+		}
+		batchSize := executionPolicy.TimerPollBatchSize
+		if batchSize <= 0 {
+			batchSize = defaults.TimerPollBatchSize
+		}
+		dispatchReconciler, err = reconciler.New(reconciler.Config{
+			InstanceID: shared.ID(id),
+			Interval:   interval,
+			BatchSize:  batchSize,
+			Lease:      scheduler.DefaultTimerPollConfig().Lease,
+		}, store, store, bus)
+		if err != nil {
+			cancel()
+			bus.Close()
+			return nil, fmt.Errorf("create dispatch reconciler: %w", err)
+		}
+	}
+
 	sched, err := scheduler.New(bus, store, scopes, schedOpts...)
 	if err != nil {
 		cancel()
@@ -334,26 +368,27 @@ func New(
 	}
 
 	i := &Instance{
-		ID:                id,
-		Key:               key,
-		Blueprint:         blueprint,
-		status:            StatusStarting,
-		ctx:               ctx,
-		cancel:            cancel,
-		bus:               bus,
-		createdAt:         time.Now().UTC(),
-		store:             store,
-		eventStore:        evtStore,
-		scopes:            scopes,
-		scheduler:         sched,
-		engine:            execEngine,
-		registry:          reg,
-		analytics:         anly,
-		execPersister:     persister,
-		durability:        optsApplied.Durability,
-		executionPolicy:   executionPolicy,
-		timerPollInterval: executionPolicy.TimerPollInterval,
-		waitLifecycle:     lifecycle,
+		ID:                 id,
+		Key:                key,
+		Blueprint:          blueprint,
+		status:             StatusStarting,
+		ctx:                ctx,
+		cancel:             cancel,
+		bus:                bus,
+		createdAt:          time.Now().UTC(),
+		store:              store,
+		eventStore:         evtStore,
+		scopes:             scopes,
+		scheduler:          sched,
+		engine:             execEngine,
+		registry:           reg,
+		analytics:          anly,
+		execPersister:      persister,
+		durability:         optsApplied.Durability,
+		executionPolicy:    executionPolicy,
+		timerPollInterval:  executionPolicy.TimerPollInterval,
+		waitLifecycle:      lifecycle,
+		dispatchReconciler: dispatchReconciler,
 	}
 
 	return i, nil
@@ -385,7 +420,9 @@ func (i *Instance) Start() error {
 		routines++
 	}
 	if durable {
-		routines++
+		// One timer loop and one dispatch reconciler loop; neither overlaps
+		// itself, and Stop awaits both before closing the bus.
+		routines += 2
 	}
 	i.wg.Add(routines)
 
@@ -421,6 +458,11 @@ func (i *Instance) Start() error {
 		go func() {
 			defer i.wg.Done()
 			i.pollTimers(i.ctx)
+		}()
+		go func() {
+			defer i.wg.Done()
+			// Run logs tick failures itself and returns only on cancellation.
+			_ = i.dispatchReconciler.Run(i.ctx)
 		}()
 	}
 

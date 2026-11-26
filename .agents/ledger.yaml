@@ -1562,9 +1562,9 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "gofmt -l <changed Go files>; git diff --check"
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
-    open_risks: []
+    evidence: ["Coder added consumer-local `nore/internal/execution/reconciler/reconciler.go` with a two-method Claimer port, fresh entropy-backed owner per pass, durable instance assertion, release-before-publish, own-bus `CapabilityReady`, ticker-only Run, and no completion call. Instance host creates one durable-only reconciler from resolved policy and scheduler lease and awaits it during Stop.", "Tests: reconciler unit/invariant tests prove config validation, token freshness/prefix, bounded claim arguments, ownership mismatch behavior, release ordering, publish retryability, no completion, and cancellation. Instance tests prove two durable instances sharing one store publish only to their own buses with correct Params, foreign intents stay unmodified, non-durable instances have no loop, and Stop awaits one loop with no post-close access.", "Report `.agents/reports/T-074.md` records all exact verification outcomes: build/compile-only pass; focused Dispatch|Reconcil|Timer|Shutdown pass; full race suite pass; Wait|Timer|Reconcil|Lifetime|Publish pass; `./scripts/script.sh` printed `All modules built and tested successfully.`; gofmt and git diff --check clean.", "Sign-offs: reviewer T074-REVIEW-FINAL APPROVE with no findings; architect T074-ARCH APPROVE; security T074-SECURITY APPROVE; performance T074-PERFORMANCE APPROVE with non-blocking notes (full ready-prefix List per tick, inherited 100ms interval floor, no direct pprof capture)."]
+    reports: [".agents/reports/T-074.md"]
+    open_risks: ["Cross-instance integration test calls `Reconcile` directly rather than waiting for the ticker; ticker lifecycle is separately covered.", "Ready-prefix List materializes the full ready index each tick; accepted in ADR 0009.", "PostgreSQL parity remains unavailable.", "Engine construction-time stable owner remains a separate pre-existing fence weakness."]
     commit: null
