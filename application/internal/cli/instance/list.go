@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/neuron-runtime/neuron/application/config"
-	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/render"
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
@@ -71,12 +69,7 @@ func listInstances(ctx context.Context, cmd *cobra.Command) error {
 	showAll, _ := cmd.Flags().GetBool("all")
 	statusFilter, _ := cmd.Flags().GetString("status")
 
-	cfg, ok := config.FromContext(ctx)
-	if !ok {
-		return fmt.Errorf("configuration not loaded")
-	}
-
-	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
+	c, cleanup, err := setup(ctx)
 	if err != nil {
 		return err
 	}
@@ -109,12 +102,7 @@ func listInstances(ctx context.Context, cmd *cobra.Command) error {
 // When --status is provided it is passed through to the server, allowing
 // operators to list suspended executions with ?status=waiting.
 func listInstanceExecutions(ctx context.Context, cmd *cobra.Command, instanceID string) error {
-	cfg, ok := config.FromContext(ctx)
-	if !ok {
-		return fmt.Errorf("configuration not loaded")
-	}
-
-	c, cleanup, err := bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
+	c, cleanup, err := setup(ctx)
 	if err != nil {
 		return err
 	}

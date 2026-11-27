@@ -53,5 +53,5 @@ func setup(ctx context.Context) (*client.Client, func(), error) {
 	if !ok {
 		return nil, func() {}, fmt.Errorf("configuration not loaded")
 	}
-	return bootstrap.SetupClient(ctx, bootstrap.Options{Config: cfg})
+	return bootstrap.SetupInstanceClient(ctx, bootstrap.Options{Config: cfg})
 }

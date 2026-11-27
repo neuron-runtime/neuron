@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/neuron-runtime/neuron/application/capabilityruntime"
 	"github.com/neuron-runtime/neuron/application/capabilityruntime/store"
-	"github.com/neuron-runtime/neuron/application/client"
 	"github.com/neuron-runtime/neuron/application/config"
-	"github.com/neuron-runtime/neuron/application/connection"
 	"github.com/neuron-runtime/neuron/application/internal/cli/bootstrap"
 	"github.com/neuron-runtime/neuron/application/internal/cli/command"
 	"github.com/neuron-runtime/neuron/application/internal/cli/utils"
@@ -24,7 +20,6 @@ import (
 	"github.com/neuron-runtime/neuron/shared/types/builtins"
 	capabilityrt "github.com/neuron-runtime/neuron/shared/types/capabilityruntime"
 	core "github.com/neuron-runtime/neuron/shared/types/core"
-	"github.com/neuron-runtime/neuron/shared/types/projectruntime"
 	"github.com/neuron-runtime/neuron/shared/types/protocol"
 	"github.com/spf13/cobra"
 )
@@ -116,29 +111,20 @@ func runCmdHandler(cmd *cobra.Command, args []string) error {
 
 	// Resolve the runtime endpoint. A remote endpoint is explicit; otherwise
 	// the local project runtime is discovered once and its record supplies both
-	// the endpoint and the API token.
+	// the endpoint and the API token. Discovery and token adoption are shared
+	// with the instance commands so they cannot address different runtimes.
 	var endpoint, token string
 	if remoteURL != "" {
 		endpoint = remoteURL
 	} else {
-		discovered, discoveredToken, err := discoverLocalRuntime(cfg, overridePort)
+		endpoint, token, err = bootstrap.DiscoverProjectRuntime(cfg, overridePort)
 		if err != nil {
-			return fmt.Errorf("discover local runtime: %w", err)
-		}
-		if discovered == "" {
-			return fmt.Errorf("no project runtime found; start one with `neuron` in the project directory")
-		}
-		endpoint, token = discovered, discoveredToken
-	}
-
-	conn := connection.NewRemote(endpoint)
-	c := client.New(conn)
-
-	if token != "" {
-		if transport, ok := conn.Transport().(*connection.HTTPTransport); ok {
-			transport.WithToken(token)
+			return err
 		}
 	}
+
+	c := bootstrap.NewProjectRuntimeClient(endpoint, token)
+	defer c.Close()
 
 	// Address the Assembly to run. The facade takes one selector query
 	// parameter. If an explicit target is provided, try to interpret it as an
@@ -312,136 +298,12 @@ func loadExecParams() (map[string]any, error) {
 	return map[string]any{}, nil
 }
 
-// projectRoot returns the project root the effective configuration was loaded
-// for. The loader resolves it from the nearest ancestor holding a
-// neuron.config.* file (falling back to the working directory), so a command
-// run from a subdirectory still addresses the project that owns it.
-func projectRoot(cfg config.Config) (string, error) {
-	if cfg.ProjectDir != "" {
-		return cfg.ProjectDir, nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get current directory: %w", err)
-	}
-	return cwd, nil
-}
-
-// discoverLocalRuntime resolves the local project runtime for the project the
-// effective configuration belongs to. It returns the runtime endpoint and the
-// API token its discovery record publishes.
-//
-// An explicit --port overrides endpoint discovery but still adopts the token if
-// the project runtime published one, so an operator pointing at a known port is
-// not locked out by authentication. Discovery walks up from the project root, so
-// a runtime started at any ancestor is found, and a missing runtime returns an
-// empty endpoint rather than an error -- not running is the normal state before
-// `neuron` starts.
-func discoverLocalRuntime(cfg config.Config, overridePort string) (endpoint, token string, err error) {
-	root, err := projectRoot(cfg)
-	if err != nil {
-		return "", "", err
-	}
-
-	if overridePort != "" {
-		host := cfg.Runtime.Host
-		if host == "" {
-			host = "127.0.0.1"
-		}
-		// Best effort: an explicit port is authoritative even if no discovery
-		// record exists next to it.
-		if record, found, err := findRuntimeRecord(root); err == nil && found {
-			token = record.Token
-		}
-		return fmt.Sprintf("http://%s:%s", host, overridePort), token, nil
-	}
-
-	record, found, err := findRuntimeRecord(root)
-	if err != nil {
-		return "", "", err
-	}
-	if !found {
-		return "", "", nil
-	}
-	return record.Endpoint(), record.Token, nil
-}
-
-// findRuntimeRecord walks up from startDir looking for a project runtime
-// discovery record. It returns the newest live record for the nearest project
-// that has one. A record left behind by a dead or foreign process is reported as
-// an error rather than silently ignored, because it means the project believes a
-// runtime is running when it is not.
-func findRuntimeRecord(startDir string) (projectruntime.Record, bool, error) {
-	root := filepath.Clean(startDir)
-	for {
-		record, err := selectRuntimeRecord(root)
-		if err != nil {
-			return projectruntime.Record{}, false, err
-		}
-		if record != nil {
-			return *record, true, nil
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			return projectruntime.Record{}, false, nil // reached the filesystem root
-		}
-		root = parent
-	}
-}
-
-// selectRuntimeRecord returns the newest live runtime record for a project root,
-// or nil when the project has no runtime record at all. Several sessions may
-// publish records for the same project; the newest whose process is still alive
-// and whose project root matches wins. If records exist but none is usable, the
-// newest unusable record is reported as an error so the caller learns the
-// project's runtime is stale rather than absent.
-func selectRuntimeRecord(root string) (*projectruntime.Record, error) {
-	records, err := projectruntime.ReadAll(root)
-	if err != nil {
-		return nil, err
-	}
-	if len(records) == 0 {
-		return nil, nil
-	}
-	for i := range records {
-		if err := validateRuntimeRecord(records[i], root); err == nil {
-			return &records[i], nil
-		}
-	}
-	return nil, validateRuntimeRecord(records[0], root)
-}
-
-// validateRuntimeRecord rejects a record that cannot belong to a live runtime
-// for this project.
-func validateRuntimeRecord(record projectruntime.Record, root string) error {
-	if record.PID <= 0 {
-		return nil
-	}
-	if !isProcessAlive(record.PID) {
-		return fmt.Errorf("runtime process %d is not alive", record.PID)
-	}
-	if record.ProjectRoot != "" && record.ProjectRoot != root {
-		return fmt.Errorf("discovery record project root mismatch")
-	}
-	return nil
-}
-
-func isProcessAlive(pid int) bool {
-	// On Unix, signal 0 checks if process exists without sending a signal
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// Signal 0 doesn't actually send a signal, just checks existence
-	return proc.Signal(syscall.Signal(0)) == nil
-}
-
 // resolveSelector determines the selector to pass to the runtime facade:
 // if target is empty, it selects the default Assembly from the current build;
 // if target names a built Assembly, it returns its key colon form; otherwise it
 // normalizes the target as an instance key/selector (preserving legacy behavior).
 func resolveSelector(cfg config.Config, target string) (string, error) {
-	root, err := projectRoot(cfg)
+	root, err := bootstrap.ProjectRoot(cfg)
 	if err != nil {
 		return "", err
 	}
