@@ -228,6 +228,11 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		return
 	}
 
+	// Read the durable resume descriptor before invoking the capability. It is
+	// part of the resumed invocation's identity, not a property of the wait that
+	// may be entered again by the outcome of this same call.
+	resume := execution.CapabilityState(capabilityID).Resume
+
 	// A suspend is an outcome rather than an error, so retry treats it as a
 	// success. Remember the last successful outcome's suspend so the engine can
 	// either enter the wait or fail closed: completing with the empty result
@@ -237,7 +242,9 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		func(attemptCtx context.Context) (map[string]any, error) {
 			outcome, err := cr.Execute(attemptCtx, contracts.ExecutionContext{
 				ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
+				AttemptID: execution.AttemptID, LogicalOperationID: execution.LogicalOperationID,
 				Capability: node.Capability, Params: input, CapabilityConfigurations: resolvedConfig,
+				Resume: resume,
 				// The runtime configuration comes from the capability's runtime
 				// declaration, never from its input. The planner resolved defaults onto
 				// the plan, so this is always complete.

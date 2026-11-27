@@ -76,6 +76,53 @@ func (w WaitType) Valid() bool {
 	}
 }
 
+// ResumeCause identifies why a capability is invoked again after a wait. It is
+// the engine-domain vocabulary mapped onto the capability-runtime resume field
+// at the transport boundary.
+type ResumeCause string
+
+const (
+	// ResumeCauseSignal means an external signal delivery resolved the wait.
+	ResumeCauseSignal ResumeCause = "signal"
+	// ResumeCauseTimer means an elapsed timer resolved the wait.
+	ResumeCauseTimer ResumeCause = "timer"
+	// ResumeCauseDeadline means a deadline ended the wait, including deadline
+	// expiry under the continue policy.
+	ResumeCauseDeadline ResumeCause = "deadline"
+)
+
+// CapabilityResume describes the wait outcome that caused a resumed invocation.
+// The delivered payload is deliberately not a field: it remains the capability's
+// execution params, and the runtime boundary derives the wire payload from them.
+type CapabilityResume struct {
+	Cause      ResumeCause
+	SignalName string
+	DeliveryID string
+}
+
+// resumeCauseForWaitType derives the default resume cause for a wait that did
+// not carry explicit delivery metadata.
+func resumeCauseForWaitType(waitType WaitType) ResumeCause {
+	switch waitType {
+	case WaitTypeTimer:
+		return ResumeCauseTimer
+	case WaitTypeDeadline:
+		return ResumeCauseDeadline
+	default:
+		return ResumeCauseSignal
+	}
+}
+
+// cloneCapabilityResume copies a resume descriptor so callers cannot mutate the
+// execution's durable state through a returned pointer.
+func cloneCapabilityResume(resume *CapabilityResume) *CapabilityResume {
+	if resume == nil {
+		return nil
+	}
+	copied := *resume
+	return &copied
+}
+
 // WaitDeadlinePolicy is the action applied when a wait's deadline passes for a
 // wait that is not inherently time-triggered (a signal wait with a deadline).
 type WaitDeadlinePolicy string
@@ -194,6 +241,7 @@ func (e *Execution) EnterWait(capabilityID shared.ID, spec WaitSpec) error {
 	state.WaitDeadlinePolicy = policy
 	state.WaitDeadlineReason = ""
 	state.DeliveredPayload = nil
+	state.Resume = nil
 	state.DispatchState = ""
 	state.NextAttemptAt = nil
 	e.states[capabilityID] = state
@@ -205,17 +253,28 @@ func (e *Execution) EnterWait(capabilityID shared.ID, spec WaitSpec) error {
 	return nil
 }
 
-// ResolveWait resumes a waiting capability: it becomes ready, the wait metadata
-// is cleared, the delivered payload is recorded as its resume input, and its
-// in-flight slot is reacquired. Execution status is re-derived so a fully
-// waiting execution returns to running once work resumes.
+// ResolveWait resumes a waiting capability without explicit delivery metadata.
+// The resume cause is derived from the wait type. ResolveWaitWithResume is used
+// when a delivery carries signal-specific metadata.
 func (e *Execution) ResolveWait(capabilityID shared.ID, payload map[string]any) error {
+	return e.ResolveWaitWithResume(capabilityID, payload, nil)
+}
+
+// ResolveWaitWithResume resumes a waiting capability and records why it is being
+// invoked again. The descriptor is persisted with the capability state so a
+// crash between resolution and dispatch cannot lose the resume cause. The
+// delivered payload remains the capability's execution params.
+func (e *Execution) ResolveWaitWithResume(capabilityID shared.ID, payload map[string]any, resume *CapabilityResume) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.resolveWaitLocked(capabilityID, payload)
+	return e.resolveWaitWithResumeLocked(capabilityID, payload, resume)
 }
 
 func (e *Execution) resolveWaitLocked(capabilityID shared.ID, payload map[string]any) error {
+	return e.resolveWaitWithResumeLocked(capabilityID, payload, nil)
+}
+
+func (e *Execution) resolveWaitWithResumeLocked(capabilityID shared.ID, payload map[string]any, resume *CapabilityResume) error {
 	state, exists := e.states[capabilityID]
 	if !exists {
 		return fmt.Errorf("capability %s is not in the blueprint", capabilityID)
@@ -223,8 +282,16 @@ func (e *Execution) resolveWaitLocked(capabilityID shared.ID, payload map[string
 	if state.Status != CapabilityWaiting {
 		return fmt.Errorf("capability %s is not waiting, status is %s", capabilityID, state.Status)
 	}
+	record := cloneCapabilityResume(resume)
+	if record == nil {
+		record = &CapabilityResume{}
+	}
+	if record.Cause == "" {
+		record.Cause = resumeCauseForWaitType(state.WaitType)
+	}
 	e.clearWaitMetadataLocked(&state)
 	state.Status = CapabilityReady
+	state.Resume = record
 	if payload != nil {
 		canonical := data.CanonicalMap(payload)
 		state.DeliveredPayload = canonical
@@ -255,6 +322,7 @@ func (e *Execution) ResumeRetryWait(capabilityID shared.ID) error {
 	}
 	state.Status = CapabilityReady
 	state.NextAttemptAt = nil
+	state.Resume = &CapabilityResume{Cause: ResumeCauseTimer}
 	e.states[capabilityID] = state
 	e.acquireWorkerLocked()
 	e.refreshStatusLocked()
@@ -285,6 +353,7 @@ func (e *Execution) BeginRetryWait(capabilityID shared.ID, nextAttemptAt time.Ti
 	state.Status = CapabilityRetryWait
 	state.NextAttemptAt = &t
 	state.DispatchState = ""
+	state.Resume = nil
 	e.states[capabilityID] = state
 	e.releaseWorkerLocked()
 	e.refreshStatusLocked()
@@ -363,7 +432,8 @@ func (e *Execution) ExpireWait(capabilityID shared.ID, now time.Time) (WaitDeadl
 	e.states[capabilityID] = state
 
 	if policy == WaitDeadlinePolicyContinue {
-		if err := e.resolveWaitLocked(capabilityID, nil); err != nil {
+		resume := &CapabilityResume{Cause: ResumeCauseDeadline}
+		if err := e.resolveWaitWithResumeLocked(capabilityID, nil, resume); err != nil {
 			return "", err
 		}
 		// resolveWaitLocked clears wait metadata; restore the deadline reason so
@@ -498,4 +568,5 @@ func (e *Execution) clearWaitMetadataLocked(state *CapabilityExecutionState) {
 	state.WaitDeadlinePolicy = ""
 	state.WaitDeadlineReason = ""
 	state.DeliveredPayload = nil
+	state.Resume = nil
 }

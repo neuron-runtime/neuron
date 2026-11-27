@@ -320,6 +320,9 @@ func TestRecoverableDispatchResumesOnlyElapsedTimeWaits(t *testing.T) {
 	if want := []shared.ID{"timer", "worker"}; !equalIDs(dispatch, want) {
 		t.Fatalf("dispatch = %v, want %v", dispatch, want)
 	}
+	if resume := restored.CapabilityState("timer").Resume; resume == nil || resume.Cause != ResumeCauseTimer {
+		t.Errorf("timer resume = %+v, want a timer resume descriptor", resume)
+	}
 	for _, id := range []shared.ID{"deadline", "signal"} {
 		if got := restored.CapabilityState(id).Status; got != CapabilityWaiting {
 			t.Errorf("%s status = %s, want unchanged %s", id, got, CapabilityWaiting)
@@ -366,6 +369,13 @@ func TestExpireWaitPolicies(t *testing.T) {
 			}
 			if state.Error != tc.wantError {
 				t.Errorf("error = %q, want %q", state.Error, tc.wantError)
+			}
+			if tc.policy == WaitDeadlinePolicyContinue {
+				if state.Resume == nil || state.Resume.Cause != ResumeCauseDeadline {
+					t.Errorf("resume = %+v, want a deadline resume descriptor", state.Resume)
+				}
+			} else if state.Resume != nil {
+				t.Errorf("resume = %+v, want nil for a terminal deadline policy", state.Resume)
 			}
 			if inFlight := exec.InFlight(); inFlight != tc.wantInFlight {
 				t.Errorf("in-flight = %d, want %d", inFlight, tc.wantInFlight)
@@ -446,4 +456,169 @@ func equalIDs(a, b []shared.ID) bool {
 		}
 	}
 	return true
+}
+
+// TestResolveWaitWithResumeRecordsAndClonesDescriptor proves resume metadata is
+// owned by the execution: neither the caller's descriptor nor a returned copy
+// can mutate the durable state.
+func TestResolveWaitWithResumeRecordsAndClonesDescriptor(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+
+	descriptor := &CapabilityResume{Cause: ResumeCauseSignal, SignalName: "approval", DeliveryID: "del_1"}
+	if err := exec.ResolveWaitWithResume("cap_a", map[string]any{"approved": true}, descriptor); err != nil {
+		t.Fatalf("ResolveWaitWithResume: %v", err)
+	}
+	got := exec.CapabilityState("cap_a").Resume
+	if got == nil {
+		t.Fatal("resume descriptor was not recorded")
+	}
+	if got == descriptor {
+		t.Fatal("stored resume descriptor aliases the caller's value")
+	}
+	if got.Cause != ResumeCauseSignal || got.SignalName != "approval" || got.DeliveryID != "del_1" {
+		t.Fatalf("resume descriptor = %+v, want the delivered signal metadata", got)
+	}
+
+	descriptor.Cause = ResumeCauseTimer
+	if got := exec.CapabilityState("cap_a").Resume; got.Cause != ResumeCauseSignal {
+		t.Errorf("caller mutation changed stored cause to %q", got.Cause)
+	}
+	returned := exec.CapabilityState("cap_a")
+	returned.Resume.DeliveryID = "mutated"
+	if got := exec.CapabilityState("cap_a").Resume; got.DeliveryID != "del_1" {
+		t.Errorf("returned mutation changed stored delivery ID to %q", got.DeliveryID)
+	}
+}
+
+func TestResolveWaitDerivesResumeCauseFromWaitType(t *testing.T) {
+	future := time.Now().UTC().Add(time.Hour)
+	for _, tc := range []struct {
+		name      string
+		spec      WaitSpec
+		wantCause ResumeCause
+	}{
+		{"signal", signalWaitSpec(nil, WaitDeadlinePolicyFail), ResumeCauseSignal},
+		{"timer", WaitSpec{Type: WaitTypeTimer, WaitUntil: &future}, ResumeCauseTimer},
+		{"deadline", WaitSpec{Type: WaitTypeDeadline, WaitUntil: &future}, ResumeCauseDeadline},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := newWaitExecution(t, "cap_a")
+			makeRunning(t, exec, "cap_a")
+			if err := exec.EnterWait("cap_a", tc.spec); err != nil {
+				t.Fatalf("EnterWait: %v", err)
+			}
+			if err := exec.ResolveWait("cap_a", nil); err != nil {
+				t.Fatalf("ResolveWait: %v", err)
+			}
+			got := exec.CapabilityState("cap_a").Resume
+			if got == nil || got.Cause != tc.wantCause {
+				t.Fatalf("resume = %+v, want cause %q", got, tc.wantCause)
+			}
+			if got.SignalName != "" || got.DeliveryID != "" {
+				t.Errorf("derived resume = %+v, want no delivery metadata", got)
+			}
+		})
+	}
+}
+
+func TestEnterWaitClearsPreviousResumeDescriptor(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait signal: %v", err)
+	}
+	if err := exec.ResolveWaitWithResume("cap_a", nil, &CapabilityResume{Cause: ResumeCauseSignal}); err != nil {
+		t.Fatalf("ResolveWaitWithResume: %v", err)
+	}
+	if err := exec.MarkCapabilityRunning("cap_a"); err != nil {
+		t.Fatalf("MarkCapabilityRunning: %v", err)
+	}
+
+	future := time.Now().UTC().Add(time.Hour)
+	if err := exec.EnterWait("cap_a", WaitSpec{Type: WaitTypeTimer, WaitUntil: &future}); err != nil {
+		t.Fatalf("EnterWait timer: %v", err)
+	}
+	if got := exec.CapabilityState("cap_a").Resume; got != nil {
+		t.Errorf("resume = %+v, want cleared on fresh wait", got)
+	}
+}
+
+func TestRetryWaitClearsAndThenRecordsTimerResume(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	next := time.Now().UTC().Add(time.Hour)
+	if err := exec.BeginRetryWait("cap_a", next); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	if got := exec.CapabilityState("cap_a").Resume; got != nil {
+		t.Fatalf("resume = %+v, want cleared on retry wait", got)
+	}
+	if err := exec.ResumeRetryWait("cap_a"); err != nil {
+		t.Fatalf("ResumeRetryWait: %v", err)
+	}
+	got := exec.CapabilityState("cap_a").Resume
+	if got == nil || got.Cause != ResumeCauseTimer {
+		t.Fatalf("resume = %+v, want a timer resume descriptor", got)
+	}
+	if got.SignalName != "" || got.DeliveryID != "" {
+		t.Errorf("retry resume = %+v, want no signal metadata", got)
+	}
+}
+
+func TestRecoverableDispatchRecordsDeadlineAndRetryResumeCauses(t *testing.T) {
+	exec := newWaitExecution(t, "deadline", "retry")
+	past := time.Now().UTC().Add(-time.Hour)
+
+	makeRunning(t, exec, "deadline")
+	if err := exec.EnterWait("deadline", WaitSpec{Type: WaitTypeDeadline, WaitUntil: &past}); err != nil {
+		t.Fatalf("EnterWait deadline: %v", err)
+	}
+	makeRunning(t, exec, "retry")
+	if err := exec.BeginRetryWait("retry", past); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+
+	dispatch := exec.RecoverableDispatch()
+	if want := []shared.ID{"deadline", "retry"}; !equalIDs(dispatch, want) {
+		t.Fatalf("dispatch = %v, want %v", dispatch, want)
+	}
+	if got := exec.CapabilityState("deadline").Resume; got == nil || got.Cause != ResumeCauseDeadline {
+		t.Errorf("deadline resume = %+v, want a deadline resume descriptor", got)
+	}
+	if got := exec.CapabilityState("retry").Resume; got == nil || got.Cause != ResumeCauseTimer {
+		t.Errorf("retry resume = %+v, want a timer resume descriptor", got)
+	}
+}
+
+func TestResumeDescriptorSurvivesSnapshotRoundTrip(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	if err := exec.ResolveWaitWithResume("cap_a", map[string]any{"approved": true}, &CapabilityResume{
+		Cause: ResumeCauseSignal, SignalName: "approval", DeliveryID: "del_1",
+	}); err != nil {
+		t.Fatalf("ResolveWaitWithResume: %v", err)
+	}
+
+	payload, err := MarshalExecution(exec)
+	if err != nil {
+		t.Fatalf("MarshalExecution: %v", err)
+	}
+	restored, err := UnmarshalExecution(payload)
+	if err != nil {
+		t.Fatalf("UnmarshalExecution: %v", err)
+	}
+	got := restored.CapabilityState("cap_a").Resume
+	if got == nil {
+		t.Fatal("resume descriptor was not persisted")
+	}
+	if got.Cause != ResumeCauseSignal || got.SignalName != "approval" || got.DeliveryID != "del_1" {
+		t.Fatalf("restored resume = %+v, want the original descriptor", got)
+	}
 }

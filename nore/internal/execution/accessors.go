@@ -39,7 +39,9 @@ func (e *Execution) StartedAt() time.Time {
 func (e *Execution) CapabilityState(capabilityID core.ID) CapabilityExecutionState {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.states[capabilityID]
+	state := e.states[capabilityID]
+	state.Resume = cloneCapabilityResume(state.Resume)
+	return state
 }
 
 // UnfinishedCapabilityCount reports how many capabilities have not reached a

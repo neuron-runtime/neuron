@@ -215,7 +215,17 @@ func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.Execu
 	ctx = context.WithValue(ctx, "neuron:attempt_id", execution.AttemptID)
 	ctx = context.WithValue(ctx, "neuron:logical_operation_id", execution.LogicalOperationID)
 
-	req := &capabilityrt.Request{Params: execution.Params}
+	var resume *capabilityrt.ResumeInput
+	if execution.Resume != nil {
+		// Payload is derived from Params, the single authority for resume input.
+		resume = &capabilityrt.ResumeInput{
+			Cause:      string(execution.Resume.Cause),
+			SignalName: execution.Resume.SignalName,
+			DeliveryID: execution.Resume.DeliveryID,
+			Payload:    execution.Params,
+		}
+	}
+	req := &capabilityrt.Request{Params: execution.Params, Resume: resume}
 	resp, err := a.instance.Execute(ctx, req)
 	if err != nil {
 		return contracts.CapabilityOutcome{}, fmt.Errorf("capability runtime %s: %w", a.typ, err)

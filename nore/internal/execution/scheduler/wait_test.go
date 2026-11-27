@@ -322,6 +322,38 @@ func TestResolveSignalCommitsBeforePublishing(t *testing.T) {
 	}
 }
 
+func TestResolveSignalPersistsResumeDescriptor(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	if err := sched.EnterWait(h.ctx, WaitEntryRequest{
+		Execution: h.exec, CapabilityID: "cap",
+		Spec: executionmodel.WaitSpec{Type: executionmodel.WaitTypeSignal, ExpectedSignal: "approved"},
+	}); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+
+	if _, err := sched.ResolveSignal(h.ctx, signalRequest(h.exec, "del_1", map[string]any{"status": "approved"})); err != nil {
+		t.Fatalf("ResolveSignal: %v", err)
+	}
+	want := &executionmodel.CapabilityResume{
+		Cause:      executionmodel.ResumeCauseSignal,
+		SignalName: "approved",
+		DeliveryID: "del_1",
+	}
+	live := h.exec.CapabilityState("cap").Resume
+	if live == nil || *live != *want {
+		t.Fatalf("live resume = %+v, want %+v", live, want)
+	}
+	stored, err := h.store.Reload(h.ctx, h.exec.ID)
+	if err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	durable := stored.CapabilityState("cap").Resume
+	if durable == nil || *durable != *want {
+		t.Fatalf("durable resume = %+v, want %+v", durable, want)
+	}
+}
+
 func TestResolveSignalReplayReloadsDurableState(t *testing.T) {
 	h := newWaitHarness(t)
 	sched := h.scheduler(t)

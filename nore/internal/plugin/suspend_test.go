@@ -129,3 +129,61 @@ func TestInstanceAdapterExecuteRejectsMalformedSuspendOutcome(t *testing.T) {
 		t.Fatalf("error = %v, want explicit invalid_suspend_outcome rejection", err)
 	}
 }
+
+// TestInstanceAdapterForwardsResumeInput proves a resolved wait reaches the
+// capability runtime with its descriptor and the canonical resume payload.
+func TestInstanceAdapterForwardsResumeInput(t *testing.T) {
+	instance := &recordingInstance{response: &capabilityrt.Response{Result: map[string]any{"done": true}}}
+	adapter := &instanceAdapter{instance: instance, typ: "acme:approval"}
+	params := map[string]any{"approved": true, "nested": map[string]any{"key": "value"}}
+
+	_, err := adapter.Execute(context.Background(), contracts.ExecutionContext{
+		Params: params,
+		Resume: &contracts.CapabilityResume{
+			Cause:      executionmodel.ResumeCauseSignal,
+			SignalName: "approval",
+			DeliveryID: "del_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if instance.request == nil {
+		t.Fatal("the runtime received no request")
+	}
+	got := instance.request.Resume
+	if got == nil {
+		t.Fatal("resume input was not forwarded")
+	}
+	if got.Cause != capabilityrt.ResumeCauseSignal || got.SignalName != "approval" || got.DeliveryID != "del_1" {
+		t.Errorf("resume input = %+v, want the descriptor fields", got)
+	}
+	if len(got.Payload) != 2 || got.Payload["approved"] != true {
+		t.Fatalf("resume payload = %+v, want the execution params", got.Payload)
+	}
+	nested, ok := got.Payload["nested"].(map[string]any)
+	if !ok || nested["key"] != "value" {
+		t.Errorf("nested resume payload = %+v, want the delivered params", got.Payload["nested"])
+	}
+	if instance.request.Params["approved"] != true {
+		t.Errorf("request params = %+v, want the delivered payload", instance.request.Params)
+	}
+}
+
+func TestInstanceAdapterLeavesResumeNilWithoutDescriptor(t *testing.T) {
+	instance := &recordingInstance{}
+	adapter := &instanceAdapter{instance: instance, typ: "acme:echo"}
+
+	_, err := adapter.Execute(context.Background(), contracts.ExecutionContext{
+		Params: map[string]any{"value": "hello"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if instance.request == nil {
+		t.Fatal("the runtime received no request")
+	}
+	if instance.request.Resume != nil {
+		t.Fatalf("resume = %+v, want nil without a descriptor", instance.request.Resume)
+	}
+}

@@ -344,7 +344,12 @@ func (s *Scheduler) ResolveSignal(ctx context.Context, req SignalResolutionReque
 		}
 
 		before := req.Execution.Snapshot()
-		if err := req.Execution.ResolveWait(req.CapabilityID, req.Payload); err != nil {
+		resume := &executionmodel.CapabilityResume{
+			Cause:      executionmodel.ResumeCauseSignal,
+			SignalName: req.SignalName,
+			DeliveryID: req.DeliveryID,
+		}
+		if err := req.Execution.ResolveWaitWithResume(req.CapabilityID, req.Payload, resume); err != nil {
 			return err
 		}
 		attemptID := req.AttemptID

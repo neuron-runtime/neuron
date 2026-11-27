@@ -239,6 +239,9 @@ func TestRecoverExecutionDispatchesElapsedTimerWaitExactlyOnce(t *testing.T) {
 	if state.Status != executionmodel.CapabilityReady {
 		t.Errorf("capability status = %s, want %s", state.Status, executionmodel.CapabilityReady)
 	}
+	if state.Resume == nil || state.Resume.Cause != executionmodel.ResumeCauseTimer {
+		t.Errorf("resume = %+v, want a timer resume descriptor", state.Resume)
+	}
 	if state.WaitUntil != nil || state.WaitType != "" {
 		t.Errorf("wait metadata was not cleared on resume: %+v", state)
 	}
@@ -277,6 +280,9 @@ func TestRecoverExecutionDispatchesElapsedRetryWaitExactlyOnce(t *testing.T) {
 	state := h.restored.CapabilityState("cap")
 	if state.Status != executionmodel.CapabilityReady || state.NextAttemptAt != nil {
 		t.Errorf("retry capability = %+v, want ready with NextAttemptAt cleared", state)
+	}
+	if state.Resume == nil || state.Resume.Cause != executionmodel.ResumeCauseTimer {
+		t.Errorf("resume = %+v, want a timer resume descriptor", state.Resume)
 	}
 	if got := h.restored.InFlight(); got != 1 {
 		t.Errorf("in-flight = %d, want 1", got)

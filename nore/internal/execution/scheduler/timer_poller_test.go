@@ -118,6 +118,9 @@ func TestPollDueTimersResumesElapsedTimer(t *testing.T) {
 	if state := h.exec.CapabilityState("cap"); state.Status != executionmodel.CapabilityReady {
 		t.Fatalf("capability status = %s, want ready", state.Status)
 	}
+	if got := h.exec.CapabilityState("cap").Resume; got == nil || got.Cause != executionmodel.ResumeCauseTimer {
+		t.Fatalf("resume = %+v, want a timer resume descriptor", got)
+	}
 	if evt := expectReadyEvent(t, ready); evt.Type != event.CapabilityReady {
 		t.Fatalf("published event = %s, want %s", evt.Type, event.CapabilityReady)
 	}
@@ -172,8 +175,16 @@ func TestPollDueTimersAppliesDeadlinePolicy(t *testing.T) {
 				t.Fatalf("execution status = %s, want %s", h.exec.Status(), tc.wantStatus)
 			}
 			expectTerminalEvent(t, sub, tc.wantEvent)
-			if state := h.exec.CapabilityState("cap"); tc.wantStatus != executionmodel.StatusRunning && state.WaitDeadlineReason == "" {
+			state := h.exec.CapabilityState("cap")
+			if tc.wantStatus != executionmodel.StatusRunning && state.WaitDeadlineReason == "" {
 				t.Fatal("deadline policy outcome was not recorded on the capability")
+			}
+			if tc.wantStatus == executionmodel.StatusRunning {
+				if state.Resume == nil || state.Resume.Cause != executionmodel.ResumeCauseDeadline {
+					t.Fatalf("resume = %+v, want a deadline resume descriptor", state.Resume)
+				}
+			} else if state.Resume != nil {
+				t.Fatalf("resume = %+v, want nil for a terminal deadline policy", state.Resume)
 			}
 		})
 	}
@@ -646,6 +657,9 @@ func TestPollDueTimersResumesElapsedRetryWait(t *testing.T) {
 	state := h.exec.CapabilityState("cap")
 	if state.Status != executionmodel.CapabilityReady || state.NextAttemptAt != nil {
 		t.Fatalf("retry state = %+v, want ready with NextAttemptAt cleared", state)
+	}
+	if state.Resume == nil || state.Resume.Cause != executionmodel.ResumeCauseTimer {
+		t.Fatalf("resume = %+v, want a timer resume descriptor", state.Resume)
 	}
 	if evt := expectReadyEvent(t, ready); evt.Type != event.CapabilityReady {
 		t.Fatalf("published event = %s, want %s", evt.Type, event.CapabilityReady)

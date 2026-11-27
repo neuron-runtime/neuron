@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 
+	executionmodel "github.com/neuron-runtime/neuron/nore/internal/execution"
 	core2 "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
@@ -53,6 +54,11 @@ func LoggerOrNop(l Logger) Logger {
 	return l
 }
 
+// CapabilityResume is the contract-facing name for the execution domain's
+// resume descriptor. It is an alias so descriptors have one representation,
+// owned by the execution domain that persists them.
+type CapabilityResume = executionmodel.CapabilityResume
+
 type ExecutionContext struct {
 	ExecutionID   core2.ID
 	CorrelationID core2.ID
@@ -69,6 +75,10 @@ type ExecutionContext struct {
 
 	Capability core2.Capability
 	Params     map[string]any
+
+	// Resume describes the wait outcome that caused this invocation. It is nil
+	// for an initial or ordinary retry invocation that did not resolve a wait.
+	Resume *CapabilityResume
 
 	// CapabilityConfigurations contains the fully resolved configuration for
 	// this single Capability execution. It contains no {{ ... }} placeholders.

@@ -58,6 +58,35 @@ func (r *scriptedRuntime) callCount() int {
 	return r.calls
 }
 
+// contextCapturingRuntime records the engine-facing context of every attempt so
+// resume metadata can be asserted at the capability runtime boundary.
+type contextCapturingRuntime struct {
+	mu       sync.Mutex
+	calls    int
+	contexts []contracts.ExecutionContext
+}
+
+func (r *contextCapturingRuntime) Execute(_ context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
+	r.mu.Lock()
+	r.calls++
+	r.contexts = append(r.contexts, execution)
+	call := r.calls
+	r.mu.Unlock()
+	if call == 1 {
+		return contracts.CapabilityOutcome{Suspend: &contracts.CapabilitySuspend{
+			WaitType:       exec.WaitTypeSignal,
+			ExpectedSignal: "approval",
+		}}, nil
+	}
+	return contracts.CapabilityOutcome{Result: map[string]any{"done": true}}, nil
+}
+
+func (r *contextCapturingRuntime) contextSnapshots() []contracts.ExecutionContext {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]contracts.ExecutionContext(nil), r.contexts...)
+}
+
 type waitEnterCall struct {
 	executionID  core.ID
 	capabilityID core.ID
@@ -149,6 +178,7 @@ type waitHarness struct {
 	ctx          context.Context
 	capabilityID core.ID
 	execution    *exec.Execution
+	bus          *event.Bus
 	events       event.Subscription
 	started      time.Time
 }
@@ -171,7 +201,7 @@ func waitBlueprint(capabilityID core.ID, runtimeConfig *core.RuntimeConfig) *typ
 // startWaitHarness drives one ready capability through a real engine. Events
 // are collected at the execution subscription, so tests assert the engine's
 // public output rather than its internal bookkeeping.
-func startWaitHarness(t *testing.T, capabilityID core.ID, blueprint *types.ExecutionBlueprint, runtime *scriptedRuntime, lifecycle *recordingWaitLifecycle, committer *recordingClaimCommitter) *waitHarness {
+func startWaitHarness(t *testing.T, capabilityID core.ID, blueprint *types.ExecutionBlueprint, runtime contracts.CapabilityRuntime, lifecycle *recordingWaitLifecycle, committer *recordingClaimCommitter) *waitHarness {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -228,7 +258,7 @@ func startWaitHarness(t *testing.T, capabilityID core.ID, blueprint *types.Execu
 
 	go func() { _ = engineInstance.Run(ctx) }()
 
-	h := &waitHarness{ctx: ctx, capabilityID: capabilityID, execution: execution, events: subscription}
+	h := &waitHarness{ctx: ctx, capabilityID: capabilityID, execution: execution, bus: bus, events: subscription}
 	h.started = time.Now()
 	if err := bus.Publish(ctx, event.New(event.CapabilityReady, execution.ID, execution.CorrelationID, capabilityID, event.CapabilityReadyPayload{Params: input})); err != nil {
 		t.Fatalf("publish CapabilityReady: %v", err)
@@ -599,6 +629,61 @@ func TestEngineKeepsInlineRetryWithoutLifecycle(t *testing.T) {
 	}
 	if state := h.execution.CapabilityState(capabilityID); state.Status != exec.CapabilityCompleted {
 		t.Errorf("capability status = %q, want %q", state.Status, exec.CapabilityCompleted)
+	}
+	h.drainEvents(t)
+}
+
+// TestEnginePropagatesResumeDescriptorAndIdentities proves the first invocation
+// carries no resume, and a resolved wait reaches the capability with the durable
+// descriptor and the stable attempt/logical-operation identities.
+func TestEnginePropagatesResumeDescriptorAndIdentities(t *testing.T) {
+	capabilityID := core.ID("resumer")
+	lifecycle := &recordingWaitLifecycle{}
+	runtime := &contextCapturingRuntime{}
+	h := startWaitHarness(t, capabilityID, waitBlueprint(capabilityID, nil), runtime, lifecycle, nil)
+	_ = awaitEnterCall(t, lifecycle)
+
+	firstCalls := runtime.contextSnapshots()
+	if len(firstCalls) != 1 {
+		t.Fatalf("runtime calls before resume = %d, want 1", len(firstCalls))
+	}
+	if firstCalls[0].Resume != nil {
+		t.Fatalf("first resume = %+v, want nil", firstCalls[0].Resume)
+	}
+	if firstCalls[0].AttemptID != h.execution.AttemptID || firstCalls[0].LogicalOperationID != h.execution.LogicalOperationID {
+		t.Fatalf("first identities = %q/%q, want %q/%q",
+			firstCalls[0].AttemptID, firstCalls[0].LogicalOperationID,
+			h.execution.AttemptID, h.execution.LogicalOperationID)
+	}
+
+	want := &exec.CapabilityResume{Cause: exec.ResumeCauseSignal, SignalName: "approval", DeliveryID: "del_1"}
+	if err := h.execution.ResolveWaitWithResume(capabilityID, map[string]any{"approved": true}, want); err != nil {
+		t.Fatalf("ResolveWaitWithResume: %v", err)
+	}
+	input := h.execution.Params(capabilityID)
+	if err := h.bus.Publish(h.ctx, event.New(event.CapabilityReady, h.execution.ID, h.execution.CorrelationID, capabilityID, event.CapabilityReadyPayload{Params: input})); err != nil {
+		t.Fatalf("publish resumed CapabilityReady: %v", err)
+	}
+	events := h.awaitEventsUntil(t, event.CapabilityCompleted)
+	if countEvents(events, event.CapabilityCompleted) != 1 {
+		t.Fatalf("CapabilityCompleted count = %d, want 1", countEvents(events, event.CapabilityCompleted))
+	}
+
+	callSnapshots := runtime.contextSnapshots()
+	if len(callSnapshots) != 2 {
+		t.Fatalf("runtime calls after resume = %d, want 2", len(callSnapshots))
+	}
+	resumed := callSnapshots[1]
+	if resumed.Resume == nil || *resumed.Resume != *want {
+		t.Fatalf("resume = %+v, want %+v", resumed.Resume, want)
+	}
+	if resumed.AttemptID != h.execution.AttemptID || resumed.LogicalOperationID != h.execution.LogicalOperationID {
+		t.Errorf("resumed identities = %q/%q, want %q/%q",
+			resumed.AttemptID, resumed.LogicalOperationID,
+			h.execution.AttemptID, h.execution.LogicalOperationID)
+	}
+	if resumed.Params["approved"] != true {
+		t.Errorf("resumed params = %+v, want the delivered payload", resumed.Params)
 	}
 	h.drainEvents(t)
 }

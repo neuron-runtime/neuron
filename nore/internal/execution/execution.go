@@ -107,6 +107,11 @@ type CapabilityExecutionState struct {
 	// signal or timer delivery is accepted.
 	DeliveredPayload map[string]any
 
+	// Resume records why a resolved wait is dispatching the capability again.
+	// It is nil until a wait is resolved and survives snapshots so recovery can
+	// rebuild the capability-runtime resume request after a restart.
+	Resume *CapabilityResume
+
 	// DispatchState tracks whether the capability has been dispatched
 	// and prevents duplicate dispatch. Values: "dispatched", "pending".
 	DispatchState string
@@ -454,6 +459,9 @@ func (e *Execution) SeedInitialParams(params map[string]any) {
 // recorded are also made ready; both cover snapshots written before the current
 // atomic transition boundary.
 //
+// Each resumed wait records its timer or deadline resume cause so recovery
+// dispatches the same capability-runtime resume input as an in-process resolution.
+//
 // Only elapsed time-based waits resume here. A capability in RetryWait resumes
 // when its NextAttemptAt has elapsed. A capability in Waiting resumes only when
 // it is a timer or deadline wait with a non-nil, elapsed WaitUntil; a nil
@@ -495,14 +503,17 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 			if state.NextAttemptAt != nil && !state.NextAttemptAt.After(now) {
 				state.Status = CapabilityReady
 				state.NextAttemptAt = nil
+				state.Resume = &CapabilityResume{Cause: ResumeCauseTimer}
 				e.states[capabilityID] = state
 				dispatch = append(dispatch, capabilityID)
 				active++
 			}
 		case CapabilityWaiting:
 			if isElapsedTimerWait(state, now) {
+				resume := &CapabilityResume{Cause: resumeCauseForWaitType(state.WaitType)}
 				e.clearWaitMetadataLocked(&state)
 				state.Status = CapabilityReady
+				state.Resume = resume
 				e.states[capabilityID] = state
 				dispatch = append(dispatch, capabilityID)
 				active++
