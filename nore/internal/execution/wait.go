@@ -289,6 +289,7 @@ func (e *Execution) resolveWaitWithResumeLocked(capabilityID shared.ID, payload 
 	if record.Cause == "" {
 		record.Cause = resumeCauseForWaitType(state.WaitType)
 	}
+	e.rotateAttemptIDLocked()
 	e.clearWaitMetadataLocked(&state)
 	state.Status = CapabilityReady
 	state.Resume = record
@@ -320,6 +321,7 @@ func (e *Execution) ResumeRetryWait(capabilityID shared.ID) error {
 	if state.Status != CapabilityRetryWait {
 		return fmt.Errorf("capability %s is not in retry wait, status is %s", capabilityID, state.Status)
 	}
+	e.rotateAttemptIDLocked()
 	state.Status = CapabilityReady
 	state.NextAttemptAt = nil
 	state.Resume = &CapabilityResume{Cause: ResumeCauseTimer}

@@ -180,3 +180,86 @@ func TestEngineDispatchesAClaimedCapabilityOnce(t *testing.T) {
 	}
 	close(runtime.release)
 }
+
+// rotatingClaimCommitter models a peer capability resuming between a claim and
+// its deferred completion. The peer rotation changes execution.AttemptID while
+// this worker still owns the intent it originally claimed.
+type rotatingClaimCommitter struct {
+	*claimCommitter
+	execution       *exec.Execution
+	claimAttempt    core.ID
+	completeAttempt core.ID
+}
+
+func (c *rotatingClaimCommitter) ClaimDispatchIntent(ctx context.Context, intent *exec.DispatchIntent, owner string, lease time.Duration) (*exec.DispatchIntent, bool, error) {
+	claimed, won, err := c.claimCommitter.ClaimDispatchIntent(ctx, intent, owner, lease)
+	if err != nil || !won {
+		return claimed, won, err
+	}
+	c.claimAttempt = intent.AttemptID
+	if err := c.execution.ResumeRetryWait("peer"); err != nil {
+		return nil, false, err
+	}
+	return claimed, won, nil
+}
+
+func (c *rotatingClaimCommitter) CompleteDispatchIntent(ctx context.Context, executionID, capabilityID, attemptID core.ID, owner string) error {
+	c.completeAttempt = attemptID
+	return c.claimCommitter.CompleteDispatchIntent(ctx, executionID, capabilityID, attemptID, owner)
+}
+
+// TestClaimDispatchKeepsClaimedAttemptAcrossPeerRotation proves ADR 0010 D3:
+// completion addresses the generation that was claimed even when another
+// capability rotates the shared execution before the worker finishes.
+func TestClaimDispatchKeepsClaimedAttemptAcrossPeerRotation(t *testing.T) {
+	bp := claimBlueprint("cap")
+	bp.Nodes["peer"] = types.ExecutionNode{
+		Capability: core.Capability{
+			Metadata: core.Metadata{ID: "peer", Name: "peer", Version: "1.0.0"},
+			Type:     core.CapabilityRuntimeType("test:rotation"),
+		},
+		Configurations: emptyConfigurations{},
+	}
+	bp.EntryCapabilityIDs = append(bp.EntryCapabilityIDs, "peer")
+
+	execution, err := exec.NewExecution(bp, core.NewID("corr_"), "inst_1", "", "", "", "")
+	if err != nil {
+		t.Fatalf("NewExecution: %v", err)
+	}
+	if err := execution.Start(map[string]any{}, 2); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := execution.MarkCapabilityReady("cap", map[string]any{}); err != nil {
+		t.Fatalf("MarkCapabilityReady: %v", err)
+	}
+	if err := execution.MarkCapabilityRunning("cap"); err != nil {
+		t.Fatalf("MarkCapabilityRunning: %v", err)
+	}
+	if err := execution.BeginRetryWait("peer", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	prior := execution.AttemptID
+
+	committer := &rotatingClaimCommitter{claimCommitter: newClaimCommitter(), execution: execution}
+	committer.allow(execution.ID, "cap", prior)
+	engineInstance := &CapabilityRuntimeEngine{committer: committer, owner: "engine_test"}
+
+	release, claimed, err := engineInstance.claimDispatch(context.Background(), execution, "cap", invocation{})
+	if err != nil || !claimed {
+		t.Fatalf("claimDispatch = (claimed %v, err %v), want a claim", claimed, err)
+	}
+	if execution.AttemptID == prior {
+		t.Fatal("peer resume did not rotate the generation")
+	}
+	release()
+	if committer.claimAttempt != prior {
+		t.Fatalf("claimed attempt = %q, want %q", committer.claimAttempt, prior)
+	}
+	if committer.completeAttempt != committer.claimAttempt {
+		t.Fatalf("completed attempt = %q, want the claimed attempt %q", committer.completeAttempt, committer.claimAttempt)
+	}
+	_, orphaned, err := committer.ClaimDispatchIntent(context.Background(), exec.NewDispatchIntent(execution.ID, "cap", committer.claimAttempt), "probe", time.Minute)
+	if err != nil || orphaned {
+		t.Fatalf("claimed generation still has a ready entry: ok=%v err=%v", orphaned, err)
+	}
+}

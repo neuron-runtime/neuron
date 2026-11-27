@@ -134,3 +134,37 @@ func TestRecoverableDispatchRedispatchesRecordedJoin(t *testing.T) {
 		}
 	}
 }
+
+// TestRecoverableDispatchRotatesAttemptIDOncePerWave proves a recovery that
+// returns work starts one new generation shared by every re-dispatched
+// capability, while the logical operation identity survives the snapshot.
+func TestRecoverableDispatchRotatesAttemptIDOncePerWave(t *testing.T) {
+	blueprint := recoveryJoinBlueprint()
+	exec, err := NewExecution(blueprint, shared.NewID("corr"), shared.NewID("inst"), "", "", "", "")
+	if err != nil {
+		t.Fatalf("new execution: %v", err)
+	}
+	if err := exec.Start(map[string]any{}, 2); err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	for _, capabilityID := range []shared.ID{"a", "b"} {
+		if err := exec.MarkCapabilityReady(capabilityID, map[string]any{}); err != nil {
+			t.Fatalf("mark %s ready: %v", capabilityID, err)
+		}
+		if err := exec.MarkCapabilityRunning(capabilityID); err != nil {
+			t.Fatalf("mark %s running: %v", capabilityID, err)
+		}
+	}
+
+	restored := restoreForRecovery(t, exec, blueprint)
+	prior := restored.AttemptID
+	logical := restored.LogicalOperationID
+	dispatch := restored.RecoverableDispatch()
+	if want := []shared.ID{"a", "b"}; !reflect.DeepEqual(dispatch, want) {
+		t.Fatalf("dispatch = %v, want %v", dispatch, want)
+	}
+	assertAttemptRotated(t, restored, prior, logical)
+	if snapshot := restored.Snapshot(); snapshot.AttemptID != restored.AttemptID || snapshot.LogicalOperationID != logical {
+		t.Fatalf("snapshot identities = %q/%q, want %q/%q", snapshot.AttemptID, snapshot.LogicalOperationID, restored.AttemptID, logical)
+	}
+}

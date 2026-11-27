@@ -232,11 +232,10 @@ func (s *Scheduler) processDueTimer(ctx context.Context, instanceID core.ID, tim
 			DeleteTimers: []executionmodel.WaitTimerDelete{{Key: timer.Key, Owner: owner}},
 		}
 		if needsIntent {
-			attemptID := payload.AttemptID
-			if attemptID == "" {
-				attemptID = execution.AttemptID
-			}
-			effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(execution.ID, payload.CapabilityID, attemptID))
+			// The timer key already names the generation that created it, but the
+			// payload may be stale. Resolution rotated the attempt ID in this
+			// transition, so the new dispatch must use that committed generation.
+			effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(execution.ID, payload.CapabilityID, execution.AttemptID))
 		}
 
 		result, commitErr := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{

@@ -233,6 +233,12 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 	// may be entered again by the outcome of this same call.
 	resume := execution.CapabilityState(capabilityID).Resume
 
+	// Snapshot the dispatch generation once. A peer resolving a wait can rotate
+	// the execution's attempt ID while policy.run retries inline; re-reading it
+	// inside the attempt would change an in-flight invocation's wire identity.
+	attemptID := execution.AttemptID
+	logicalOperationID := execution.LogicalOperationID
+
 	// A suspend is an outcome rather than an error, so retry treats it as a
 	// success. Remember the last successful outcome's suspend so the engine can
 	// either enter the wait or fail closed: completing with the empty result
@@ -242,7 +248,7 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 		func(attemptCtx context.Context) (map[string]any, error) {
 			outcome, err := cr.Execute(attemptCtx, contracts.ExecutionContext{
 				ExecutionID: execution.ID, CorrelationID: execution.CorrelationID,
-				AttemptID: execution.AttemptID, LogicalOperationID: execution.LogicalOperationID,
+				AttemptID: attemptID, LogicalOperationID: logicalOperationID,
 				Capability: node.Capability, Params: input, CapabilityConfigurations: resolvedConfig,
 				Resume: resume,
 				// The runtime configuration comes from the capability's runtime
@@ -332,7 +338,11 @@ func (e *CapabilityRuntimeEngine) claimDispatch(ctx context.Context, execution *
 	if e.committer == nil {
 		return func() {}, true, nil
 	}
-	intent := exec.NewDispatchIntent(execution.ID, capabilityID, execution.AttemptID)
+	// Capture the generation once. Another capability's wait resolution can
+	// rotate the shared execution between the claim and its completion; both
+	// operations must address the intent this worker actually claimed.
+	attemptID := execution.AttemptID
+	intent := exec.NewDispatchIntent(execution.ID, capabilityID, attemptID)
 	lease := DefaultDispatchLease
 	if policy.timeout > 0 {
 		lease += policy.timeout
@@ -345,7 +355,7 @@ func (e *CapabilityRuntimeEngine) claimDispatch(ctx context.Context, execution *
 	return func() {
 		completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dispatchCompleteTimeout)
 		defer cancel()
-		if err := e.committer.CompleteDispatchIntent(completeCtx, execution.ID, capabilityID, execution.AttemptID, e.owner); err != nil {
+		if err := e.committer.CompleteDispatchIntent(completeCtx, execution.ID, capabilityID, attemptID, e.owner); err != nil {
 			slog.Error("complete dispatch intent",
 				slog.String("execution_id", string(execution.ID)),
 				slog.String("capability_id", string(capabilityID)),

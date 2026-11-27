@@ -196,8 +196,10 @@ type Execution struct {
 	// idempotency and diagnostics.
 	LogicalOperationID shared.ID
 
-	// AttemptID is the per-invocation attempt identifier. It increments
-	// when a capability is re-attempted after a failure or wait.
+	// AttemptID is the per-invocation attempt identifier for the current
+	// dispatch generation. It rotates when a wait is resolved, a retry is
+	// resumed, or recovery re-dispatches work; wait entry never rotates it.
+	// LogicalOperationID remains unchanged for the whole logical operation.
 	AttemptID shared.ID
 }
 
@@ -268,6 +270,14 @@ func (e *Execution) RunTransition(fn func() error) error {
 	e.transitionMu.Lock()
 	defer e.transitionMu.Unlock()
 	return fn()
+}
+
+// rotateAttemptIDLocked starts a new dispatch generation. The caller must hold
+// e.mu and must commit the transition that announces the fresh invocation in
+// the same critical section; a bare rotation would orphan the generation's
+// durable dispatch. LogicalOperationID is deliberately never rotated.
+func (e *Execution) rotateAttemptIDLocked() {
+	e.AttemptID = shared.NewID("attempt_")
 }
 
 func (e *Execution) Start(initialParams map[string]any, initialCapabilityCount int) error {
@@ -452,8 +462,9 @@ func (e *Execution) SeedInitialParams(params map[string]any) {
 //
 // A capability recorded as running has an unknown external outcome: the process
 // stopped while it may have been executing. Recovery follows the at-least-once
-// policy, so it is returned to ready and dispatched again under the same
-// attempt identity. A capability already recorded as ready is returned as-is.
+// policy, so it is returned to ready and dispatched again under a fresh attempt
+// identity shared by every capability in this recovery wave. A capability
+// already recorded as ready is returned as-is.
 //
 // Pending entry capabilities and joins whose predecessor bindings are all
 // recorded are also made ready; both cover snapshots written before the current
@@ -526,6 +537,9 @@ func (e *Execution) RecoverableDispatch() []shared.ID {
 		}
 	}
 	sort.Slice(dispatch, func(i, j int) bool { return dispatch[i] < dispatch[j] })
+	if len(dispatch) > 0 {
+		e.rotateAttemptIDLocked()
+	}
 	e.inFlight = active
 	e.refreshStatusLocked()
 	return dispatch

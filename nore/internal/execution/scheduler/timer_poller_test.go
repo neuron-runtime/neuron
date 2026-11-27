@@ -144,6 +144,53 @@ func TestPollDueTimersResumesElapsedTimer(t *testing.T) {
 	}
 }
 
+// TestPollDueTimersIgnoresStalePayloadAttemptForIntent proves a due timer whose
+// payload still names an older attempt is deleted under its own key, while the
+// resumed dispatch is committed only under the rotated execution generation.
+func TestPollDueTimersIgnoresStalePayloadAttemptForIntent(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	due := time.Now().UTC().Add(-time.Minute)
+	prior := h.exec.AttemptID
+	if err := h.exec.BeginRetryWait("cap", due); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	key, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", prior)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+	data, err := executionmodel.EncodeWaitTimer(executionmodel.WaitTimerPayload{
+		ExecutionID: h.exec.ID, CapabilityID: "cap", WaitType: executionmodel.WaitTypeTimer,
+		AttemptID: "attempt_stale",
+	})
+	if err != nil {
+		t.Fatalf("EncodeWaitTimer: %v", err)
+	}
+	if err := h.raw.PutTimer(h.ctx, key, due, data); err != nil {
+		t.Fatalf("PutTimer: %v", err)
+	}
+	indexRawWaitTimer(t, h, key, due)
+
+	count, err := sched.PollDueTimers(h.ctx, h.exec.InstanceID)
+	if err != nil || count != 1 {
+		t.Fatalf("PollDueTimers = (%d, %v), want (1, nil)", count, err)
+	}
+	if h.exec.AttemptID == prior {
+		t.Fatal("retry resumption did not rotate the attempt ID")
+	}
+	if _, err := h.raw.GetTimer(h.ctx, key); err == nil {
+		t.Fatal("claimed timer was not removed under its own key")
+	}
+	intent, ok, err := h.store.ClaimDispatchIntent(h.ctx, executionmodel.NewDispatchIntent(h.exec.ID, "cap", h.exec.AttemptID), "probe", time.Minute)
+	if err != nil || !ok || intent == nil {
+		t.Fatalf("post-rotation intent not claimable: intent=%v ok=%v err=%v", intent, ok, err)
+	}
+	stale, ok, err := h.store.ClaimDispatchIntent(h.ctx, executionmodel.NewDispatchIntent(h.exec.ID, "cap", "attempt_stale"), "probe", time.Minute)
+	if err != nil || ok {
+		t.Fatalf("stale-payload intent remained claimable: intent=%v ok=%v err=%v", stale, ok, err)
+	}
+}
+
 func TestPollDueTimersAppliesDeadlinePolicy(t *testing.T) {
 	cases := []struct {
 		name       string

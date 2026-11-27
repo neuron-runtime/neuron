@@ -600,6 +600,8 @@ func TestResumeDescriptorSurvivesSnapshotRoundTrip(t *testing.T) {
 	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
 		t.Fatalf("EnterWait: %v", err)
 	}
+	priorAttempt := exec.AttemptID
+	logical := exec.LogicalOperationID
 	if err := exec.ResolveWaitWithResume("cap_a", map[string]any{"approved": true}, &CapabilityResume{
 		Cause: ResumeCauseSignal, SignalName: "approval", DeliveryID: "del_1",
 	}); err != nil {
@@ -621,4 +623,157 @@ func TestResumeDescriptorSurvivesSnapshotRoundTrip(t *testing.T) {
 	if got.Cause != ResumeCauseSignal || got.SignalName != "approval" || got.DeliveryID != "del_1" {
 		t.Fatalf("restored resume = %+v, want the original descriptor", got)
 	}
+	if restored.AttemptID != exec.AttemptID || restored.AttemptID == priorAttempt {
+		t.Fatalf("restored attempt ID = %q, want the rotated %q", restored.AttemptID, exec.AttemptID)
+	}
+	if restored.LogicalOperationID != logical {
+		t.Fatalf("restored logical operation ID = %q, want unchanged %q", restored.LogicalOperationID, logical)
+	}
+}
+
+// assertAttemptRotated proves that a transition generated a fresh attempt
+// generation without disturbing the logical operation identity.
+func assertAttemptRotated(t *testing.T, exec *Execution, prior, logical shared.ID) {
+	t.Helper()
+	if exec.AttemptID == "" || !strings.HasPrefix(string(exec.AttemptID), "attempt_") {
+		t.Fatalf("attempt ID = %q, want a generated attempt_ ID", exec.AttemptID)
+	}
+	if exec.AttemptID == prior {
+		t.Fatalf("attempt ID stayed %q after a fresh invocation", prior)
+	}
+	if exec.LogicalOperationID != logical {
+		t.Fatalf("logical operation ID = %q, want unchanged %q", exec.LogicalOperationID, logical)
+	}
+}
+
+func assertAttemptUnchanged(t *testing.T, exec *Execution, prior, logical shared.ID) {
+	t.Helper()
+	if exec.AttemptID != prior {
+		t.Fatalf("attempt ID = %q, want unchanged %q", exec.AttemptID, prior)
+	}
+	if exec.LogicalOperationID != logical {
+		t.Fatalf("logical operation ID = %q, want unchanged %q", exec.LogicalOperationID, logical)
+	}
+}
+
+func TestWaitResolutionRotatesAttemptID(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    func() WaitSpec
+		resolve func(*Execution) error
+	}{
+		{
+			name:    "ResolveWait",
+			spec:    func() WaitSpec { return signalWaitSpec(nil, WaitDeadlinePolicyFail) },
+			resolve: func(e *Execution) error { return e.ResolveWait("cap_a", nil) },
+		},
+		{
+			name: "ResolveWaitWithResume",
+			spec: func() WaitSpec { return signalWaitSpec(nil, WaitDeadlinePolicyFail) },
+			resolve: func(e *Execution) error {
+				return e.ResolveWaitWithResume("cap_a", nil, &CapabilityResume{Cause: ResumeCauseSignal, SignalName: "approval"})
+			},
+		},
+		{
+			name: "ExpireWaitContinue",
+			spec: func() WaitSpec {
+				past := time.Now().UTC().Add(-time.Hour)
+				return signalWaitSpec(&past, WaitDeadlinePolicyContinue)
+			},
+			resolve: func(e *Execution) error {
+				_, err := e.ExpireWait("cap_a", time.Now())
+				return err
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := newWaitExecution(t, "cap_a")
+			makeRunning(t, exec, "cap_a")
+			if err := exec.EnterWait("cap_a", tc.spec()); err != nil {
+				t.Fatalf("EnterWait: %v", err)
+			}
+			prior := exec.AttemptID
+			logical := exec.LogicalOperationID
+			if err := tc.resolve(exec); err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			assertAttemptRotated(t, exec, prior, logical)
+		})
+	}
+}
+
+func TestResumeRetryWaitRotatesAttemptID(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	if err := exec.BeginRetryWait("cap_a", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	prior := exec.AttemptID
+	logical := exec.LogicalOperationID
+	if err := exec.ResumeRetryWait("cap_a"); err != nil {
+		t.Fatalf("ResumeRetryWait: %v", err)
+	}
+	assertAttemptRotated(t, exec, prior, logical)
+}
+
+func TestWaitEntryDoesNotRotateAttemptID(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a", "cap_b")
+	prior := exec.AttemptID
+	logical := exec.LogicalOperationID
+
+	makeRunning(t, exec, "cap_a")
+	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	assertAttemptUnchanged(t, exec, prior, logical)
+
+	makeRunning(t, exec, "cap_b")
+	if err := exec.BeginRetryWait("cap_b", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("BeginRetryWait: %v", err)
+	}
+	assertAttemptUnchanged(t, exec, prior, logical)
+}
+
+func TestRejectedAndTerminalWaitTransitionsDoNotRotateAttemptID(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	prior := exec.AttemptID
+	logical := exec.LogicalOperationID
+
+	if err := exec.ResolveWait("cap_a", nil); err == nil {
+		t.Fatal("ResolveWait on a pending capability succeeded, want error")
+	}
+	if err := exec.ResumeRetryWait("cap_a"); err == nil {
+		t.Fatal("ResumeRetryWait outside retry wait succeeded, want error")
+	}
+	assertAttemptUnchanged(t, exec, prior, logical)
+
+	makeRunning(t, exec, "cap_a")
+	past := time.Now().UTC().Add(-time.Hour)
+	if err := exec.EnterWait("cap_a", signalWaitSpec(&past, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	policy, err := exec.ExpireWait("cap_a", time.Now())
+	if err != nil {
+		t.Fatalf("ExpireWait: %v", err)
+	}
+	if policy != WaitDeadlinePolicyFail {
+		t.Fatalf("expired policy = %q, want %q", policy, WaitDeadlinePolicyFail)
+	}
+	assertAttemptUnchanged(t, exec, prior, logical)
+}
+
+func TestRecoverableDispatchWithoutWorkDoesNotRotateAttemptID(t *testing.T) {
+	exec := newWaitExecution(t, "cap_a")
+	makeRunning(t, exec, "cap_a")
+	if err := exec.EnterWait("cap_a", signalWaitSpec(nil, WaitDeadlinePolicyFail)); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	restored := restoreForRecovery(t, exec, blueprintFor("cap_a"))
+	prior := restored.AttemptID
+	logical := restored.LogicalOperationID
+	if dispatch := restored.RecoverableDispatch(); len(dispatch) != 0 {
+		t.Fatalf("dispatch = %v, want none for a healthy signal wait", dispatch)
+	}
+	assertAttemptUnchanged(t, restored, prior, logical)
 }

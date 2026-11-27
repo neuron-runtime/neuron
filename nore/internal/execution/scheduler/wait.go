@@ -344,6 +344,13 @@ func (s *Scheduler) ResolveSignal(ctx context.Context, req SignalResolutionReque
 		}
 
 		before := req.Execution.Snapshot()
+		// The deadline timer belongs to the generation current before the
+		// resolution rotates the attempt ID. An explicit request attempt is the
+		// key of the wait being resolved, so it also names that older generation.
+		priorAttemptID := req.AttemptID
+		if priorAttemptID == "" {
+			priorAttemptID = req.Execution.AttemptID
+		}
 		resume := &executionmodel.CapabilityResume{
 			Cause:      executionmodel.ResumeCauseSignal,
 			SignalName: req.SignalName,
@@ -352,13 +359,9 @@ func (s *Scheduler) ResolveSignal(ctx context.Context, req SignalResolutionReque
 		if err := req.Execution.ResolveWaitWithResume(req.CapabilityID, req.Payload, resume); err != nil {
 			return err
 		}
-		attemptID := req.AttemptID
-		if attemptID == "" {
-			attemptID = req.Execution.AttemptID
-		}
 		effects := executionmodel.WaitEffects{Delivery: delivery}
-		if attemptID != "" {
-			key, err := executionmodel.WaitTimerKey(req.Execution.ID, req.CapabilityID, attemptID)
+		if priorAttemptID != "" {
+			key, err := executionmodel.WaitTimerKey(req.Execution.ID, req.CapabilityID, priorAttemptID)
 			if err != nil {
 				req.Execution.Restore(before)
 				return err
@@ -367,7 +370,9 @@ func (s *Scheduler) ResolveSignal(ctx context.Context, req SignalResolutionReque
 			// store's unfenced delete is still part of this same transaction.
 			effects.DeleteTimers = append(effects.DeleteTimers, executionmodel.WaitTimerDelete{Key: key})
 		}
-		effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(req.Execution.ID, req.CapabilityID, attemptID))
+		// The dispatch announces the fresh invocation produced by this
+		// transition, so the engine must be able to claim it under the new key.
+		effects.Intents = append(effects.Intents, executionmodel.NewDispatchIntent(req.Execution.ID, req.CapabilityID, req.Execution.AttemptID))
 
 		result, commitErr := s.waitStore.SaveWaitTransition(ctx, executionmodel.WaitTransitionRequest{
 			Execution: req.Execution,

@@ -338,3 +338,59 @@ func TestRecoverExecutionDispatchesOnlyElapsedWaitsInMixedSet(t *testing.T) {
 		t.Errorf("status = %s, want %s once runnable work exists", got, executionmodel.StatusRunning)
 	}
 }
+
+// orderedRecoveryCommitter records the scheduler's clear/rebuild ordering while
+// reusing the standard in-memory committer for transition bookkeeping.
+type orderedRecoveryCommitter struct {
+	*fakeCommitter
+	order *orderLog
+}
+
+func (c *orderedRecoveryCommitter) ClearDispatchIntents(context.Context, core.ID) error {
+	c.order.add("clear")
+	return nil
+}
+
+func (c *orderedRecoveryCommitter) SaveTransition(ctx context.Context, execution *executionmodel.Execution, intents []*executionmodel.DispatchIntent) error {
+	c.order.add("commit")
+	return c.fakeCommitter.SaveTransition(ctx, execution, intents)
+}
+
+// TestRecoverExecutionClearsStaleIntentsBeforePostRotationRebuild covers ADR
+// 0010 D3: recovery drops pre-rotation work before rebuilding intents from the
+// recovered, rotated generation.
+func TestRecoverExecutionClearsStaleIntentsBeforePostRotationRebuild(t *testing.T) {
+	h := newRecoveryHarness(t, "cap")
+	past := time.Now().UTC().Add(-time.Minute)
+	h.restoreWaiting(t, []core.ID{"cap"}, func(exec *executionmodel.Execution) {
+		makeSchedulerRunning(t, exec, "cap")
+		if err := exec.EnterWait("cap", executionmodel.WaitSpec{Type: executionmodel.WaitTypeTimer, WaitUntil: &past}); err != nil {
+			t.Fatalf("EnterWait: %v", err)
+		}
+	})
+	prior := h.restored.AttemptID
+
+	committer := &orderedRecoveryCommitter{fakeCommitter: &fakeCommitter{}, order: &orderLog{}}
+	sched, err := New(h.bus, h.store, h.scopes, WithTransitionCommitter(committer))
+	if err != nil {
+		t.Fatalf("New scheduler: %v", err)
+	}
+	if err := sched.RecoverExecution(h.ctx, h.restored); err != nil {
+		t.Fatalf("RecoverExecution: %v", err)
+	}
+	if h.restored.AttemptID == prior {
+		t.Fatal("recovery did not rotate the generation")
+	}
+
+	if got := committer.order.snapshot(); len(got) != 2 || got[0] != "clear" || got[1] != "commit" {
+		t.Fatalf("clear/commit order = %v, want [clear commit]", got)
+	}
+	commits := committer.snapshot()
+	if len(commits) != 1 || len(commits[0].intents) != 1 {
+		t.Fatalf("recovery commits = %d with intents %d, want one commit with one intent", len(commits), len(commits[0].intents))
+	}
+	intent := commits[0].intents[0]
+	if intent.CapabilityID != "cap" || intent.AttemptID != h.restored.AttemptID {
+		t.Fatalf("rebuilt intent = cap %q attempt %q, want cap cap attempt %q", intent.CapabilityID, intent.AttemptID, h.restored.AttemptID)
+	}
+}

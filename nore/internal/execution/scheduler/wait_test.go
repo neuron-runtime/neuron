@@ -354,6 +354,55 @@ func TestResolveSignalPersistsResumeDescriptor(t *testing.T) {
 	}
 }
 
+// TestResolveSignalUsesPreRotationTimerKeyAndPostRotationIntent proves ADR 0010
+// D3: a signal resolution deletes the deadline timer under the generation that
+// wrote it, but the dispatch it commits is claimable under the fresh generation
+// produced by the same transition.
+func TestResolveSignalUsesPreRotationTimerKeyAndPostRotationIntent(t *testing.T) {
+	h := newWaitHarness(t)
+	sched := h.scheduler(t)
+	prior := h.exec.AttemptID
+	logical := h.exec.LogicalOperationID
+	deadline := time.Now().UTC().Add(time.Hour)
+	if err := sched.EnterWait(h.ctx, WaitEntryRequest{
+		Execution: h.exec, CapabilityID: "cap",
+		Spec: executionmodel.WaitSpec{
+			Type: executionmodel.WaitTypeSignal, ExpectedSignal: "approved",
+			WaitUntil: &deadline, DeadlinePolicy: executionmodel.WaitDeadlinePolicyContinue,
+		},
+	}); err != nil {
+		t.Fatalf("EnterWait: %v", err)
+	}
+	oldKey, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", prior)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, oldKey); err != nil {
+		t.Fatalf("test setup: signal deadline timer is missing: %v", err)
+	}
+
+	if _, err := sched.ResolveSignal(h.ctx, signalRequest(h.exec, "del_1", map[string]any{"ok": true})); err != nil {
+		t.Fatalf("ResolveSignal: %v", err)
+	}
+	if h.exec.AttemptID == prior {
+		t.Fatal("resolution did not rotate the attempt ID")
+	}
+	if h.exec.LogicalOperationID != logical {
+		t.Fatalf("logical operation ID = %q, want %q", h.exec.LogicalOperationID, logical)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, oldKey); err == nil {
+		t.Fatal("pre-rotation deadline timer survived resolution")
+	}
+	intent, ok, err := h.store.ClaimDispatchIntent(h.ctx, executionmodel.NewDispatchIntent(h.exec.ID, "cap", h.exec.AttemptID), "probe", time.Minute)
+	if err != nil || !ok || intent == nil {
+		t.Fatalf("post-rotation intent not claimable: intent=%v ok=%v err=%v", intent, ok, err)
+	}
+	stale, ok, err := h.store.ClaimDispatchIntent(h.ctx, executionmodel.NewDispatchIntent(h.exec.ID, "cap", prior), "probe", time.Minute)
+	if err != nil || ok {
+		t.Fatalf("stale-generation intent remained claimable: intent=%v ok=%v err=%v", stale, ok, err)
+	}
+}
+
 func TestResolveSignalReplayReloadsDurableState(t *testing.T) {
 	h := newWaitHarness(t)
 	sched := h.scheduler(t)
