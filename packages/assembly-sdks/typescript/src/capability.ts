@@ -121,13 +121,13 @@ export type Condition = {
 export type ParamValue<T> = T | Expression<T> | Expressionify<Exclude<T, undefined>>;
 
 type RequiredKeys<T extends object> = {
-  [K in keyof T]-?: undefined extends T[K] ? never : K;
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
 }[keyof T];
 
 type OptionalKeys<T extends object> = Exclude<keyof T, RequiredKeys<T>>;
 
 export type ParamBindings<T extends object> = {
-  [K in RequiredKeys<T>]: ParamValue<T[K]>;
+  [K in RequiredKeys<T>]: ParamValue<Exclude<T[K], undefined>>;
 } & {
   [K in OptionalKeys<T>]?: ParamValue<Exclude<T[K], undefined>>;
 };
