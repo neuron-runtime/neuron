@@ -106,6 +106,14 @@ Assembly()
         })
     );
 
+const booleanCapability = Capability("boolean-result").resultSchema<{ active: boolean }>();
+  booleanCapability.result.active.and(booleanCapability.result.active);
+  // @ts-expect-error boolean expressions cannot be ordered.
+  booleanCapability.result.active.greaterThan(true);
+  // @ts-expect-error string expressions do not support ordered comparison.
+  githubRead.result.content.greaterThan("abc");
+  githubRead.result.metadata.size.greaterThan(10);
+
 // ---------------------------------------------------------------------------
 // Fan-in: multiple sources binding to the same target capability field
 // ---------------------------------------------------------------------------
@@ -151,6 +159,30 @@ Assembly()
         summary: analyzeContent.result.summary,
         sha: githubRead.result.sha,
     });
+
+const typedAssemblyResult = Assembly().resultSchema<AssemblyResult>();
+typedAssemblyResult.result({ summary: "ok", sha: "abc" });
+
+// @ts-expect-error required assembly result fields cannot be omitted.
+typedAssemblyResult.result({ summary: "ok" });
+
+// @ts-expect-error assembly result fields must use the declared value types.
+typedAssemblyResult.result({ summary: 42, sha: "abc" });
+
+// @ts-expect-error undeclared assembly result fields are rejected.
+typedAssemblyResult.result({ summary: "ok", sha: "abc", extra: true });
+
+const runtimeAssemblyResult = Assembly().resultSchema({
+    name: string().required(),
+    count: number().required(),
+});
+runtimeAssemblyResult.result({ name: "sample", count: 1 });
+
+// @ts-expect-error runtime schema field values are type checked.
+runtimeAssemblyResult.result({ name: "sample", count: "one" });
+
+// @ts-expect-error an Assembly must declare resultSchema before result.
+Assembly().result({ summary: "ok" });
 
 // The type-only resultSchema form and the schema form both accept `.result()`.
 Assembly().resultSchema({ summary: string(), sha: string() });
