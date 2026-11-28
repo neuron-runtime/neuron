@@ -149,6 +149,26 @@ func TestCompileAssemblyContractRejectsFieldNotDeclaredInSchema(t *testing.T) {
 	}
 }
 
+func TestCompileAssemblyContractAcceptsCapabilityWithTypeOnlyPorts(t *testing.T) {
+	m := resultManifest()
+	m.Capabilities[0].Results = nil
+
+	if _, err := New().Compile(m); err != nil {
+		t.Fatalf("compile type-only capability result: %v", err)
+	}
+
+	m = resultManifest()
+	m.Result.Fields[0].Source = &core.ValueRef{
+		Kind:       core.ValueRefCapabilityParams,
+		Capability: "validate",
+		Path:       []string{"runtimeOwnedInput"},
+	}
+	m.Capabilities[0].Params = nil
+	if _, err := New().Compile(m); err != nil {
+		t.Fatalf("compile type-only capability params: %v", err)
+	}
+}
+
 func TestCompileAssemblyContractRejectsUnknownCapabilityResultPort(t *testing.T) {
 	m := resultManifest()
 	m.Result.Fields[0].Source.Path = []string{"missing"}
