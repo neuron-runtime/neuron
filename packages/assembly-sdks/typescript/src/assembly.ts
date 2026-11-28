@@ -13,7 +13,7 @@ import {
   type CapabilityComposition,
   type ParamValue,
 } from "./capability.js";
-import { schemaToManifest, type InferSchema, type SchemaObject } from "./schema.js";
+import { cloneFieldRules, schemaToManifest, type InferSchema, type SchemaObject } from "./schema.js";
 
 // A value that produces one or more flat capability invocations. Edges between
 // them are derived at compilation time from the data each node references;
@@ -218,13 +218,13 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
     };
 
     if (this._paramPorts.length > 0) {
-      manifest.params = this._paramPorts.map((p) => ({ ...p }));
+      manifest.params = this._paramPorts.map(clonePortManifest);
     }
 
     if (this._resultFields.length > 0) {
       this.validateResultFields(capabilityDefs);
       manifest.result = {
-        schema: this._resultPorts.map((p) => ({ ...p })),
+        schema: this._resultPorts.map(clonePortManifest),
         fields: this._resultFields.map((f) => ({
           name: f.name,
           source: cloneSource(f.source),
@@ -283,6 +283,13 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
       }
     }
   }
+}
+
+function clonePortManifest(port: PortManifest): PortManifest {
+  return {
+    ...port,
+    rules: port.rules ? cloneFieldRules(port.rules) : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
