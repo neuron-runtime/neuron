@@ -160,6 +160,11 @@ Assembly()
         sha: githubRead.result.sha,
     });
 
+const noResultType = Assembly().resultSchema();
+
+// @ts-expect-error type-only Assembly result schemas must declare their TypeScript result type.
+noResultType.result({ summary: "ok", sha: "abc" });
+
 const typedAssemblyResult = Assembly().resultSchema<AssemblyResult>();
 typedAssemblyResult.result({ summary: "ok", sha: "abc" });
 
