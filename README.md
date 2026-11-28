@@ -58,10 +58,7 @@ Capabilities are reached through contracts, not through integration code that mi
 git clone https://github.com/neuron-runtime/neuron.git
 cd neuron/examples/hello
 
-# Build the assembly
-neuron build
-
-# Start the project runtime in one terminal
+# Build/register the assembly automatically and start the project runtime
 neuron
 
 # Run the assembly in another terminal
