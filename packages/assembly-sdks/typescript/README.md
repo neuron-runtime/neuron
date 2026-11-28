@@ -471,12 +471,15 @@ const assembly = Assembly()
   .resultSchema({
     orderId: string().required(),
     status: string().required(),
-  })
+  });
+
+const manifest = assembly
   .withParams((params) => validateOrder.withParams({ id: params.orderId }))
   .result({
-    orderId: assemblyParams.orderId,
+    orderId: assembly.params.orderId,
     status: validateOrder.result.status,
-  });
+  })
+  .toManifest();
 ```
 
 The schema-builder form emits runtime port types and validation rules. The
