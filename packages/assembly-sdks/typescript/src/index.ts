@@ -1,5 +1,6 @@
 export { Capability, CapabilityDefinition, CompositionNode, Composition, type CapabilityComposition } from "./capability.js";
 export { Assembly, AssemblyDefinition } from "./assembly.js";
+export type { AssemblyResultBindings } from "./assembly.js";
 export { connect } from "./connection.js";
 
 export {
