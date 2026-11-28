@@ -178,7 +178,11 @@ func compileAssemblyResult(m *manifest.Assembly, capabilityMap map[string]core.C
 				portKind = "param"
 			}
 			root := core.CamelToSnake(field.Source.Path[0])
-			if !hasPort(ports, root) {
+			// An empty port list is a type-only/untyped capability contract.
+			// In that case the runtime owns the result shape (as with built-ins),
+			// and the source-language frontend may have checked the path statically.
+			// A non-empty list is an explicit runtime contract and must be enforced.
+			if len(ports) > 0 && !hasPort(ports, root) {
 				return nil, fmt.Errorf("%s: capability %q declares no %s port matching %q (snake_case: %q)", prefix, field.Source.Capability, portKind, field.Source.Path[0], root)
 			}
 		}
