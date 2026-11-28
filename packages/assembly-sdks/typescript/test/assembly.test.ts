@@ -9,7 +9,7 @@ import { createExecutionContext, createSourceContext } from "../src/expression.j
 describe("Assembly", () => {
   it("throws when missing definition", () => {
     const sys = Assembly();
-    expect(() => sys.toManifest()).toThrow("Assembly has no definition");
+    expect(() => sys.toManifest()).toThrow("Assembly has no capability definitions");
   });
 
   it("throws when capability is referenced but not defined", () => {
