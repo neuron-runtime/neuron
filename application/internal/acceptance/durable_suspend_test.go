@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,7 +119,9 @@ func installSuspendRuntime(t *testing.T, p project) {
 
 	src := filepath.Join("testdata", "suspendruntime")
 	dst := filepath.Join(p.root, "neuron", "capabilityRuntimes", "acctest", "suspend", "1.0.0")
-	for _, name := range []string{"main.go", "go.mod", "build.sh"} {
+	// build.sh compiles from NEURON_ACCEPTANCE_TESTDATA so the SDK/shared module
+	// replacements stay relative to the repository, not the throwaway project.
+	for _, name := range []string{"main.go", "build.sh"} {
 		data, err := os.ReadFile(filepath.Join(src, name))
 		if err != nil {
 			t.Fatal(err)
@@ -140,7 +143,7 @@ func installSuspendRuntime(t *testing.T, p project) {
 		"runtime": map[string]any{
 			"type":       "process",
 			"entrypoint": "suspendruntime",
-			"protocol":   capabilityrt.ProtocolJSONV1,
+			"protocol":   capabilityrt.ProtocolV1,
 		},
 		"capabilities": []string{"acctest:suspend"},
 		"build":        map[string]any{"command": "./build.sh"},
@@ -154,6 +157,31 @@ func installSuspendRuntime(t *testing.T, p project) {
 		t.Fatal(err)
 	}
 	writeWithMode(t, filepath.Join(dst, "runtime.json"), data, 0o644)
+}
+
+// TestSuspendRuntimeFixtureBuildsWithWorkspaceEnabled protects the validation
+// path: scripts/script.sh tests the application module inside go.work, while
+// the fixture is an independent module with local replacements. Its build must
+// not depend on how the caller invoked the Go toolchain.
+func TestSuspendRuntimeFixtureBuildsWithWorkspaceEnabled(t *testing.T) {
+	p := writeProject(t)
+	installSuspendRuntime(t, p)
+
+	dst := filepath.Join(p.root, "neuron", "capabilityRuntimes", "acctest", "suspend", "1.0.0")
+	workspace, err := filepath.Abs(filepath.Join("..", "..", "..", "go.work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("./build.sh")
+	cmd.Dir = dst
+	cmd.Env = append(os.Environ(), "GOWORK="+workspace)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build.sh with workspace enabled: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "suspendruntime")); err != nil {
+		t.Fatalf("built capability runtime missing: %v", err)
+	}
 }
 
 func setupSuspendProject(t *testing.T) project {
@@ -232,6 +260,37 @@ func readResumeMarker(t *testing.T, path string, timeout time.Duration) map[stri
 	}
 }
 
+// assertResumeIdentity proves ADR 0010 at the acceptance boundary: a resumed
+// invocation carries a fresh attempt ID and the unchanged logical operation ID
+// from the first invocation. Both values are observed through fixture markers,
+// never through engine internals.
+func assertResumeIdentity(t *testing.T, started, resumed map[string]any) {
+	t.Helper()
+
+	initialAttempt, ok := started["attempt_id"].(string)
+	if !ok || initialAttempt == "" {
+		t.Fatalf("initial marker attempt_id = %#v, want a non-empty string", started["attempt_id"])
+	}
+	initialLogical, ok := started["logical_operation_id"].(string)
+	if !ok || initialLogical == "" {
+		t.Fatalf("initial marker logical_operation_id = %#v, want a non-empty string", started["logical_operation_id"])
+	}
+	resumeAttempt, ok := resumed["attempt_id"].(string)
+	if !ok || resumeAttempt == "" {
+		t.Fatalf("resume marker attempt_id = %#v, want a non-empty string", resumed["attempt_id"])
+	}
+	resumeLogical, ok := resumed["logical_operation_id"].(string)
+	if !ok || resumeLogical == "" {
+		t.Fatalf("resume marker logical_operation_id = %#v, want a non-empty string", resumed["logical_operation_id"])
+	}
+	if resumeAttempt == initialAttempt {
+		t.Fatalf("resume attempt_id = %q, want a fresh attempt distinct from initial %q", resumeAttempt, initialAttempt)
+	}
+	if resumeLogical != initialLogical {
+		t.Fatalf("resume logical_operation_id = %q, want unchanged %q", resumeLogical, initialLogical)
+	}
+}
+
 func newTestClient(t *testing.T, record projectruntime.Record) *client.Client {
 	t.Helper()
 	conn := connection.NewRemote(record.Endpoint())
@@ -272,6 +331,7 @@ func TestR5_22_SuspendRestartDeliverSignalResumesWithPayload(t *testing.T) {
 	if wait.CorrelationKey != "approval-1" {
 		t.Fatalf("wait.CorrelationKey = %q, want approval-1", wait.CorrelationKey)
 	}
+	started := readResumeMarker(t, marker, 10*time.Second)
 
 	session.kill()
 	restarted := startDurableRuntime(t, p)
@@ -339,6 +399,7 @@ func TestR5_22_SuspendRestartDeliverSignalResumesWithPayload(t *testing.T) {
 	if payload["approved"] != true || payload["by"] != "ada" {
 		t.Fatalf("resume payload = %#v, want approved=true by=ada", payload)
 	}
+	assertResumeIdentity(t, started, resumed)
 
 	completedItems, err := c.ListInstanceExecutions(context.Background(), p.assembly, "status=completed")
 	if err != nil {
@@ -378,6 +439,7 @@ func TestR5_23_R5_13_DurableTimerFiresAfterRestartIncludingMissedDue(t *testing.
 	if len(waiting.Waits) != 1 || waiting.Waits[0].WaitType != "timer" {
 		t.Fatalf("execution %s waits = %#v, want one timer wait", executionID, waiting.Waits)
 	}
+	started := readResumeMarker(t, marker, 10*time.Second)
 
 	// Kill before the timer can fire, then wait past the due time so restart
 	// must observe a missed timer (R5-13), not a fresh schedule.
@@ -398,4 +460,5 @@ func TestR5_23_R5_13_DurableTimerFiresAfterRestartIncludingMissedDue(t *testing.
 	if resumed["done"] != true {
 		t.Fatalf("resume marker done = %#v, want true; marker=%#v", resumed["done"], resumed)
 	}
+	assertResumeIdentity(t, started, resumed)
 }

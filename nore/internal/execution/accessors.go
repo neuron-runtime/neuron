@@ -34,6 +34,16 @@ func (e *Execution) StartedAt() time.Time {
 	return e.startedAt.UTC()
 }
 
+// AttemptIdentity snapshots the current dispatch generation together with the
+// stable logical operation ID under the domain lock. Callers that derive wire
+// identity or dispatch-intent keys from these values must capture both once per
+// invocation or claim: a peer resolving a wait can rotate AttemptID at any time.
+func (e *Execution) AttemptIdentity() (core.ID, core.ID) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.AttemptID, e.LogicalOperationID
+}
+
 // CapabilityState reports what happened to one capability of this execution. The
 // zero value means the capability is not in the blueprint.
 func (e *Execution) CapabilityState(capabilityID core.ID) CapabilityExecutionState {

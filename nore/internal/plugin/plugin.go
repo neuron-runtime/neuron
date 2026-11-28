@@ -211,9 +211,11 @@ type instanceAdapter struct {
 // completing an empty result. Result and error behavior is unchanged.
 func (a *instanceAdapter) Execute(ctx context.Context, execution contracts.ExecutionContext) (contracts.CapabilityOutcome, error) {
 	// Store attempt_id and logical_operation_id in the context so the
-	// worker can populate them on the gRPC ExecuteRequest.
-	ctx = context.WithValue(ctx, "neuron:attempt_id", execution.AttemptID)
-	ctx = context.WithValue(ctx, "neuron:logical_operation_id", execution.LogicalOperationID)
+	// worker can populate them on the gRPC ExecuteRequest. The values must be
+	// plain strings: the worker reads them with a string type assertion, so
+	// storing a named core.ID directly would send empty identity fields.
+	ctx = context.WithValue(ctx, "neuron:attempt_id", string(execution.AttemptID))
+	ctx = context.WithValue(ctx, "neuron:logical_operation_id", string(execution.LogicalOperationID))
 
 	var resume *capabilityrt.ResumeInput
 	if execution.Resume != nil {

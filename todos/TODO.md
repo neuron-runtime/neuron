@@ -762,8 +762,10 @@ Exit criteria:
       sleep at `nore/internal/execution/engine/invocation.go:232-244` for durable executions.
       Closed by T-025 (`30ccbd0`, with the T-022/T-024 substrate): durable retry calls `BeginRetryWait`
       with `nextAttemptAt` and releases the worker (`TestEngineDefersDurableRetryWithoutInlineSleep`);
-      full `scripts/script.sh` gate passed after T-025. Production timer/deadline polling is wired
-      by T-063/T-065; dispatch reconciliation remains open as F5-3.
+      full `scripts/script.sh` gate passed after T-025. Production timer/deadline polling was wired
+      by T-063/T-065 and bounded dispatch-intent reconciliation by T-074 (`c33a8dc`); end-to-end
+      restart and idempotency acceptance tests pass; the final Phase 5 validation gate (T-032)
+      passed after T-081 (result recorded under R5-28).
 - [x] **R5-11** Add a timer index/claim operation so a restarted runtime can find due and
       future timers efficiently and claim them safely. Closed by T-022: `due_at` column and
       `idx_timer_store_due_key` index (migration v3) plus bounded `DueTimers`, lease-aware
@@ -778,7 +780,9 @@ Exit criteria:
       process was down fires on recovery.
       Closed by T-064/T-066: bounded startup backfill and raw-KV restart tests prove elapsed
       timers and re-stamped deadlines leave exactly one current index entry across repeated
-      restarts; full `scripts/script.sh` gate passed. PostgreSQL parity is not claimed.
+      restarts; full `scripts/script.sh` gate passed. T-030 (`e0a4aa5`) adds end-to-end coverage
+      with `TestR5_23_R5_13_DurableTimerFiresAfterRestartIncludingMissedDue`. PostgreSQL parity is
+      not claimed.
 
 ### 5.4 Deadlines and lifetime
 
@@ -825,20 +829,46 @@ Exit criteria:
 - [x] **R5-21** Ensure the engine still enforces cancellation and deadlines on suspended work.
       Closed by T-025 (`30ccbd0`, with the T-024 domain deadline/cancellation policy): suspended
       waits enter on the engine context, so cancellation and deadlines remain authoritative;
-      full `scripts/script.sh` gate passed after T-025. Host wait-lifecycle wiring remains T-050 scope.
+      full `scripts/script.sh` gate passed after T-025. Host wait-lifecycle and bounded dispatch
+      reconciliation are wired in durable instances (`c33a8dc`); the final Phase 5 validation gate
+      (T-032) passed after T-081 (result recorded under R5-28).
 
 ### 5.7 Validation
 
-- [ ] **R5-22** Test suspending for approval, restarting the runtime, delivering the signal, and
+- [x] **R5-22** Test suspending for approval, restarting the runtime, delivering the signal, and
       resuming the execution with the approval payload.
-- [ ] **R5-23** Test a durable timer firing after a restart.
+      Closed by T-030 (`e0a4aa5`): `TestR5_22_SuspendRestartDeliverSignalResumesWithPayload` covers
+      restart, signal delivery, and payload resume. The full acceptance suite passed after T-030.
+- [x] **R5-23** Test a durable timer firing after a restart.
+      Closed by T-030 (`e0a4aa5`): `TestR5_23_R5_13_DurableTimerFiresAfterRestartIncludingMissedDue`
+      covers the missed-due path; the full acceptance suite passed.
 - [ ] **R5-24** Test duplicate signal delivery and duplicate timer fires; assert one state
       transition each.
-- [ ] **R5-25** Test unauthorized signal rejection and signal-to-wrong-execution rejection.
-- [ ] **R5-26** Test that a waiting execution does not occupy a worker (observe pool usage while
+      Duplicate-signal idempotency is closed by T-030 (`2d9fda5`,
+      `TestR5_24_DuplicateSignalDeliveryCausesOneResume`). Duplicate-timer fencing is proven by
+      T-079 at the scheduler boundary: `TestTwoPollersWithStaleTimerLeaseCommitOneResume` in
+      `nore/internal/execution/scheduler/timer_poller_test.go` asserts one `CapabilityReady` event,
+      one timer delete, distinct fence owners, and one claimable dispatch intent under stale-lease
+      takeover. Decision 0011 records this as scheduler-boundary proof, not public acceptance
+      coverage, and makes acceptance-level duplicate-timer delivery out of scope: the
+      nondeterministic two-runtime acceptance test was removed, and no public timer
+      claim/lease-expiry/delivery injection route exists to prove it. R5-24 therefore remains
+      unchecked; the final Phase 5 validation gate passed, but acceptance-level duplicate-timer
+      delivery remains unproven and only the scheduler-boundary proof from T-079 exists.
+- [x] **R5-25** Test unauthorized signal rejection and signal-to-wrong-execution rejection.
+      Closed by T-030 (`2d9fda5`): `TestR5_25_SignalDeliveryRejectsUnauthorizedAndWrongExecution`;
+      the full acceptance suite passed.
+- [x] **R5-26** Test that a waiting execution does not occupy a worker (observe pool usage while
       suspended).
-- [ ] **R5-27** Test deadline expiry policies.
-- [ ] **R5-28** Run `scripts/script.sh` and record the result in this phase.
+      Closed by T-030 (`2d9fda5`): `TestR5_26_WaitingExecutionsDoNotOccupyWorkers`; the full
+      acceptance suite passed.
+- [x] **R5-27** Test deadline expiry policies.
+      Closed by T-030 (`2d9fda5`): `TestR5_27_DeadlinePoliciesFailCancelContinue`; the full
+      acceptance suite passed.
+- [x] **R5-28** Run `scripts/script.sh` and record the result in this phase.
+      Final Phase 5 validation gate (T-032) passed after T-081: `./scripts/script.sh` printed
+      `All modules built and tested successfully.`; the full acceptance suite also passed.
+      PostgreSQL parity is unverified without a test DSN, and no .NET result is claimed by this gate.
 
 ### Findings during Phase 5 implementation
 
@@ -846,10 +876,10 @@ Append new findings here as checklist items.
 
 - [x] **F5-1: CapabilityWaiting is never entered and wait fields have no writers.** Defect: the durable execution state never transitions into `CapabilityWaiting`; `StatusWaiting`, `WaitUntil`, and `DispatchState` have no writers, so the modeled wait state is unreachable in practice. Evidence: `nore/internal/execution/execution.go`. Impact: waiting cannot be represented, persisted, or excluded from scheduling as required by R5-1..R5-3, blocking durable suspension semantics. Intended fix: make wait transitions explicit and persist wait metadata atomically when entering/leaving a wait. Closed by `2b9dcaa` (typed wait model and mutators, with `7e7e633` and `059cae7` adding durable writers); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [ ] **F5-2: Signal handler mutates memory only and lacks delivery/authorization guarantees.** Defect: `SignalExecution` only mutates in-memory state, with no request body, delivery ID, payload handling, idempotency, persistence, or dispatch/resume side effects, and it does not verify execution ownership. Evidence: `nore/internal/api/handlers/instances/instance_executions.go:257-328`. Impact: signals can be lost across restart, duplicated, unauthenticated to the execution/wait, or applied without durable effect, violating R5-4..R5-8. Intended fix: define an authenticated, execution-bound signal API with delivery IDs, validation, transactional persistence-before-ack, and idempotent resume.
-- [ ] **F5-3: Production timer/deadline loop is wired, but the bounded dispatch-intent reconciler is still missing.** Defect: T-063/T-065 wired the durable host loop that polls instance-scoped due timers and expires deadlines through bounded discovery, with a 100ms minimum poll interval and clean shutdown; the bounded dispatch-intent claim (`ExecutionStore.ClaimReadyDispatchIntents`, `nore/internal/execution/store.go:1232`) still has no production reconciler caller because T-050 is blocked. Evidence: full `scripts/script.sh` gate passed for T-063/T-064/T-065/T-066; T-050 remains `blocked`. Impact: due timers and deadlines now drive scheduler/expiry work in a running N.O.R.E., but dispatch intents are not discovered and published by a production reconciler, so end-to-end signal/timer restart delivery is not claimed (R5-22..R5-28 remain open). Intended fix: wire the bounded dispatch-intent reconciler into the host under T-050.
+- [x] **F5-3: The bounded dispatch-intent reconciler was missing after the timer/deadline loop was wired.** Defect: T-063/T-065 wired the durable host loop that polls instance-scoped due timers and expires deadlines through bounded discovery, with a 100ms minimum poll interval and clean shutdown; the bounded dispatch-intent claim (`ExecutionStore.ClaimReadyDispatchIntents`) had no production reconciler caller. Closed by T-074 (`c33a8dc`): a consumer-local reconciler in `nore/internal/execution/reconciler` claims bounded per-instance batches with a fresh fencing token per pass, releases each claim before publishing `CapabilityReady` on its own instance bus, and never completes intents; durable instances start and stop one loop with resolved policy and clean shutdown. End-to-end restart and idempotency acceptance tests pass (`e0a4aa5`, `2d9fda5`); the final Phase 5 validation gate (T-032) passed after T-081 (result recorded under R5-28). PostgreSQL parity is not claimed without a test DSN.
 - [x] **F5-4: Recovery mishandles nil `WaitUntil` and miscounts in-flight waiting work.** Defect: recovery resumes `CapabilityWaiting` when `WaitUntil == nil || elapsed` and counts waiting in `inFlight` on the elapsed path. Evidence: `nore/internal/execution/execution.go:443-499`. Impact: indefinite waits can be resumed prematurely, and waiting work can occupy in-flight/worker accounting, violating R5-1, R5-2, and recovery expectations. Intended fix: treat nil deadlines as still waiting, keep waits out of in-flight accounting, and only resume when a concrete wait condition is satisfied. Closed by `059cae7` (nil-`WaitUntil` polling and in-flight handling, with `e7ab02e` for StatusWaiting recovery); `scripts/script.sh` passed in full at `cf3e6a6`.
-- [x] **F5-5: Retry backoff still blocks workers with in-memory sleeps.** Defect: retry handling still sleeps in the worker path instead of scheduling durable wake times for durable executions. Evidence: `nore/internal/execution/engine/invocation.go:132-139,232-244`. Impact: restarts lose pending retries, workers are occupied during backoff, and durable retry scheduling required by R5-10 is not achieved. Intended fix: persist retry wake times and let a durable timer/scheduler resume attempts without sleeping workers. Closed by T-025 (`30ccbd0`, with T-024 domain support): durable retries call `BeginRetryWait` and release the worker instead of sleeping (`TestEngineDefersDurableRetryWithoutInlineSleep`); non-durable mode keeps inline backoff by design. Full `scripts/script.sh` gate passed after T-025. Dispatch reconciliation remains open as F5-3.
-- [ ] **F5-6: Wait deadline and maximum lifetime expiry are not proven end to end.** Defect: the domain wait-deadline policy is applied transactionally (`WaitDeadlinePolicy` fail/cancel/continue in `nore/internal/execution/wait.go:79-107,329-365`; R5-16 checked) and deployment-level `runtime.execution.maxLifetime`/`waitDeadlinePolicy` configuration now exists (T-028 `c1b5f41`, T-056 `373d671`; R5-14/R5-15 checked), but no end-to-end test exercises fail/cancel/continue expiry. Evidence: T-030 is not_started and R5-27 remains unchecked. Impact: configured expiry for long-running or stuck waits is not proven across a runtime. Intended fix: cover fail/cancel/continue expiry end to end in T-030; the configuration half of this finding is closed.
+- [x] **F5-5: Retry backoff still blocks workers with in-memory sleeps.** Defect: retry handling still sleeps in the worker path instead of scheduling durable wake times for durable executions. Evidence: `nore/internal/execution/engine/invocation.go:132-139,232-244`. Impact: restarts lose pending retries, workers are occupied during backoff, and durable retry scheduling required by R5-10 is not achieved. Intended fix: persist retry wake times and let a durable timer/scheduler resume attempts without sleeping workers. Closed by T-025 (`30ccbd0`, with T-024 domain support): durable retries call `BeginRetryWait` and release the worker instead of sleeping (`TestEngineDefersDurableRetryWithoutInlineSleep`); non-durable mode keeps inline backoff by design. Full `scripts/script.sh` gate passed after T-025. Bounded dispatch reconciliation is wired by T-074 (`c33a8dc`); the final Phase 5 validation gate (T-032) passed after T-081 (result recorded under R5-28).
+- [x] **F5-6: Wait deadline and maximum lifetime expiry are now proven end to end.** Defect: the domain wait-deadline policy is applied transactionally (`WaitDeadlinePolicy` fail/cancel/continue in `nore/internal/execution/wait.go:79-107,329-365`; R5-16 checked) and deployment-level `runtime.execution.maxLifetime`/`waitDeadlinePolicy` configuration exists (T-028 `c1b5f41`, T-056 `373d671`; R5-14/R5-15 checked), but no end-to-end test exercised fail/cancel/continue expiry. Closed by T-030 (`2d9fda5`): `TestR5_27_DeadlinePoliciesFailCancelContinue` exercises the configured policies through a durable runtime, and the full acceptance suite passed after all T-030 additions (`e0a4aa5`, `2d9fda5`). The final Phase 5 validation gate (T-032) passed after T-081 (result recorded under R5-28). PostgreSQL parity is not claimed without a test DSN.
 - [x] **F5-7: Capability runtime protocol lacks a suspension outcome.** Defect: the capability runtime protocol defines no suspend/wait outcome for a capability to request durable suspension. Evidence: `shared/protocol/capabilityruntime/v1/capability_runtime.proto` (no capability suspend outcome). Impact: capabilities cannot request waits through a general, language-independent protocol primitive, blocking R5-19/R5-20. Intended fix: version and extend the protocol with a suspension outcome carrying wait/correlation metadata and update all SDKs and conformance tests. Closed by `157ac66` (additive suspend outcome, with `18dc6a6` and `100d9dd` for SDK conformance); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [x] **F5-8: Pre-existing baseline failures block clean Phase 5 validation.** Defect: the baseline has unrelated build/format/acceptance failures that obscure Phase 5 verification. Evidence: four test packages do not compile because fakes lack `WithTimer`/`ClaimTimer` (`nore/internal/storage/fake_test.go`, `nore/internal/execution/store_failure_test.go`, `nore/internal/instance/metadata_store_test.go`, `nore/cmd/nore/main_test.go`); acceptance `TestR4_24SigKill*` hangs due to non-idempotent stop; `gofmt -l` reports drift in `nore/internal/storage/memory.go` and `nore/internal/storage/postgres/postgres.go`. Impact: full validation cannot be treated as green, and regressions introduced by Phase 5 work are harder to isolate. Intended fix: repair the fake/store timer contract, make stop idempotent for the acceptance harness, and normalize formatting as separate, bounded fixes with recorded validation. Closed by `0a4b42d` (fake/timer contract and gofmt repairs, with `3d2e6d5` for the acceptance harness); `scripts/script.sh` passed in full at `cf3e6a6`.
 - [x] **F5-9: Concurrent shared wait transitions can duplicate commit/publish.** Defect: ExecutionStore.Get returns a shared mutable *Execution; ResolveSignal and PollDueTimers mutate outside saveMu, while revision CAS validates against the same shared object. Two transitions can both pass a waiting precheck, commit, and publish CapabilityReady or inconsistent terminal events. Evidence: reviewer T-024c1b1-review (nore/internal/execution/store.go:99-108, :464-482, :993-994; scheduler/wait.go:251-253; scheduler/timer_poller.go:106-190). Impact: latent duplicate publish/inconsistent state before T-025/T-027 wiring. Intended fix: T-041 serialization or durable re-read with loser rejection before publication. Closed by `aa24624` (T-041 serialized shared wait transitions through `Execution.RunTransition` across signal, timer, and recovery drivers; concurrent regression tests prove exactly one commit and no duplicate `CapabilityReady` publish); `scripts/script.sh` passed in full at `aa24624`.

@@ -921,3 +921,225 @@ func TestPollDueTimersSkipsForeignStampedTimer(t *testing.T) {
 		t.Fatal("foreign stamped timer was claimed")
 	}
 }
+
+// staleLeaseWaitStore models one recovered poller whose claim expires while it
+// prepares a transition: it claims with a short lease, never renews, and holds
+// its fenced commit until the competing owner has taken the timer over.
+type staleLeaseWaitStore struct {
+	*executionmodel.ExecutionStore
+	atCommit     chan struct{}
+	takeover     chan struct{}
+	claimOwner   string
+	deleteOwners []string
+}
+
+func (s *staleLeaseWaitStore) ClaimWaitTimer(ctx context.Context, key, owner string, _ time.Duration) (bool, error) {
+	claimed, err := s.ExecutionStore.ClaimWaitTimer(ctx, key, owner, time.Millisecond)
+	if claimed {
+		s.claimOwner = owner
+	}
+	return claimed, err
+}
+
+func (s *staleLeaseWaitStore) RenewWaitTimer(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (s *staleLeaseWaitStore) SaveWaitTransition(ctx context.Context, req executionmodel.WaitTransitionRequest) (*executionmodel.WaitTransitionResult, error) {
+	for _, del := range req.Effects.DeleteTimers {
+		s.deleteOwners = append(s.deleteOwners, del.Owner)
+	}
+	close(s.atCommit)
+	select {
+	case <-s.takeover:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.ExecutionStore.SaveWaitTransition(ctx, req)
+}
+
+// takeoverWaitStore models the peer that reclaims the expired timer. Claims are
+// retried inside a bounded window, so takeover does not depend on a sleep race.
+type takeoverWaitStore struct {
+	*executionmodel.ExecutionStore
+	claimed chan string
+}
+
+func (s *takeoverWaitStore) ClaimWaitTimer(ctx context.Context, key, owner string, lease time.Duration) (bool, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		claimed, err := s.ExecutionStore.ClaimWaitTimer(ctx, key, owner, lease)
+		if err != nil || claimed {
+			if claimed {
+				select {
+				case s.claimed <- owner:
+				default:
+				}
+			}
+			return claimed, err
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestTwoPollersWithStaleTimerLeaseCommitOneResume proves duplicate-timer
+// fencing at the scheduler boundary. Two recovered pollers adopt independent
+// execution copies from one durable store. The first claims the due timer under
+// a lease that expires before its commit; the second takes over and commits the
+// resume. The delayed fenced commit must lose without publishing another
+// CapabilityReady or writing another dispatch intent.
+func TestTwoPollersWithStaleTimerLeaseCommitOneResume(t *testing.T) {
+	h := newWaitHarness(t)
+	seed := h.scheduler(t)
+	due := time.Now().UTC().Add(-time.Minute)
+	enterDueWait(t, h, seed, executionmodel.WaitTypeTimer, "", due)
+	timerKey, err := executionmodel.WaitTimerKey(h.exec.ID, "cap", h.exec.AttemptID)
+	if err != nil {
+		t.Fatalf("WaitTimerKey: %v", err)
+	}
+
+	// Each recovered view reads its own execution copy from durable storage and
+	// adopts it, so no two pollers share a mutable snapshot or revision counter.
+	firstStore := executionmodel.NewExecutionStore(h.raw)
+	secondStore := executionmodel.NewExecutionStore(h.raw)
+	firstExec, err := h.store.Reload(h.ctx, h.exec.ID)
+	if err != nil {
+		t.Fatalf("Reload(first): %v", err)
+	}
+	secondExec, err := h.store.Reload(h.ctx, h.exec.ID)
+	if err != nil {
+		t.Fatalf("Reload(second): %v", err)
+	}
+	if firstExec == secondExec {
+		t.Fatal("both views adopted the same execution value")
+	}
+	if err := firstStore.Adopt(h.ctx, firstExec); err != nil {
+		t.Fatalf("Adopt(first): %v", err)
+	}
+	if err := secondStore.Adopt(h.ctx, secondExec); err != nil {
+		t.Fatalf("Adopt(second): %v", err)
+	}
+
+	stale := &staleLeaseWaitStore{
+		ExecutionStore: firstStore,
+		atCommit:       make(chan struct{}),
+		takeover:       make(chan struct{}),
+	}
+	replacement := &takeoverWaitStore{ExecutionStore: secondStore, claimed: make(chan string, 1)}
+	firstBus := event.NewBus()
+	secondBus := event.NewBus()
+	firstSub, err := firstBus.SubscribeExecution(h.exec.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution(first): %v", err)
+	}
+	defer func() { _ = firstSub.Close() }()
+	secondSub, err := secondBus.SubscribeExecution(h.exec.ID, 8)
+	if err != nil {
+		t.Fatalf("SubscribeExecution(second): %v", err)
+	}
+	defer func() { _ = secondSub.Close() }()
+	firstScheduler, err := New(firstBus, firstStore, h.scopes, WithWaitStore(stale, TimerPollConfig{}))
+	if err != nil {
+		t.Fatalf("New scheduler(first): %v", err)
+	}
+	secondScheduler, err := New(secondBus, secondStore, h.scopes, WithWaitStore(replacement, TimerPollConfig{}))
+	if err != nil {
+		t.Fatalf("New scheduler(second): %v", err)
+	}
+
+	type pollOutcome struct {
+		count int
+		err   error
+	}
+	firstDone := make(chan pollOutcome, 1)
+	go func() {
+		n, err := firstScheduler.PollDueTimers(h.ctx, h.exec.InstanceID)
+		firstDone <- pollOutcome{count: n, err: err}
+	}()
+	select {
+	case <-stale.atCommit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stale poll never reached its gated commit")
+	}
+
+	secondDone := make(chan pollOutcome, 1)
+	go func() {
+		n, err := secondScheduler.PollDueTimers(h.ctx, h.exec.InstanceID)
+		secondDone <- pollOutcome{count: n, err: err}
+	}()
+	var replacementOwner string
+	select {
+	case replacementOwner = <-replacement.claimed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement poller never took over the expired lease")
+	}
+	if replacementOwner == stale.claimOwner {
+		t.Fatalf("replacement poller reused stale owner %q", stale.claimOwner)
+	}
+	close(stale.takeover)
+
+	select {
+	case got := <-secondDone:
+		if got.err != nil || got.count != 1 {
+			t.Fatalf("replacement PollDueTimers = (%d, %v), want (1, nil)", got.count, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement poll did not finish")
+	}
+	select {
+	case got := <-firstDone:
+		if got.err != nil || got.count != 0 {
+			t.Fatalf("stale PollDueTimers = (%d, %v), want (0, nil) after lease loss", got.count, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stale poll did not finish")
+	}
+
+	countReady := func(sub event.Subscription) int {
+		n := 0
+		for {
+			select {
+			case evt := <-sub.Events():
+				if evt.Type == event.CapabilityReady {
+					n++
+				}
+			default:
+				return n
+			}
+		}
+	}
+	if n := countReady(firstSub); n != 0 {
+		t.Fatalf("stale poller published %d CapabilityReady events, want 0", n)
+	}
+	if n := countReady(secondSub); n != 1 {
+		t.Fatalf("replacement poller published %d CapabilityReady events, want 1", n)
+	}
+
+	if len(stale.deleteOwners) != 1 || stale.deleteOwners[0] != stale.claimOwner {
+		t.Fatalf("stale fenced delete owners = %v, want only %q", stale.deleteOwners, stale.claimOwner)
+	}
+	if _, err := h.raw.GetTimer(h.ctx, timerKey); !errors.Is(err, storage.ErrTimerNotFound) {
+		t.Fatalf("timer after takeover = %v, want ErrTimerNotFound", err)
+	}
+
+	intents, err := secondStore.ClaimReadyDispatchIntents(h.ctx, h.exec.InstanceID, "probe", time.Minute, 10)
+	if err != nil {
+		t.Fatalf("ClaimReadyDispatchIntents: %v", err)
+	}
+	if len(intents) != 1 {
+		t.Fatalf("claimable dispatch intents = %d, want 1", len(intents))
+	}
+	state := secondExec.CapabilityState("cap")
+	if state.Resume == nil || state.Resume.Cause != executionmodel.ResumeCauseTimer {
+		t.Fatalf("resume = %+v, want a timer resume descriptor", state.Resume)
+	}
+	if intents[0].CapabilityID != "cap" || intents[0].AttemptID != secondExec.AttemptID {
+		t.Fatalf("dispatch intent = %+v, want cap at resumed attempt %q", intents[0], secondExec.AttemptID)
+	}
+}

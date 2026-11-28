@@ -236,8 +236,7 @@ func (e *CapabilityRuntimeEngine) executeCapability(ctx context.Context, receive
 	// Snapshot the dispatch generation once. A peer resolving a wait can rotate
 	// the execution's attempt ID while policy.run retries inline; re-reading it
 	// inside the attempt would change an in-flight invocation's wire identity.
-	attemptID := execution.AttemptID
-	logicalOperationID := execution.LogicalOperationID
+	attemptID, logicalOperationID := execution.AttemptIdentity()
 
 	// A suspend is an outcome rather than an error, so retry treats it as a
 	// success. Remember the last successful outcome's suspend so the engine can
@@ -341,7 +340,7 @@ func (e *CapabilityRuntimeEngine) claimDispatch(ctx context.Context, execution *
 	// Capture the generation once. Another capability's wait resolution can
 	// rotate the shared execution between the claim and its completion; both
 	// operations must address the intent this worker actually claimed.
-	attemptID := execution.AttemptID
+	attemptID, _ := execution.AttemptIdentity()
 	intent := exec.NewDispatchIntent(execution.ID, capabilityID, attemptID)
 	lease := DefaultDispatchLease
 	if policy.timeout > 0 {

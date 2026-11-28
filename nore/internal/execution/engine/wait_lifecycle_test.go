@@ -253,7 +253,8 @@ func startWaitHarness(t *testing.T, capabilityID core.ID, blueprint *types.Execu
 		t.Fatalf("MarkCapabilityReady: %v", err)
 	}
 	if committer != nil {
-		committer.allow(execution.ID, capabilityID, execution.AttemptID)
+		attemptID, _ := execution.AttemptIdentity()
+		committer.allow(execution.ID, capabilityID, attemptID)
 	}
 
 	go func() { _ = engineInstance.Run(ctx) }()
@@ -650,10 +651,11 @@ func TestEnginePropagatesResumeDescriptorAndIdentities(t *testing.T) {
 	if firstCalls[0].Resume != nil {
 		t.Fatalf("first resume = %+v, want nil", firstCalls[0].Resume)
 	}
-	if firstCalls[0].AttemptID != h.execution.AttemptID || firstCalls[0].LogicalOperationID != h.execution.LogicalOperationID {
+	wantAttempt, wantLogical := h.execution.AttemptIdentity()
+	if firstCalls[0].AttemptID != wantAttempt || firstCalls[0].LogicalOperationID != wantLogical {
 		t.Fatalf("first identities = %q/%q, want %q/%q",
 			firstCalls[0].AttemptID, firstCalls[0].LogicalOperationID,
-			h.execution.AttemptID, h.execution.LogicalOperationID)
+			wantAttempt, wantLogical)
 	}
 
 	want := &exec.CapabilityResume{Cause: exec.ResumeCauseSignal, SignalName: "approval", DeliveryID: "del_1"}
@@ -677,10 +679,11 @@ func TestEnginePropagatesResumeDescriptorAndIdentities(t *testing.T) {
 	if resumed.Resume == nil || *resumed.Resume != *want {
 		t.Fatalf("resume = %+v, want %+v", resumed.Resume, want)
 	}
-	if resumed.AttemptID != h.execution.AttemptID || resumed.LogicalOperationID != h.execution.LogicalOperationID {
+	wantAttempt, wantLogical = h.execution.AttemptIdentity()
+	if resumed.AttemptID != wantAttempt || resumed.LogicalOperationID != wantLogical {
 		t.Errorf("resumed identities = %q/%q, want %q/%q",
 			resumed.AttemptID, resumed.LogicalOperationID,
-			h.execution.AttemptID, h.execution.LogicalOperationID)
+			wantAttempt, wantLogical)
 	}
 	if resumed.Params["approved"] != true {
 		t.Errorf("resumed params = %+v, want the delivered payload", resumed.Params)

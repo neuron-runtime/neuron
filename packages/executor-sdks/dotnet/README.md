@@ -133,7 +133,7 @@ return await ExecutorServer.RunAsync(handler);
 
 ## Suspending and resuming a capability
 
-Suspend is an additive, opt-in v1 extension. A handler that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the handler again with the same logical operation ID, a new attempt ID, and `ExecuteContext.Resume`. It is not a stackful continuation: reconstruct state from the input and deduplicate on `Resume.DeliveryId`.
+Suspend is an additive, opt-in v1 extension. A handler that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the handler again with the same logical operation ID, a new attempt ID, and `ExecuteContext.Resume`. It is not a stackful continuation: reconstruct state from the input and deduplicate on the logical operation ID together with the delivery ID — the client-supplied idempotency key — never on the attempt ID, which is new on every resume or retry.
 
 ```csharp
 using Neuron.Executor;

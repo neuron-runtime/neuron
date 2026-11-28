@@ -11,13 +11,16 @@ import (
 	core "github.com/neuron-runtime/neuron/shared/types/core"
 )
 
-// recordingInstance captures the request a capability runtime actually receives.
+// recordingInstance captures the request and context a capability runtime
+// actually receives.
 type recordingInstance struct {
+	ctx      context.Context
 	request  *capabilityrt.Request
 	response *capabilityrt.Response
 }
 
-func (r *recordingInstance) Execute(_ context.Context, req *capabilityrt.Request) (*capabilityrt.Response, error) {
+func (r *recordingInstance) Execute(ctx context.Context, req *capabilityrt.Request) (*capabilityrt.Response, error) {
+	r.ctx = ctx
 	r.request = req
 	if r.response != nil {
 		return r.response, nil

@@ -444,6 +444,8 @@ The commands in this section are auxiliary. They are not part of the normal buil
 
 Create, list, and manage running assembly instances.
 
+When no explicit `--remote` endpoint or daemon endpoint is configured, these commands use the discovered live project runtime for the current project and adopt the token it published. An explicit `--remote` or authenticated socket-daemon endpoint is still honored. If no live project runtime is found, the command fails with ``no project runtime found; start one with `neuron` in the project directory`` instead of falling back to the build daemon, which would report an empty instance list.
+
 ```
 Usage:
   neuron instance [flags]

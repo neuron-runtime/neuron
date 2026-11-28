@@ -151,7 +151,8 @@ func TestEngineDispatchesAClaimedCapabilityOnce(t *testing.T) {
 	if err := execution.MarkCapabilityReady("cap", input); err != nil {
 		t.Fatalf("MarkCapabilityReady: %v", err)
 	}
-	committer.allow(execution.ID, "cap", execution.AttemptID)
+	attemptID, _ := execution.AttemptIdentity()
+	committer.allow(execution.ID, "cap", attemptID)
 
 	go func() { _ = engineInstance.Run(ctx) }()
 
@@ -182,8 +183,8 @@ func TestEngineDispatchesAClaimedCapabilityOnce(t *testing.T) {
 }
 
 // rotatingClaimCommitter models a peer capability resuming between a claim and
-// its deferred completion. The peer rotation changes execution.AttemptID while
-// this worker still owns the intent it originally claimed.
+// its deferred completion. The peer rotation changes the execution's attempt
+// generation while this worker still owns the intent it originally claimed.
 type rotatingClaimCommitter struct {
 	*claimCommitter
 	execution       *exec.Execution
@@ -238,7 +239,7 @@ func TestClaimDispatchKeepsClaimedAttemptAcrossPeerRotation(t *testing.T) {
 	if err := execution.BeginRetryWait("peer", time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatalf("BeginRetryWait: %v", err)
 	}
-	prior := execution.AttemptID
+	prior, _ := execution.AttemptIdentity()
 
 	committer := &rotatingClaimCommitter{claimCommitter: newClaimCommitter(), execution: execution}
 	committer.allow(execution.ID, "cap", prior)
@@ -248,7 +249,7 @@ func TestClaimDispatchKeepsClaimedAttemptAcrossPeerRotation(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("claimDispatch = (claimed %v, err %v), want a claim", claimed, err)
 	}
-	if execution.AttemptID == prior {
+	if current, _ := execution.AttemptIdentity(); current == prior {
 		t.Fatal("peer resume did not rotate the generation")
 	}
 	release()

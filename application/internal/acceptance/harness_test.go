@@ -50,6 +50,15 @@ func TestMain(m *testing.M) {
 	harness.noreBin = filepath.Join(dir, "nore")
 	harness.home = filepath.Join(dir, "home")
 
+	// Fixture capability runtimes are built from their source directory, where
+	// local module replacements resolve. Processes spawned by the tests inherit
+	// this path, so copied runtime directories need no machine-specific paths.
+	acceptanceDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	if err := os.MkdirAll(harness.home, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -67,10 +76,11 @@ func TestMain(m *testing.M) {
 	// The fake HOME isolates every default path: the daemon socket, data
 	// directory, PID file, capability runtime store, and provider store.
 	env := map[string]string{
-		"HOME":                  harness.home,
-		"NEURON_SOCKET":         filepath.Join(harness.home, "nore.sock"),
-		"NEURON_DATA_DIR":       filepath.Join(harness.home, "data"),
-		"NEURON_DAEMON_PIDFILE": filepath.Join(harness.home, "nore.pid"),
+		"HOME":                       harness.home,
+		"NEURON_SOCKET":              filepath.Join(harness.home, "nore.sock"),
+		"NEURON_DATA_DIR":            filepath.Join(harness.home, "data"),
+		"NEURON_DAEMON_PIDFILE":      filepath.Join(harness.home, "nore.pid"),
+		"NEURON_ACCEPTANCE_TESTDATA": filepath.Join(acceptanceDir, "testdata", "suspendruntime"),
 	}
 	for key, value := range env {
 		if err := os.Setenv(key, value); err != nil {

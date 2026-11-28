@@ -233,7 +233,7 @@ func main() {
 
 ## Suspending and resuming a capability
 
-Suspend is an additive, opt-in v1 extension. A capability that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the capability again with the same logical operation ID, a new attempt ID, and a resume input. It is not a stackful continuation: reconstruct state from `req.Params` and deduplicate on `req.Resume.DeliveryID`.
+Suspend is an additive, opt-in v1 extension. A capability that needs external input can return an `ExecutionResult` with `Suspend` set instead of a result; N.O.R.E. records a durable wait and later invokes the capability again with the same logical operation ID, a new attempt ID, and a resume input. It is not a stackful continuation: reconstruct state from `req.Params` and deduplicate on the logical operation ID together with the delivery ID — the client-supplied idempotency key — never on the attempt ID, which is new on every resume or retry.
 
 ```go
 import (
@@ -251,7 +251,7 @@ func main() {
         },
         ExecuteWithRequest: func(ctx context.Context, req executor.ExecutionRequest) (*executor.ExecutionResult, error) {
             if req.Resume != nil {
-                // Reconstruct state from req.Params; dedupe on req.Resume.DeliveryID.
+                // Reconstruct state from req.Params; dedupe on logical operation ID + delivery ID, not the attempt ID.
                 return &executor.ExecutionResult{Result: map[string]any{"resumed": true}}, nil
             }
             return &executor.ExecutionResult{Suspend: &executor.SuspendOutcome{
@@ -271,7 +271,7 @@ Rules enforced by the SDK:
 - `WaitType` must be `WaitTypeSignal` or `WaitTypeTimer`. A signal wait requires `ExpectedSignal`; a timer wait requires `DeadlineUnixMs > 0`. `deadline` is an engine-internal cause, not an executor wait type.
 - `Result` and `Error` must be empty when `Suspend` is set.
 - `Initialize` must advertise `v1.SuspendFeature`; otherwise the SDK returns an explicit `unsupported_suspend_outcome` error rather than an empty success.
-- `req.Resume` carries `Cause`, `SignalName`, `DeliveryID`, and `Payload`. `Cause` may be `signal`, `timer`, or `deadline`.
+- `req.Resume` carries `Cause`, `SignalName`, `DeliveryID`, and `Payload`. `Cause` may be `signal`, `timer`, or `deadline`. `req.AttemptID` changes on every resume or retry; `req.LogicalOperationID` is stable across restarts. Deduplicate across attempts on the logical operation ID together with the delivery ID, never on the attempt ID.
 
 Handlers that implement only `Execute` keep the original wire behavior; absent `resume`/`suspend` fields preserve the pre-extension protocol.
 
