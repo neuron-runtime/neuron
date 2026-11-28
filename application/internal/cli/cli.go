@@ -27,9 +27,14 @@ import (
 
 var cfgFile string
 
+// buildProjectBeforeRun is the same pipeline used by `neuron build`.
+// Keeping this seam makes the bare-command ordering testable without a runtime
+// registry or a live N.O.R.E. process.
+var buildProjectBeforeRun = build.ExecuteWith
+
 var RootCmd = &cobra.Command{
 	Use:     command.Neuron,
-	Short:   "Neuron CLI",
+	Short:   "Build the project and start its foreground runtime.",
 	Version: buildversion.String(),
 	RunE:    runProjectRuntime,
 }
@@ -164,6 +169,20 @@ func runProjectRuntime(cmd *cobra.Command, args []string) error {
 	// via --config.
 	if cfg.ConfigFile == "" {
 		return fmt.Errorf("no Neuron project found in current directory or ancestors; run `neuron init` first")
+	}
+
+	// Bare `neuron` is the development entry point: build and register the
+	// project's declared Assemblies before starting N.O.R.E. This uses exactly
+	// the same pipeline as `neuron build`, including manifest compilation,
+	// capability-runtime resolution, and immutable build-record persistence.
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	force, _ := cmd.Flags().GetBool("force")
+	if err := buildProjectBeforeRun(cmd, build.Options{
+		Root:    cfg.ProjectDir,
+		Verbose: verbose,
+		Force:   force,
+	}); err != nil {
+		return fmt.Errorf("build project before starting runtime: %w", err)
 	}
 
 	// Build the nore command
