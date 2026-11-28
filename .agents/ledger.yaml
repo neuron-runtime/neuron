@@ -807,11 +807,11 @@ tasks:
       - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/instance/... ./internal/mechanism/... ./cmd/..."
       - "cd nore && GOWORK=off go test -count=1 ./internal/instance/... ./cmd/... -run 'Wait|Timer|Reconcil|Lifetime|Publish'"
       - "git diff --check"
-    status: blocked
+    status: done
     lease: null
-    evidence: ["T-025/T-026/T-027/T-028/T-049 and D4 prerequisite T-060 all reached done with full integration gates; T-060 added bounded `dispatch_ready/` discovery in commit 5d6cac8.", "ADR 0007 is accepted and internally consistent. Reviewer PASS confirmed it is safe for implementation dispatch: ID-1 assigns live retry-wait resumption to the scheduler timer poller; ID-2 maps wait deadline policy once in the instance adapter; ID-3 records the lease-source exception; ID-4 binds periodic reconciliation with only a ticker wake-up from publish errors; ID-5 sets execution deadlines at admission/recovery and enforces expiry through scheduler cancellation.", "The old D4 blocker and non-existent runtime max-lifetime option were removed from the ADR. The implementer must not call `WithExecutionMaxLifetime`; the actual resolved config field is `policy.MaxLifetime` at `nore/internal/runtimeconfig/execution_policy.go:19`.", "T-062 chose bounded instance-scoped deadline discovery in ADR 0008; T-063/T-064/T-065/T-066/T-068/T-069/T-070 implemented and verified all previously reported timer-loop, unbounded discovery, cross-instance polling, minimum-interval, stale-index, and shutdown-flake blockers. Architect APPROVE for the wired scope; security APPROVE on T-070; reviewer APPROVE on T-070 but final T050 acceptance CHANGES_REQUESTED.", "Final integrated recheck found the remaining blocker at acceptance item 3: no production consumer-local dispatch reconciler package or caller of `ClaimReadyDispatchIntents` exists (`nore/internal/execution/store.go:1232` is test-only). The bounded ready-index primitive satisfies D4, and the production timer/deadline loop is wired, but dispatch intents are not claimed/released/published by a host loop.", "T071-RESEARCH mapped the reconciler scope: ADR 0006 places a consumer-local port in `nore/internal/execution/reconciler`; the host should reuse the durable poll cadence and avoid `CompleteDispatchIntent`; cross-instance dispatch routing is unresolved because `DispatchIntent` and `dispatch_ready/` keys carry no instance ID while instances share a store.", "PostgreSQL parity: not claimed; no DSN is available."]
+    evidence: ["Closed by T-074; production bounded dispatch reconciler landed in commit `c33a8dc`, satisfying the previously blocked acceptance item 3.", "T-025/T-026/T-027/T-028/T-049 and D4 prerequisite T-060 all reached done with full integration gates; T-060 added bounded `dispatch_ready/` discovery in commit 5d6cac8.", "ADR 0007 is accepted and internally consistent. Reviewer PASS confirmed it is safe for implementation dispatch: ID-1 assigns live retry-wait resumption to the scheduler timer poller; ID-2 maps wait deadline policy once in the instance adapter; ID-3 records the lease-source exception; ID-4 binds periodic reconciliation with only a ticker wake-up from publish errors; ID-5 sets execution deadlines at admission/recovery and enforces expiry through scheduler cancellation.", "The old D4 blocker and non-existent runtime max-lifetime option were removed from the ADR. The implementer must not call `WithExecutionMaxLifetime`; the actual resolved config field is `policy.MaxLifetime` at `nore/internal/runtimeconfig/execution_policy.go:19`.", "T-062 chose bounded instance-scoped deadline discovery in ADR 0008; T-063/T-064/T-065/T-066/T-068/T-069/T-070 implemented and verified all previously reported timer-loop, unbounded discovery, cross-instance polling, minimum-interval, stale-index, and shutdown-flake blockers. Architect APPROVE for the wired scope; security APPROVE on T-070; reviewer APPROVE on T-070 but final T050 acceptance CHANGES_REQUESTED.", "Final integrated recheck found the remaining blocker at acceptance item 3: no production consumer-local dispatch reconciler package or caller of `ClaimReadyDispatchIntents` exists (`nore/internal/execution/store.go:1232` is test-only). The bounded ready-index primitive satisfies D4, and the production timer/deadline loop is wired, but dispatch intents are not claimed/released/published by a host loop.", "T071-RESEARCH mapped the reconciler scope: ADR 0006 places a consumer-local port in `nore/internal/execution/reconciler`; the host should reuse the durable poll cadence and avoid `CompleteDispatchIntent`; cross-instance dispatch routing is unresolved because `DispatchIntent` and `dispatch_ready/` keys carry no instance ID while instances share a store.", "PostgreSQL parity: not claimed; no DSN is available."]
     reports: [".agents/decisions/0007-t050-host-wiring.md", "T-050-discovery", "T-050-design-final-review", ".agents/reports/T-050A-review-integration.md"]
-    open_risks: ["Residual accepted exception: the fencing lease comes from the scheduler's validated authority, not T-028 config; operators cannot tune it independently (ADR 0007 ID-3).", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "BLOCKED: T050 acceptance item 3 remains unmet — no production dispatch-intent reconciler exists. Implementation requires an architect decision on instance-scoped dispatch routing before wiring, because dispatch intents and ready keys are not instance-scoped while the manager shares one store across instances.", "The ADR leaves the exact host loop placement to implementation but requires existing scheduler terminal paths and no duplicate state machine."]
+    open_risks: ["Residual accepted exception: the fencing lease comes from the scheduler's validated authority, not T-028 config; operators cannot tune it independently (ADR 0007 ID-3).", "PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN.", "The ADR leaves the exact host loop placement to implementation but requires existing scheduler terminal paths and no duplicate state machine."]
 
   - id: T-062
     objective: "Choose a bounded, instance-safe deadline discovery design and resolve T-050A review blockers"
@@ -1207,11 +1207,12 @@ tasks:
     verification:
       - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/..."
       - "cd application && GOWORK=off go test -count=1 -timeout 15m -run 'Durable|R5|Signal|Timer|Deadline' ./internal/acceptance/..."
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
-    open_risks: ["Postgres parity cannot be exercised without a DSN; record the limitation."]
+    evidence: ["Added durable suspend/signal restart coverage (`TestR5_22`), durable missed-timer restart coverage (`TestR5_23`/R5-13), duplicate-signal idempotency and authorization/wrong-target coverage (`TestR5_24`, `TestR5_25`), one-worker wait occupancy (`TestR5_26`), and deadline fail/cancel/continue policies (`TestR5_27`).", "Full acceptance suite passed after all additions: `cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/...` (ok, 71.038s); focused R5-26/R5-27 passed; R5-24/R5-25 passed three consecutive runs; gofmt and git diff --check clean.", "CLI routing is exercised through the discovered project runtime; the CLI assertion uses stable truncated table details while the API assertion verifies the full execution ID.", "Final acceptance suite passed again after identity/validation hardening (122.353s); duplicate-timer proof is scheduler-boundary only per decision 0011; final full validation passed in `./scripts/script.sh`."]
+    reports: [".agents/reports/T-030.md", ".agents/reports/T-079.md"]
+    open_risks: ["Postgres parity cannot be exercised without a DSN; record the limitation.", "Acceptance-level duplicate-timer delivery is intentionally not claimed; scheduler-boundary proof is the approved boundary."]
+    commit: e0a4aa5,2d9fda5,5d3d247
 
   - id: T-031
     objective: "Synchronize documentation and todo closure with verified Phase 5 behavior"
@@ -1235,11 +1236,12 @@ tasks:
     verification:
       - "git diff --check"
       - "Manual cross-check of every changed documentation claim against code/tests"
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
-    open_risks: []
+    evidence: ["Documenter synchronized README, architecture docs, CLI README, both SDK READMEs, and TODO with verified behavior. Final documenter sign-off APPROVE recorded in `.agents/reports/FINAL-SIGNOFF-DOCS-docs.md`; R5-24 remains unchecked with scheduler-boundary-only caveat.", "Final `./scripts/script.sh` passed with exact output `All modules built and tested successfully.`; dotnet suite passed 38/38."]
+    reports: [".agents/reports/FINAL-SIGNOFF-DOCS-docs.md", ".agents/reports/T-032-docs.md"]
+    open_risks: ["PostgreSQL parity remains DSN-gated and is not claimed."]
+    commit: 5d3d247
 
   - id: T-032
     objective: "Run the final Phase 5 validation gate and verify the committed repository state"
@@ -1258,11 +1260,11 @@ tasks:
       - "scripts/script.sh"
       - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/..."
       - "git status --short --branch && git log --oneline -20"
-    status: not_started
+    status: done
     lease: null
-    evidence: []
-    reports: []
-    open_risks: ["Gate is non-mutating; project changes are committed by their owners before the gate."]
+    evidence: ["Coordinator ran `./scripts/script.sh` after all code/docs were complete; exact final output: `All modules built and tested successfully.`", "Full acceptance suite passed after identity/validation hardening (122.353s); targeted scheduler race tests, plugin/process identity tests, and CLI/engine suites passed.", "Separate .NET check passed: `dotnet test packages/executor-sdks/dotnet/Neuron.Executor.slnx --no-restore` -> Passed 38, Failed 0, Skipped 0. PostgreSQL parity remains DSN-gated and is not claimed.", "Final reviewer, architect, security, and documenter sign-offs recorded; final integration commit is `5d3d247`.", "Final git status is clean after the ledger coordination commit."]
+    reports: [".agents/reports/T-032-docs.md", ".agents/reports/FINAL-SIGNOFF-DOCS-docs.md", ".agents/reports/FINAL-SIGNOFF-SEC-CLI-security.md"]
+    open_risks: ["PostgreSQL parity remains unavailable without NEURON_TEST_POSTGRES_DSN; recorded limitation, not a pass.", "Acceptance-level duplicate-timer delivery is out of scope; scheduler-boundary proof is authoritative per decision 0011."]
 
   - id: T-039
     objective: "Mark only verified completed Phase 5 todo items in todos/TODO.md"
@@ -1567,4 +1569,179 @@ tasks:
     evidence: ["Coder added consumer-local `nore/internal/execution/reconciler/reconciler.go` with a two-method Claimer port, fresh entropy-backed owner per pass, durable instance assertion, release-before-publish, own-bus `CapabilityReady`, ticker-only Run, and no completion call. Instance host creates one durable-only reconciler from resolved policy and scheduler lease and awaits it during Stop.", "Tests: reconciler unit/invariant tests prove config validation, token freshness/prefix, bounded claim arguments, ownership mismatch behavior, release ordering, publish retryability, no completion, and cancellation. Instance tests prove two durable instances sharing one store publish only to their own buses with correct Params, foreign intents stay unmodified, non-durable instances have no loop, and Stop awaits one loop with no post-close access.", "Report `.agents/reports/T-074.md` records all exact verification outcomes: build/compile-only pass; focused Dispatch|Reconcil|Timer|Shutdown pass; full race suite pass; Wait|Timer|Reconcil|Lifetime|Publish pass; `./scripts/script.sh` printed `All modules built and tested successfully.`; gofmt and git diff --check clean.", "Sign-offs: reviewer T074-REVIEW-FINAL APPROVE with no findings; architect T074-ARCH APPROVE; security T074-SECURITY APPROVE; performance T074-PERFORMANCE APPROVE with non-blocking notes (full ready-prefix List per tick, inherited 100ms interval floor, no direct pprof capture)."]
     reports: [".agents/reports/T-074.md"]
     open_risks: ["Cross-instance integration test calls `Reconcile` directly rather than waiting for the ticker; ticker lifecycle is separately covered.", "Ready-prefix List materializes the full ready index each tick; accepted in ADR 0009.", "PostgreSQL parity remains unavailable.", "Engine construction-time stable owner remains a separate pre-existing fence weakness."]
-    commit: null
+    commit: c33a8dc
+
+  - id: T-082
+    objective: "Route instance CLI commands to the discovered project runtime when no explicit remote is set"
+    scope:
+      - "application/internal/cli/**"
+      - "application/config/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security, documenter]
+    dependencies: [T-029, T-030]
+    acceptance:
+      - "`neuron instance list`, `signal`, `cancel`, `remove`, and related instance commands prefer a discovered live project runtime over the build daemon when no explicit remote endpoint is configured"
+      - "Explicit `--remote` and authenticated socket-daemon workflows remain supported and are not broken"
+      - "Project-runtime discovery and token adoption are implemented once in a shared CLI bootstrap helper, without duplicating `run` logic"
+      - "Acceptance tests prove list/signal reach the runtime that owns a recovered execution after restart"
+      - "No public API/protocol change and no secret leakage in logs or errors"
+    verification:
+      - "cd application && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/... -run 'Instance|Signal|R5_22|Durable'"
+      - "cd application && GOWORK=off go test -race -count=1 ./internal/cli/... ./internal/acceptance/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["User explicitly authorized CLI routing fix on 2026-11-26 after read-only diagnosis proved the default CLI targets the Unix-socket build daemon while `neuron run` and the harness use the discovered project runtime record.", "Coder centralized discovery/token adoption in `application/internal/cli/bootstrap/runtime.go:27-110`; `run/run.go` and instance list/remove now use the shared setup, covering signal/cancel/clear. Explicit `--remote`/daemon endpoint still uses `SetupClient`; no token logging.", "Tests added at `bootstrap/runtime_test.go:233-298`, `instance/client_test.go:25`, and `run/run_test.go:24`; coder verified application build/compile, CLI/config tests, CLI race tests, gofmt, and git diff --check all passed.", "Final reviewer APPROVE; architect APPROVE; security APPROVE with one pre-existing non-blocking medium finding (local unauthenticated discovery records); documenter APPROVE."]
+    reports: [".agents/reports/T-033.md", ".agents/reports/FINAL-SIGNOFF-SEC-CLI-security.md", ".agents/reports/FINAL-SIGNOFF-DOCS-docs.md"]
+    open_risks: ["The explicit no-runtime error is intentional and may change behavior for users who previously received an empty daemon-backed list.", "Pre-existing medium security finding: local discovery records are unauthenticated and a same-user writer could redirect CLI authority; not introduced by this task."]
+    commit: aa4b497
+
+  - id: T-075
+    objective: "Carry resolved wait metadata into the capability runtime resume request"
+    scope:
+      - "nore/internal/contracts/**"
+      - "nore/internal/execution/**"
+      - "nore/internal/plugin/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-030]
+    acceptance:
+      - "A transport-neutral internal resume descriptor is persisted when a wait is resolved and cleared when a fresh wait begins"
+      - "Signal, timer, retry, deadline-continue, and restart-recovery resolution paths populate the correct cause and signal metadata"
+      - "Engine populates `ExecutionContext.Resume`, `AttemptID`, and `LogicalOperationID`; plugin maps the descriptor into the existing `capabilityruntime.Request.Resume`"
+      - "First invocations keep `Resume == nil`; existing transport validation remains authoritative; no new public protocol field, SDK change, or snapshot migration"
+      - "Boundary tests prove domain persistence, scheduler resolution, engine propagation, plugin mapping, and nil behavior"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/plugin/... ./contracts/..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/plugin/..."
+      - "cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/... -run 'TestR5_22|TestR5_23'"
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["User explicitly authorized this bounded internal repair on 2026-11-26 after acceptance exposed `Request.Resume == nil` after resolved waits. Read-only design map recorded exact edit points; no new public protocol field or SDK change is authorized.", "Coder added the internal resume descriptor, persisted it on capability state, populated it from signal/timer/retry/deadline/recovery resolution, and mapped it through engine and plugin. Boundary tests were added at domain, scheduler, engine, and plugin levels: `wait_test.go`, `scheduler/wait_test.go`, `scheduler/timer_poller_test.go`, `scheduler/recovery_test.go`, `engine/wait_lifecycle_test.go`, and `plugin/suspend_test.go`.", "Verification passed: `cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./...`; focused execution/plugin tests; focused execution/plugin race tests; go vet; gofmt; git diff --check.", "Architect early review APPROVED the contracts→execution alias as an existing ADR-0006 direction. User chose `Implement rotation now`, so the AttemptID observation is tracked under T-076 and ADR 0010.", "Report `.agents/reports/T034-TESTS.md` records test coverage and exact outcomes.", "Final architect and security sign-offs APPROVE; final reviewer APPROVE; integration gate passed."]
+    reports: [".agents/reports/T034-TESTS.md"]
+    open_risks: []
+    commit: 7f90416
+
+  - id: T-076
+    objective: "Rotate the per-invocation attempt ID atomically with resolved waits and retries"
+    scope:
+      - "nore/internal/contracts/**"
+      - "nore/internal/execution/**"
+      - "nore/internal/plugin/**"
+      - ".agents/decisions/**"
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect, security]
+    dependencies: [T-075]
+    acceptance:
+      - "An ADR records attempt identity semantics, key derivation changes, compatibility, and rollback before implementation"
+      - "A resumed or retried invocation carries a new attempt ID and the unchanged logical operation ID"
+      - "Timer, dispatch-intent, and wait keys are not invalidated by rotation or are migrated atomically"
+      - "Snapshot compatibility is preserved and duplicate/replayed deliveries remain idempotent"
+      - "Boundary and scheduler tests prove rotation, stable logical identity, and no duplicate dispatch"
+    verification:
+      - "cd nore && GOWORK=off go build ./... && GOWORK=off go test -run '^$' ./..."
+      - "cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/plugin/..."
+      - "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/plugin/..."
+      - "gofmt -l <changed Go files>; git diff --check"
+    status: done
+    lease: null
+    evidence: ["User explicitly chose `Implement rotation now` after architecture review found that resume currently reuses the persisted AttemptID while the capability-runtime protocol requires a fresh per-invocation attempt ID.", "Architect created `.agents/decisions/0010-per-invocation-attempt-identity.md`; coordinator adopted it as the governing design on 2026-11-26 and updated its status to accepted.", "Coder implemented one private domain rotation helper; rotation occurs once on wait resolution/retry/reservation recovery and never on wait entry, with LogicalOperationID unchanged. Scheduler captures pre-rotation IDs for timer deletes and post-rotation IDs for new intents; engine snapshots wire IDs and claim/completion generation once.", "Focused execution/plugin tests and race tests passed after implementation: `cd nore && GOWORK=off go test -count=1 ./internal/execution/... ./internal/plugin/...` and `GOWORK=off go test -race -count=1 ./internal/execution/... ./internal/plugin/...` were clean; build and git diff --check passed.", "Final reviewer, architect, and security sign-offs APPROVE; docs state capability-side dedupe uses logical_operation_id + delivery_id, not attempt_id; integration gate passed."]
+    reports: [".agents/decisions/0010-per-invocation-attempt-identity.md"]
+    open_risks: []
+    commit: a0e3649
+
+  - id: T-077
+    objective: "Synchronize AttemptID reads with domain rotation"
+    scope: ["nore/internal/execution/accessors.go", "nore/internal/execution/engine/executor_engine.go", "nore/internal/execution/engine/**"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: [T-076]
+    acceptance:
+      - "A locked AttemptIdentity accessor is used for every engine AttemptID read"
+      - "A race test rotates from another goroutine while claim/wire identity is captured"
+    verification: ["cd nore && GOWORK=off go test -race -count=1 ./internal/execution/...", "gofmt -l <changed files>; git diff --check"]
+    status: done
+    lease: null
+    evidence: ["Final-review verification confirmed `executor_engine.go:239-240,337-345` read `Execution.AttemptID` without the domain lock while rotation writes at `execution.go:279-281` are locked.", "Coder added locked `Execution.AttemptIdentity()` and used it for engine wire/claim capture; race test and full `go test -race -count=1 ./internal/execution/...` passed. Mutation check reproduced the race with the old read.", "Reviewer APPROVED T-077: locked accessor used at every engine read, race test meaningful, in scope.", "Architect and security final sign-offs APPROVE; integration gate passed."]
+    reports: []
+    open_risks: []
+    commit: 5d3d247
+
+  - id: T-078
+    objective: "Normalize capability-runtime identity context values and prove the wire mapping"
+    scope: ["nore/internal/plugin/**", "nore/internal/mechanism/process/**"]
+    owner: coder
+    reviewer: reviewer
+    signoff: [security]
+    dependencies: [T-076]
+    acceptance:
+      - "Plugin stores plain string attempt/logical IDs so process worker type assertions succeed"
+      - "Boundary tests prove ExecuteRequest attempt and logical IDs equal the execution context values"
+    verification: ["cd nore && GOWORK=off go test -count=1 ./internal/plugin/... ./internal/mechanism/process/...", "cd nore && GOWORK=off go test -race -count=1 ./internal/plugin/...", "gofmt -l <changed files>; git diff --check"]
+    status: done
+    lease: null
+    evidence: ["Final-review verification found `plugin.go:215-216` stores `core.ID`, while `process/worker.go:612-624` asserts `.(string)` and silently sends empty wire IDs.", "Coder converted plugin context identity values to plain strings and added plugin/process boundary tests. Focused tests, race test, vet, gofmt, and git diff --check passed; pre-fix reproduction failed as expected.", "Reviewer APPROVED T-078: plain-string conversion correct, wire tests meaningful, no protocol change.", "Security final sign-off APPROVE; architect final sign-off APPROVE; integration gate passed. Duplicated context-key literals are non-blocking."]
+    reports: [".agents/reports/T-037.md"]
+    open_risks: []
+    commit: 5d3d247
+
+  - id: T-079
+    objective: "Complete resume identity evidence and deterministic duplicate timer fencing proof"
+    scope: ["application/internal/acceptance/**", "nore/internal/execution/scheduler/**"]
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: [architect]
+    dependencies: [T-030, T-076, T-078]
+    acceptance:
+      - "Fixture exposes attempt and logical IDs on resumed execution"
+      - "R5-22/R5-23 assert fresh attempt and stable logical operation ID end to end"
+      - "The nondeterministic duplicate-timer acceptance test is removed"
+      - "A scheduler test deterministically proves one ready event and one dispatch intent under two timer pollers with stale-lease takeover"
+    verification: ["cd application && GOWORK=off go test -count=1 -timeout 15m ./internal/acceptance/...", "cd nore && GOWORK=off go test -race -count=1 ./internal/execution/scheduler/...", "gofmt -l <changed files>; git diff --check"]
+    status: done
+    lease: null
+    evidence: ["Final-review verification confirmed ADR 0010 D6 identity evidence is absent and duplicate-timer acceptance coverage is missing.", "Fixture converted to the Go gRPC capability SDK; R5-22/R5-23 identity assertions passed after the fixture module environment was corrected.", "The two-runtime public acceptance trigger was removed after reproducing a non-deterministic 45s/92.44s timeout; decision 0011 moved the proof to the scheduler boundary.", "Deterministic `TestTwoPollersWithStaleTimerLeaseCommitOneResume` uses two store views with independent Adopt caches, a 1ms no-renew first claim, and a gated stale commit; it asserts one CapabilityReady event, one fenced timer delete, distinct fence owners, and one claimable dispatch intent at the resumed attempt.", "Focused `-race` and `-count=50` passed; full scheduler `-race` and full acceptance suite passed; final reviewer, architect, and security sign-offs APPROVE."]
+    reports: [".agents/reports/T-079.md", ".agents/decisions/0011-r5-24-duplicate-timer-proof-boundary.md"]
+    open_risks: ["Acceptance-level duplicate-timer delivery is intentionally unproven and out of scope; scheduler-boundary fencing proof is authoritative."]
+    commit: 5d3d247
+
+  - id: T-080
+    objective: "Apply the remaining audited TODO closure edits"
+    scope: ["todos/TODO.md"]
+    owner: documenter
+    reviewer: reviewer
+    signoff: [documenter]
+    dependencies: [T-030, T-074]
+    acceptance: ["All exact checkbox and stale-text edits from the T031 audit are applied with evidence-based wording"]
+    verification: ["git diff -- todos/TODO.md", "git diff --check"]
+    status: done
+    lease: null
+    evidence: ["Previous documenter edits updated prose files but did not modify `todos/TODO.md`; stale F5-3/F5-6 and open R5-22..27 text remains.", "Documenter applied audited TODO closure edits and corrected the R5-24 evidence to cite T-079 scheduler-boundary proof and decision 0011; `git diff -- todos/TODO.md` and `git diff --check` passed.", "Final documenter and reviewer sign-offs APPROVE; final gate pass recorded without claiming PostgreSQL parity."]
+    reports: [".agents/reports/T-039-docs.md", ".agents/reports/T-080-docs.md", ".agents/reports/FINAL-SIGNOFF-DOCS-docs.md"]
+    open_risks: []
+    commit: 5d3d247
+
+  - id: T-081
+    objective: "Make the converted suspend fixture pass the project validation script"
+    scope: ["application/internal/acceptance/**", "packages/assembly-sdks/typescript/neuronruntime-sdk-0.1.0.tgz"]
+    owner: bugfixer
+    reviewer: reviewer
+    signoff: []
+    dependencies: [T-079]
+    acceptance:
+      - "`./scripts/script.sh` passes with the gRPC suspend fixture"
+      - "Generated TypeScript SDK tarball is not left as an untracked artifact"
+    verification: ["./scripts/script.sh", "git status --short --branch"]
+    status: done
+    lease: null
+    evidence: ["Full validation failed after T-079: four acceptance tests reported `main module (github.com/neuron-runtime/neuron/application) does not contain package .../testdata/suspendruntime`.", "Root cause: the standalone fixture build inherited ambient `GOWORK`; `build.sh` now sets `GOWORK=off`, with a regression test that fails before the fix.", "Coordinator reran `./scripts/script.sh`: exact final output `All modules built and tested successful.` Generated SDK tarball absent; reviewer initially required committed `go.sum`, which is now included in `5d3d247`. Security sign-off APPROVE."]
+    reports: [".agents/reports/T-081.md"]
+    open_risks: []
+    commit: 5d3d247
