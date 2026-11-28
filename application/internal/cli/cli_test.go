@@ -1,7 +1,4 @@
-
-	stubProjectBuild(t)
-	stubProjectBuild(t)
-	stubProjectBuild(t)package cli
+package cli
 
 import (
 	"encoding/json"
@@ -158,6 +155,7 @@ func TestBareNeuronBuildsBeforeRuntime(t *testing.T) {
 // flag to the runtime it starts. Durability is rejected in the project file, so
 // the flag and environment are the only authoring surfaces that must reach nore.
 func TestProjectRuntimeReceivesDurability(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	argsFile := filepath.Join(dir, "nore-args.txt")
@@ -206,6 +204,7 @@ func TestProjectRuntimeReceivesDurability(t *testing.T) {
 // travels with the runtime, because a configuration the runtime never
 // receives is a promise the runtime never keeps.
 func TestProjectRuntimeReceivesTheBuiltinPolicy(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	argsFile := filepath.Join(dir, "nore-args.txt")
@@ -272,6 +271,7 @@ func TestProjectRuntimeReceivesTheBuiltinPolicy(t *testing.T) {
 // surface that must actually reach the runtime. Without explicit forwarding,
 // the denial message would name a global config that the runtime never sees.
 func TestProjectRuntimeReceivesOperationalPolicy(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	// Point the global config at a temp file. os.UserConfigDir honours
