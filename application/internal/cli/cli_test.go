@@ -1,4 +1,7 @@
-package cli
+
+	stubProjectBuild(t)
+	stubProjectBuild(t)
+	stubProjectBuild(t)package cli
 
 import (
 	"encoding/json"
@@ -7,7 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/neuron-runtime/neuron/application/internal/cli/build"
+	"github.com/spf13/cobra"
 )
+
+func stubProjectBuild(t *testing.T) {
+	t.Helper()
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(*cobra.Command, build.Options) error { return nil }
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+}
 
 // TestBareNeuronRefusesOutsideProject pins the bare `neuron` command to
 // project directories only. The command starts the project runtime, so
@@ -87,6 +100,57 @@ func TestUndocumentedCapabilityListIsNotACommand(t *testing.T) {
 	}
 	if len(rest) == 0 {
 		t.Errorf("capability list resolved to %q with no remaining args; the list command must live under capability runtime", cmd.Use)
+	}
+}
+
+// TestBareNeuronBuildsBeforeRuntime proves bare `neuron` invokes the shared
+// build pipeline before launching the foreground runtime and forwards --force.
+func TestBareNeuronBuildsBeforeRuntime(t *testing.T) {
+	dir := t.TempDir()
+	eventsFile := filepath.Join(dir, "events.txt")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nprintf 'runtime\\n' >> " + eventsFile + "\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(_ *cobra.Command, opts build.Options) error {
+		if opts.Root != dir {
+			t.Errorf("build root = %q, want %q", opts.Root, dir)
+		}
+		if !opts.Force {
+			t.Error("bare neuron did not forward --force to the build pipeline")
+		}
+		return os.WriteFile(eventsFile, []byte("build\n"), 0o644)
+	}
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore, "--force"})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("bare neuron: %v", err)
+	}
+
+	data, err := os.ReadFile(eventsFile)
+	if err != nil {
+		t.Fatalf("read event order: %v", err)
+	}
+	if got, want := string(data), "build\nruntime\n"; got != want {
+		t.Fatalf("event order = %q, want %q", got, want)
 	}
 }
 
