@@ -199,6 +199,18 @@ describe("Capability schemas", () => {
   });
 });
 
+describe("CapabilityDefinition manifest snapshots", () => {
+  it("does not expose mutable internal port rules through toManifest", () => {
+    const capability = Capability("read")
+      .resultSchema({ content: string().min(3) });
+
+    const first = capability.toManifest();
+    first.results[0]!.rules!.minLength = 99;
+
+    expect(capability.toManifest().results[0]?.rules?.minLength).toBe(3);
+  });
+});
+
 describe("Capability.withParams()", () => {
   it("returns an immutable composition node with bindings", () => {
     const svc = Capability("github.read")
