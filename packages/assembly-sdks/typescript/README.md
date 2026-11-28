@@ -381,22 +381,28 @@ const sys = Assembly().run([
 // toManifest() succeeds; manifest carries two bindings from a and b respectively.
 ```
 
-### Fan-in with shared target path
+### Fan-in to a shared target field
 
-When multiple sources contribute to the **same** target field path, the SDK now allows it — each source emits its own binding with its own mappings, and the runtime merges all inputs before dispatch. This enables patterns like collecting multiple independent results into a single capability:
+Multiple sources may contribute to the same target field. Neuron treats these as
+separate inputs to the target's join; it does not add, concatenate, or otherwise
+combine the values automatically. JavaScript arithmetic such as `a.result.value + b.result.value`
+is not an Assembly mapping expression.
+
+For an aggregation, define a capability whose executor implements that operation
+and pass each source as a separate parameter:
 
 ```ts
-const target = Capability("target").paramsSchema({ count: number() });
 const a = Capability("a").resultSchema({ value: number() });
 const b = Capability("b").resultSchema({ value: number() });
+const sum = Capability("values.sum")
+  .runtime({ name: "my:sum" })
+  .paramsSchema({ left: number().required(), right: number().required() });
 
 const sys = Assembly().run([
   a.withParams({}),
   b.withParams({}),
-  target.withParams({ count: a.result.value + b.result.value }),
+  sum.withParams({ left: a.result.value, right: b.result.value }),
 ]);
-// toManifest() succeeds with two bindings from a and b, both mapping to `count`.
-// The runtime merges both `value` inputs before the target executes.
 ```
 
 Fan-out still works as before — multiple capabilities reading from the same source
@@ -443,6 +449,43 @@ const manifest = Assembly()
 
 export default manifest;
 ```
+
+### `.withParams()` vs `.run()`
+
+| Method | Use when |
+| --- | --- |
+| `.withParams((data) => ...)` | The assembly receives typed input that feeds into the first capability |
+| `.run(firstCapability.withParams({...}))` | The first capability has all its inputs resolved at build time (no runtime input) |
+
+`.withParams()` calls `.run()` internally — the difference is purely ergonomic. The `data` parameter is typed by the preceding `.paramsSchema<T>()` and compiled into `execution.params` references in the manifest. Both accept a single composition, a single capability invocation, or an array of independent entries.
+
+### Declaring the Assembly output
+
+Use `.resultSchema(...)` to declare the public output contract and `.result(...)`
+to map every required output field to a capability result, an Assembly input, or
+a literal. Make one `.result({...})` call containing the complete mapping:
+
+```ts
+const assembly = Assembly()
+  .paramsSchema<{ orderId: string }>()
+  .resultSchema({
+    orderId: string().required(),
+    status: string().required(),
+  })
+  .withParams((params) => validateOrder.withParams({ id: params.orderId }))
+  .result({
+    orderId: assemblyParams.orderId,
+    status: validateOrder.result.status,
+  });
+```
+
+The schema-builder form emits runtime port types and validation rules. The
+type-only form, `.resultSchema<MyResult>()`, preserves TypeScript checking for
+the mapping but TypeScript types are erased at build time: the SDK emits
+`any` ports for the mapped fields, so the runtime cannot validate their
+specific types. Use the schema-builder form when runtime validation matters.
+Calling `.result()` without first declaring `.resultSchema()`, omitting a
+required field, or mapping an undeclared field produces a clear build error.
 
 ### `.withParams()` vs `.run()`
 
@@ -609,7 +652,7 @@ Tests live in `packages/assembly-sdks/typescript/test/` and cover capabilities, 
 - Current version: **0.1.0**
 - The public API surface listed above is treated as a contract; changes are tracked and documented
 - The SDK is developed in this monorepo and consumed from source via `pnpm install`
-- Language target: modern Node.js with full TypeScript 5.x support; the SDK builds to ESM and CJS
+- Language target: modern Node.js with full TypeScript 5.x support; the SDK builds to ESM
 
 ## License
 
