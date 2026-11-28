@@ -79,7 +79,7 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
    * the typed result ports that every `.result({...})` field must be declared
    * against.
    */
-  resultSchema<T extends object>(): AssemblyDefinition<TParams, T>;
+  resultSchema<T extends object = never>(): AssemblyDefinition<TParams, T>;
   resultSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<TParams, InferSchema<S>>;
   resultSchema(schema?: SchemaObject): AssemblyDefinition<TParams, any> {
     if (this._resultSchemaMode !== "none") {
