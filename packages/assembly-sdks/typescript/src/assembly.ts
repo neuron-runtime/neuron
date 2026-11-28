@@ -26,7 +26,7 @@ export type Runnable<TParams extends object = object> =
   | Runnable<TParams>[];
 
 type RequiredResultKeys<T extends object> = {
-  [K in keyof T]-?: undefined extends T[K] ? never : K;
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
 }[keyof T];
 
 type OptionalResultKeys<T extends object> = Exclude<keyof T, RequiredResultKeys<T>>;
@@ -37,7 +37,7 @@ type OptionalResultKeys<T extends object> = Exclude<keyof T, RequiredResultKeys<
  */
 export type AssemblyResultBindings<T extends object> =
   keyof T extends never ? never : {
-    [K in RequiredResultKeys<T>]: ParamValue<T[K]>;
+    [K in RequiredResultKeys<T>]: ParamValue<Exclude<T[K], undefined>>;
   } & {
     [K in OptionalResultKeys<T>]?: ParamValue<Exclude<T[K], undefined>>;
   };
