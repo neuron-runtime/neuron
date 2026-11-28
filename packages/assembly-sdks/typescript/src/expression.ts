@@ -2,7 +2,7 @@ declare const expressionBrand: unique symbol;
 
 import type { ValueRefManifest } from "./manifest.js";
 
-type OrderingOperators<T> = T extends string | number ? {
+type OrderingOperators<T> = T extends number ? {
   greaterThan(value: T): Expression<boolean>;
   greaterThanOrEqualTo(value: T): Expression<boolean>;
   lessThan(value: T): Expression<boolean>;
