@@ -47,7 +47,6 @@ describe("schema → manifest conversion", () => {
       },
     ]);
   });
-});
 
   it("snapshots mutable schema builder rules", () => {
     const field = string().min(3);
@@ -64,6 +63,7 @@ describe("schema → manifest conversion", () => {
       minLength: 3,
     });
   });
+});
 
 describe("Infer type utility", () => {
   it("extracts field types from a schema object", () => {
