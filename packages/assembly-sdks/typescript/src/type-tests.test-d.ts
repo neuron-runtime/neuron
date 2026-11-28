@@ -172,6 +172,27 @@ typedAssemblyResult.result({ summary: 42, sha: "abc" });
 // @ts-expect-error undeclared assembly result fields are rejected.
 typedAssemblyResult.result({ summary: "ok", sha: "abc", extra: true });
 
+type UndefinedValueResult = { requiredValue: string | undefined; optionalValue?: string };
+const resultWithUndefined = Assembly().resultSchema<UndefinedValueResult>();
+resultWithUndefined.result({ requiredValue: "present" });
+
+// @ts-expect-error a required property remains required even if its value includes undefined.
+resultWithUndefined.result({ optionalValue: "optional" });
+
+// @ts-expect-error undefined is not a valid mapped result value.
+resultWithUndefined.result({ requiredValue: undefined });
+
+const paramsWithUndefined = Capability("params-with-undefined").paramsSchema<{
+    requiredValue: string | undefined;
+}>();
+
+// @ts-expect-error a required capability parameter cannot be omitted.
+paramsWithUndefined.withParams({});
+paramsWithUndefined.withParams({ requiredValue: "present" });
+
+// @ts-expect-error undefined is not a valid capability parameter binding.
+paramsWithUndefined.withParams({ requiredValue: undefined });
+
 const runtimeAssemblyResult = Assembly().resultSchema({
     name: string().required(),
     count: number().required(),
