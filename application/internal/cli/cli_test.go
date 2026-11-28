@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -148,6 +149,47 @@ func TestBareNeuronBuildsBeforeRuntime(t *testing.T) {
 	}
 	if got, want := string(data), "build\nruntime\n"; got != want {
 		t.Fatalf("event order = %q, want %q", got, want)
+	}
+}
+
+// TestBareNeuronStopsWhenTheBuildFails ensures an invalid Assembly cannot
+// leave the foreground runtime running with a stale previously built artifact.
+func TestBareNeuronStopsWhenTheBuildFails(t *testing.T) {
+	dir := t.TempDir()
+	runtimeStarted := filepath.Join(dir, "runtime-started")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nprintf 'started' > " + runtimeStarted + "\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(*cobra.Command, build.Options) error {
+		return errors.New("assembly result mapping is invalid")
+	}
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	err = RootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "assembly result mapping is invalid") {
+		t.Fatalf("bare neuron error = %v, want build error", err)
+	}
+	if _, statErr := os.Stat(runtimeStarted); !os.IsNotExist(statErr) {
+		t.Fatalf("runtime was started despite build failure (stat error: %v)", statErr)
 	}
 }
 
