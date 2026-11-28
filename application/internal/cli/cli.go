@@ -34,8 +34,8 @@ var buildProjectBeforeRun = build.ExecuteWith
 
 var RootCmd = &cobra.Command{
 	Use:     command.Neuron,
-	Short: "Build the project and start its foreground runtime.",
-	Long: "With no subcommand, Neuron builds and registers the project's Assemblies using the same pipeline as `neuron build`, then starts the foreground project runtime. Use `neuron build` to build and register without starting that runtime.",
+	Short:   "Build the project and start its foreground runtime.",
+	Long:    "With no subcommand, Neuron builds and registers the project's Assemblies using the same pipeline as `neuron build`, then starts the foreground project runtime. Use `neuron build` to build and register without starting that runtime.",
 	Version: buildversion.String(),
 	RunE:    runProjectRuntime,
 }
