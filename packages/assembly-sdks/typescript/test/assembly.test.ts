@@ -3,6 +3,7 @@ import { Assembly } from "../src/assembly.js";
 import { Capability } from "../src/capability.js";
 import { connect } from "../src/connection.js";
 import { string, number, boolean, record } from "../src/schema.js";
+import { http } from "../src/core.js";
 import { createExecutionContext, createSourceContext } from "../src/expression.js";
 
 describe("Assembly", () => {
@@ -300,12 +301,75 @@ describe("Assembly result contract", () => {
     const validate = Capability("validate").resultSchema({ valid: boolean() });
     const sys = Assembly()
       .resultSchema({ declared: boolean() })
-      .run(validate.withParams({}))
-      .result({ undeclared: validate.result.valid });
+      .run(validate.withParams({}));
+
+    expect(() => (sys as any).result({ undeclared: validate.result.valid })).toThrow(
+      'Assembly result field "undeclared" is not declared by .resultSchema(...)'
+    );
+  });
+
+  it("requires a result schema before accepting result mappings at runtime", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const sys = Assembly().run(validate.withParams({}));
+
+    expect(() => (sys as any).result({ valid: validate.result.valid })).toThrow(
+      "Cannot declare Assembly result mappings before a result schema"
+    );
+  });
+
+  it("requires mappings for required schema fields", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const sys = Assembly()
+      .resultSchema({ status: string().required(), note: string() })
+      .run(validate.withParams({}));
+
+    expect(() => (sys as any).result({ note: "optional note" })).toThrow(
+      'Assembly result schema marks "status" as required'
+    );
+  });
+
+  it("requires a result mapping when a result schema is declared", () => {
+    const validate = Capability("validate").resultSchema({ valid: boolean() });
+    const sys = Assembly()
+      .resultSchema({ valid: boolean() })
+      .run(validate.withParams({}));
 
     expect(() => sys.toManifest()).toThrow(
-      'the assembly result schema declares no field named "undeclared"'
+      "Assembly result schema was declared but no result mapping was provided"
     );
+  });
+
+  it("supports type-only Assembly result schemas and emits any ports", () => {
+    type Output = { statusCode: number; message: string };
+    const producer = Capability("producer").resultSchema<Output>();
+    const manifest = Assembly()
+      .resultSchema<Output>()
+      .run(producer.withParams({}))
+      .result({
+        statusCode: producer.result.statusCode,
+        message: producer.result.message,
+      })
+      .toManifest();
+
+    expect(manifest.result?.schema).toEqual([
+      { name: "statusCode", type: "any", required: true },
+      { name: "message", type: "any", required: true },
+    ]);
+  });
+
+  it("allows references to runtime-owned built-in result contracts", () => {
+    const request = http("request");
+    const manifest = Assembly()
+      .resultSchema({ statusCode: number().required() })
+      .run(request.withParams({ url: "https://example.com" }))
+      .result({ statusCode: request.result.status_code })
+      .toManifest();
+
+    expect(manifest.capabilities[0]?.results).toEqual([]);
+    expect(manifest.result?.fields[0]).toEqual({
+      name: "statusCode",
+      source: { kind: "capabilityResult", capability: "request", path: ["status_code"] },
+    });
   });
 
   it("rejects unqualified source.* references in the result contract", () => {
@@ -315,7 +379,7 @@ describe("Assembly result contract", () => {
 
     const sys = Assembly().resultSchema({ email: string() }).run(validate.withParams({}));
     expect(() => sys.result({ email: source.result.email })).toThrow(/source\.\*/);
-    expect(() => sys.result({ id: exec.params.order.id })).not.toThrow();
+    expect(() => sys.result({ email: exec.params.order.id })).not.toThrow();
   });
 
   it("detects a capability referenced by the result contract but missing from the run", () => {
