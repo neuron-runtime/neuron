@@ -13,7 +13,7 @@ import {
   type CapabilityComposition,
   type ParamValue,
 } from "./capability.js";
-import { cloneFieldRules, schemaToManifest, type InferSchema, type SchemaObject } from "./schema.js";
+import { cloneFieldRules, schemaToManifest, type FieldRules, type InferSchema, type SchemaObject } from "./schema.js";
 
 // A value that produces one or more flat capability invocations. Edges between
 // them are derived at compilation time from the data each node references;
@@ -290,7 +290,7 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
 function clonePortManifest(port: PortManifest): PortManifest {
   return {
     ...port,
-    rules: port.rules ? cloneFieldRules(port.rules) : undefined,
+    rules: port.rules ? cloneFieldRules(port.rules as FieldRules) : undefined,
   };
 }
 
