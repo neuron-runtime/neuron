@@ -72,6 +72,18 @@ Bare `neuron` is the project's development entry point: it runs the same build a
 
 ## Command Reference
 
+### `neuron`
+
+Build and register the current project's Assemblies, then start its foreground runtime.
+
+```bash
+neuron
+```
+
+This runs the same build pipeline as `neuron build` before starting N.O.R.E. Use
+`neuron build` alone when you want to build and register without leaving the
+foreground runtime running.
+
 ### `neuron version`
 
 Print the Neuron CLI version.
