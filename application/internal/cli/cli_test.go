@@ -2,12 +2,23 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/neuron-runtime/neuron/application/internal/cli/build"
+	"github.com/spf13/cobra"
 )
+
+func stubProjectBuild(t *testing.T) {
+	t.Helper()
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(*cobra.Command, build.Options) error { return nil }
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+}
 
 // TestBareNeuronRefusesOutsideProject pins the bare `neuron` command to
 // project directories only. The command starts the project runtime, so
@@ -90,10 +101,103 @@ func TestUndocumentedCapabilityListIsNotACommand(t *testing.T) {
 	}
 }
 
+// TestBareNeuronBuildsBeforeRuntime proves bare `neuron` invokes the shared
+// build pipeline before launching the foreground runtime and forwards --force.
+func TestBareNeuronBuildsBeforeRuntime(t *testing.T) {
+	dir := t.TempDir()
+	eventsFile := filepath.Join(dir, "events.txt")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nprintf 'runtime\\n' >> " + eventsFile + "\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(_ *cobra.Command, opts build.Options) error {
+		if opts.Root != dir {
+			t.Errorf("build root = %q, want %q", opts.Root, dir)
+		}
+		if !opts.Force {
+			t.Error("bare neuron did not forward --force to the build pipeline")
+		}
+		return os.WriteFile(eventsFile, []byte("build\n"), 0o644)
+	}
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore, "--force"})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	if err := RootCmd.Execute(); err != nil {
+		t.Fatalf("bare neuron: %v", err)
+	}
+
+	data, err := os.ReadFile(eventsFile)
+	if err != nil {
+		t.Fatalf("read event order: %v", err)
+	}
+	if got, want := string(data), "build\nruntime\n"; got != want {
+		t.Fatalf("event order = %q, want %q", got, want)
+	}
+}
+
+// TestBareNeuronStopsWhenTheBuildFails ensures an invalid Assembly cannot
+// leave the foreground runtime running with a stale previously built artifact.
+func TestBareNeuronStopsWhenTheBuildFails(t *testing.T) {
+	dir := t.TempDir()
+	runtimeStarted := filepath.Join(dir, "runtime-started")
+	fakeNore := filepath.Join(dir, "nore")
+	script := "#!/bin/sh\nprintf 'started' > " + runtimeStarted + "\n"
+	if err := os.WriteFile(fakeNore, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "neuron.config.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write project configuration: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	previous := buildProjectBeforeRun
+	buildProjectBeforeRun = func(*cobra.Command, build.Options) error {
+		return errors.New("assembly result mapping is invalid")
+	}
+	t.Cleanup(func() { buildProjectBeforeRun = previous })
+
+	RootCmd.SetArgs([]string{"--nore-path", fakeNore})
+	RootCmd.SetOut(io.Discard)
+	RootCmd.SetErr(io.Discard)
+	err = RootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "assembly result mapping is invalid") {
+		t.Fatalf("bare neuron error = %v, want build error", err)
+	}
+	if _, statErr := os.Stat(runtimeStarted); !os.IsNotExist(statErr) {
+		t.Fatalf("runtime was started despite build failure (stat error: %v)", statErr)
+	}
+}
+
 // TestProjectRuntimeReceivesDurability pins the deployment-level durability
 // flag to the runtime it starts. Durability is rejected in the project file, so
 // the flag and environment are the only authoring surfaces that must reach nore.
 func TestProjectRuntimeReceivesDurability(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	argsFile := filepath.Join(dir, "nore-args.txt")
@@ -142,6 +246,7 @@ func TestProjectRuntimeReceivesDurability(t *testing.T) {
 // travels with the runtime, because a configuration the runtime never
 // receives is a promise the runtime never keeps.
 func TestProjectRuntimeReceivesTheBuiltinPolicy(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	argsFile := filepath.Join(dir, "nore-args.txt")
@@ -208,6 +313,7 @@ func TestProjectRuntimeReceivesTheBuiltinPolicy(t *testing.T) {
 // surface that must actually reach the runtime. Without explicit forwarding,
 // the denial message would name a global config that the runtime never sees.
 func TestProjectRuntimeReceivesOperationalPolicy(t *testing.T) {
+	stubProjectBuild(t)
 	dir := t.TempDir()
 
 	// Point the global config at a temp file. os.UserConfigDir honours

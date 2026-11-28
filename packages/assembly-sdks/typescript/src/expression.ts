@@ -2,19 +2,25 @@ declare const expressionBrand: unique symbol;
 
 import type { ValueRefManifest } from "./manifest.js";
 
-export interface Expression<T = unknown> {
-  readonly [expressionBrand]: T;
-  equals(value: T): Expression<boolean>;
-  notEquals(value: T): Expression<boolean>;
+type OrderingOperators<T> = T extends number ? {
   greaterThan(value: T): Expression<boolean>;
   greaterThanOrEqualTo(value: T): Expression<boolean>;
   lessThan(value: T): Expression<boolean>;
   lessThanOrEqualTo(value: T): Expression<boolean>;
+} : {};
+
+type BooleanOperators<T> = T extends boolean ? {
   and(other: Expression<boolean>): Expression<boolean>;
   or(other: Expression<boolean>): Expression<boolean>;
+} : {};
+
+export type Expression<T = unknown> = {
+  readonly [expressionBrand]: T;
+  equals(value: T): Expression<boolean>;
+  notEquals(value: T): Expression<boolean>;
   toString(): string;
   valueOf(): string;
-}
+} & OrderingOperators<T> & BooleanOperators<T>;
 
 type Primitive = string | number | boolean | bigint | null | undefined;
 

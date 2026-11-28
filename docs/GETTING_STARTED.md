@@ -4,9 +4,9 @@ This guide takes you from a fresh checkout to a running assembly in about fiftee
 
 Assemblies can be authored in **any programming language that produces the Neuron Assembly manifest** (the canonical representation). Today, **TypeScript** and **YAML** are first-class authoring surfaces; this guide uses TypeScript.
 
-No prior Neuron knowledge is assumed: building, validation, compilation, and module resolution are all automatic — the one manual step is starting the project runtime that hosts executions.
+No prior Neuron knowledge is assumed: building, validation, compilation, and module resolution are automatic. Running bare `neuron` performs the build and registration first, then starts the project runtime that hosts executions.
 
-The workflow has four steps: author the assembly, `neuron build` to compile and freeze it, start the project runtime with `neuron`, and `neuron run` to execute it.
+The workflow has three steps: author the assembly, run `neuron` to build/register it and start the project runtime, then use `neuron run` to execute it. Use `neuron build` when you want to build/register without starting the foreground runtime.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ The workflow has four steps: author the assembly, `neuron build` to compile and 
   pnpm build:sdk
   ```
 
-  No daemon setup is required. `neuron build` starts and stops the local runtime it needs for registration itself; running an assembly uses the project runtime that bare `neuron` hosts for you.
+  No daemon setup is required. The build pipeline starts and stops the local runtime it needs for registration itself; bare `neuron` then starts the project's foreground runtime.
 
 ---
 
@@ -36,10 +36,10 @@ The repository ships a minimal assembly in `examples/hello`. It defines one capa
 
 ```bash
 cd examples/hello
-neuron build
+neuron
 ```
 
-`neuron build` runs the whole authoring pipeline in one step:
+Bare `neuron` first runs the same build pipeline as `neuron build`, then starts the foreground project runtime. The build pipeline:
 
 1. **Build** — the TypeScript assembly is compiled into the canonical manifest (`.neuron/assemblies/<name>/manifest.json`).
 2. **Compile** — the manifest is compiled into a runtime assembly representation.
@@ -54,11 +54,7 @@ hello@1.0.0#<key>:development
 
 Registration is self-contained: `neuron build` starts the local runtime it needs, registers the assembly, and stops it again.
 
-Now run it. `neuron run` is a client of the **project runtime** — the process bare `neuron` hosts for the current project. Start it in one terminal, from the example directory:
-
-```bash
-neuron
-```
+Bare `neuron` has completed the build and is now hosting the **project runtime**. Leave it running. In a second terminal, from the same directory, execute the assembly:
 
 ```text
 Neuron project runtime started on http://localhost:45387
@@ -66,7 +62,7 @@ Project root: .../examples/hello
 Press Ctrl-C to stop
 ```
 
-Leave it running. In a second terminal, from the same directory, execute the assembly. It expects `{ "name": "..." }`, so pass one explicitly:
+The assembly expects `{ "name": "..." }`, so pass one explicitly:
 
 ```bash
 neuron run --params '{"name":"World"}'

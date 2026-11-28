@@ -2,6 +2,8 @@ package typescript
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/neuron-runtime/neuron/application/process"
 )
@@ -21,8 +23,13 @@ func (l *TSLoader) Build() error {
 }
 
 func (l *TSLoader) BuildContext(ctx context.Context) error {
-	if _, err := l.process.RunContext(ctx); err != nil {
-		return err
+	output, err := l.process.RunContext(ctx)
+	if err != nil {
+		diagnostic := strings.TrimSpace(output)
+		if diagnostic == "" {
+			return fmt.Errorf("run TypeScript SDK build: %w", err)
+		}
+		return fmt.Errorf("run TypeScript SDK build: %w\nSDK output:\n%s", err, diagnostic)
 	}
 	return nil
 }

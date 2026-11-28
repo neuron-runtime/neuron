@@ -13,7 +13,7 @@ import {
   type CapabilityComposition,
   type ParamValue,
 } from "./capability.js";
-import { schemaToManifest, type InferSchema, type SchemaObject } from "./schema.js";
+import { cloneFieldRules, schemaToManifest, type FieldRules, type InferSchema, type SchemaObject } from "./schema.js";
 
 // A value that produces one or more flat capability invocations. Edges between
 // them are derived at compilation time from the data each node references;
@@ -25,16 +25,42 @@ export type Runnable<TParams extends object = object> =
   | CapabilityComposition
   | Runnable<TParams>[];
 
-export class AssemblyDefinition<TParams extends object = object> {
+type RequiredResultKeys<T extends object> = {
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
+}[keyof T];
+
+type OptionalResultKeys<T extends object> = Exclude<keyof T, RequiredResultKeys<T>>;
+
+/**
+ * Result mappings follow the declared result object: required fields must be
+ * mapped, optional fields may be omitted, and every value must match its field.
+ */
+export type AssemblyResultBindings<T extends object> =
+  keyof T extends never ? never : {
+    [K in RequiredResultKeys<T>]: ParamValue<Exclude<T[K], undefined>>;
+  } & {
+    [K in OptionalResultKeys<T>]?: ParamValue<Exclude<T[K], undefined>>;
+  };
+
+type MissingResultSchema = {
+  readonly __resultSchemaRequired:
+    "Call .resultSchema<ResultType>() or .resultSchema({...}) before .result({...}).";
+};
+
+type ResultArgument<T extends object> =
+  [T] extends [never] ? MissingResultSchema : AssemblyResultBindings<T>;
+
+export class AssemblyDefinition<TParams extends object = object, TResult extends object = never> {
   private _nodes: CapabilityComposition[] = [];
   private _paramPorts: PortManifest[] = [];
   private _resultPorts: PortManifest[] = [];
   private _resultFields: AssemblyResultFieldManifest[] = [];
+  private _resultSchemaMode: "none" | "typed" | "runtime" = "none";
 
-  paramsSchema<T extends object>(): AssemblyDefinition<T>;
-  paramsSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<InferSchema<S>>;
-  paramsSchema(schema?: SchemaObject): AssemblyDefinition<object> {
-    const next = new AssemblyDefinition<object>();
+  paramsSchema<T extends object>(): AssemblyDefinition<T, TResult>;
+  paramsSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<InferSchema<S>, TResult>;
+  paramsSchema(schema?: SchemaObject): AssemblyDefinition<any, TResult> {
+    const next = new AssemblyDefinition<any, TResult>();
     next._nodes = [...this._nodes];
     if (schema) {
       next._paramPorts = schemaToManifest(schema).ports;
@@ -43,6 +69,7 @@ export class AssemblyDefinition<TParams extends object = object> {
     }
     next._resultPorts = [...this._resultPorts];
     next._resultFields = [...this._resultFields];
+    next._resultSchemaMode = this._resultSchemaMode;
     return next;
   }
 
@@ -52,14 +79,21 @@ export class AssemblyDefinition<TParams extends object = object> {
    * the typed result ports that every `.result({...})` field must be declared
    * against.
    */
-  resultSchema<T extends object = object>(): AssemblyDefinition<TParams>;
-  resultSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<TParams>;
-  resultSchema(schema?: SchemaObject): AssemblyDefinition<TParams> {
-    const next = new AssemblyDefinition<TParams>();
+  resultSchema<T extends object = never>(): AssemblyDefinition<TParams, T>;
+  resultSchema<S extends SchemaObject>(schema: S): AssemblyDefinition<TParams, InferSchema<S>>;
+  resultSchema(schema?: SchemaObject): AssemblyDefinition<TParams, any> {
+    if (this._resultSchemaMode !== "none") {
+      throw new Error(
+        "Assembly result schema is already declared. Declare it once, then provide its mapping with .result({...})."
+      );
+    }
+
+    const next = new AssemblyDefinition<TParams, any>();
     next._nodes = [...this._nodes];
     next._paramPorts = [...this._paramPorts];
-    next._resultPorts = schema ? schemaToManifest(schema).ports : [...this._resultPorts];
+    next._resultPorts = schema ? schemaToManifest(schema).ports : [];
     next._resultFields = [...this._resultFields];
+    next._resultSchemaMode = schema ? "runtime" : "typed";
     return next;
   }
 
@@ -70,12 +104,74 @@ export class AssemblyDefinition<TParams extends object = object> {
    * `.withParams()`: a capability `.result`/`.params` field, an assembly
    * `.params` field, or a literal.
    */
-  result(fields: Record<string, ParamValue<unknown>>): this {
-    for (const [name, value] of Object.entries(fields)) {
-      if (value === undefined) continue;
-      const source = toResultSource(name, value);
-      this._resultFields.push({ name, source });
+  result(fields: ResultArgument<TResult>): this {
+    if (this._resultSchemaMode === "none") {
+      throw new Error(
+        "Cannot declare Assembly result mappings before a result schema. " +
+        "Call .resultSchema<ResultType>() or .resultSchema({...}) first."
+      );
     }
+    if (this._resultFields.length > 0) {
+      throw new Error(
+        "Assembly result mappings are already defined. Combine all output fields into one .result({...}) call."
+      );
+    }
+    if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
+      throw new Error("Assembly .result(...) expects an object mapping result field names to references or literal values.");
+    }
+
+    const entries = Object.entries(fields as Record<string, unknown>);
+    if (entries.length === 0) {
+      throw new Error("Assembly .result(...) must map at least one result field.");
+    }
+
+    if (this._resultSchemaMode === "runtime") {
+      const schemaNames = new Set(this._resultPorts.map((port) => port.name));
+      const suppliedNames = new Set(entries.map(([name]) => name));
+      for (const [name] of entries) {
+        if (!schemaNames.has(name)) {
+          const declared = this._resultPorts.map((port) => port.name);
+          throw new Error(
+            `Assembly result field "${name}" is not declared by .resultSchema(...). ` +
+            `Declared fields: ${declared.length ? declared.join(", ") : "(none)"}.`
+          );
+        }
+      }
+      for (const port of this._resultPorts) {
+        if (port.required && !suppliedNames.has(port.name)) {
+          throw new Error(
+            `Assembly result schema marks "${port.name}" as required, but .result({...}) does not map it. ` +
+            `Add "${port.name}" to the result mapping or make the schema field optional.`
+          );
+        }
+      }
+    }
+
+    // Build all mappings off to the side. If one reference is invalid, leave
+    // the Assembly untouched so the author can correct and retry the call.
+    const typeOnlyPorts = this._resultSchemaMode === "typed"
+      ? entries.map(([name]) => ({ name, type: "any" as const, required: true }))
+      : undefined;
+    const mappedFields: AssemblyResultFieldManifest[] = [];
+
+    for (const [name, value] of entries) {
+      if (value === undefined) {
+        throw new Error(
+          `Assembly result field "${name}" is undefined. Provide a capability reference or a literal value.`
+        );
+      }
+      let source: ValueRefManifest;
+      try {
+        source = toResultSource(name, value);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Assembly result field "${name}" could not be mapped: ${detail}`);
+      }
+      mappedFields.push({ name, source });
+    }
+
+    if (typeOnlyPorts) this._resultPorts = typeOnlyPorts;
+    this._resultFields.push(...mappedFields);
     return this;
   }
 
@@ -94,7 +190,14 @@ export class AssemblyDefinition<TParams extends object = object> {
 
   toManifest(): AssemblyManifest {
     if (this._nodes.length === 0) {
-      throw new Error("Assembly has no definition");
+      throw new Error(
+        "Assembly has no capability definitions. Add at least one capability with .run(...) or .withParams(...)."
+      );
+    }
+    if (this._resultSchemaMode !== "none" && this._resultFields.length === 0) {
+      throw new Error(
+        "Assembly result schema was declared but no result mapping was provided. Add .result({...}) after .resultSchema(...)."
+      );
     }
 
     const capabilityDefs = new Map<string, CapabilityDefinition<object, object>>();
@@ -117,13 +220,13 @@ export class AssemblyDefinition<TParams extends object = object> {
     };
 
     if (this._paramPorts.length > 0) {
-      manifest.params = this._paramPorts.map((p) => ({ ...p }));
+      manifest.params = this._paramPorts.map(clonePortManifest);
     }
 
     if (this._resultFields.length > 0) {
       this.validateResultFields(capabilityDefs);
       manifest.result = {
-        schema: this._resultPorts.map((p) => ({ ...p })),
+        schema: this._resultPorts.map(clonePortManifest),
         fields: this._resultFields.map((f) => ({
           name: f.name,
           source: cloneSource(f.source),
@@ -166,7 +269,11 @@ export class AssemblyDefinition<TParams extends object = object> {
         }
         const ports = source.kind === "capabilityResult" ? def.toManifest().results : def.toManifest().params;
         const root = camelToSnake(source.path[0]!);
-        if (!ports.some((p) => camelToSnake(p.name) === root)) {
+        // An empty port list means the capability uses a type-only/untyped
+        // contract (for example a built-in whose result shape is owned by N.O.R.E.).
+        // There is no runtime port metadata to validate against; TypeScript's
+        // declared result type remains the authoring-time check.
+        if (ports.length > 0 && !ports.some((p) => camelToSnake(p.name) === root)) {
           throw new Error(
             `${prefix}: capability "${capability}" declares no ${
               source.kind === "capabilityResult" ? "result" : "param"
@@ -178,6 +285,13 @@ export class AssemblyDefinition<TParams extends object = object> {
       }
     }
   }
+}
+
+function clonePortManifest(port: PortManifest): PortManifest {
+  return {
+    ...port,
+    rules: port.rules ? cloneFieldRules(port.rules as FieldRules) : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------

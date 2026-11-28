@@ -70,14 +70,31 @@ Commands:
 `);
 }
 
-main().catch((error) => {
-    console.error("Neuron SDK error");
+function printError(error: unknown, seen = new Set<unknown>()): void {
+    if (seen.has(error)) {
+        console.error("[cyclic error cause]");
+        return;
+    }
+    seen.add(error);
 
-    if (error instanceof Error) {
-        console.error(error.message);
-    } else {
+    if (!(error instanceof Error)) {
         console.error(error);
+        return;
     }
 
+    // The stack includes the Assembly entry file and source line for errors
+    // thrown while evaluating a project. Printing only message used to hide it.
+    console.error(error.stack ?? `${error.name}: ${error.message}`);
+
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (cause !== undefined) {
+        console.error("Caused by:");
+        printError(cause, seen);
+    }
+}
+
+main().catch((error) => {
+    console.error("Neuron SDK error");
+    printError(error);
     process.exit(1);
 });

@@ -12,13 +12,14 @@ sequenceDiagram
     participant C as neuron CLI
     participant R as Project runtime (loopback TCP)
 
-    U->>C: neuron build
+    U->>C: neuron
     C->>C: build project → canonical manifest
     C->>C: compile → resolve modules → freeze versions
-    C->>R: start project runtime if needed (discovered via .neuron/runtime/)
+    C->>R: start temporary runtime for registration
     C->>R: register compiled assembly + frozen capability runtimes
     R-->>C: assembly key
-    C-->>U: built and registered with key
+    C->>C: stop temporary registration runtime
+    C->>R: start foreground project runtime
 
     U->>C: neuron run --params '{...}'
     C->>R: synchronous run request (discovered endpoint)
@@ -67,7 +68,21 @@ The following flags are available on every `neuron` command.
 | `-h, --help`         | Help for the command                                             |
 | `--version`          | Print the CLI version and exit                                   |
 
+Bare `neuron` is the project's development entry point: it runs the same build and registration pipeline as `neuron build`, then starts the foreground project runtime. Use `neuron build` when you only want to build/register; it does not leave the foreground runtime running.
+
 ## Command Reference
+
+### `neuron`
+
+Build and register the current project's Assemblies, then start its foreground runtime.
+
+```bash
+neuron
+```
+
+This runs the same build pipeline as `neuron build` before starting N.O.R.E. Use
+`neuron build` alone when you want to build and register without leaving the
+foreground runtime running.
 
 ### `neuron version`
 

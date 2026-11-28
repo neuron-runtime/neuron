@@ -1,5 +1,7 @@
 # Neuron
 
+> **Run a project:** from a directory containing `neuron.config.*`, run `neuron`. The bare command builds and registers the project's declared Assemblies, then starts the foreground runtime. Use `neuron build` to build without starting the runtime.
+
 ![Neuron](https://raw.githubusercontent.com/neuron-runtime/.github/main/profile/brand.png)
 
 A runtime for building and operating complex software systems from composable, executable capabilities.
@@ -56,10 +58,7 @@ Capabilities are reached through contracts, not through integration code that mi
 git clone https://github.com/neuron-runtime/neuron.git
 cd neuron/examples/hello
 
-# Build the assembly
-neuron build
-
-# Start the project runtime in one terminal
+# Build/register the assembly automatically and start the project runtime
 neuron
 
 # Run the assembly in another terminal

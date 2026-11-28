@@ -106,6 +106,14 @@ Assembly()
         })
     );
 
+const booleanCapability = Capability("boolean-result").resultSchema<{ active: boolean }>();
+  booleanCapability.result.active.and(booleanCapability.result.active);
+  // @ts-expect-error boolean expressions cannot be ordered.
+  booleanCapability.result.active.greaterThan(true);
+  // @ts-expect-error string expressions do not support ordered comparison.
+  githubRead.result.content.greaterThan("abc");
+  githubRead.result.metadata.size.greaterThan(10);
+
 // ---------------------------------------------------------------------------
 // Fan-in: multiple sources binding to the same target capability field
 // ---------------------------------------------------------------------------
@@ -151,6 +159,56 @@ Assembly()
         summary: analyzeContent.result.summary,
         sha: githubRead.result.sha,
     });
+
+const noResultType = Assembly().resultSchema();
+
+// @ts-expect-error type-only Assembly result schemas must declare their TypeScript result type.
+noResultType.result({ summary: "ok", sha: "abc" });
+
+const typedAssemblyResult = Assembly().resultSchema<AssemblyResult>();
+typedAssemblyResult.result({ summary: "ok", sha: "abc" });
+
+// @ts-expect-error required assembly result fields cannot be omitted.
+typedAssemblyResult.result({ summary: "ok" });
+
+// @ts-expect-error assembly result fields must use the declared value types.
+typedAssemblyResult.result({ summary: 42, sha: "abc" });
+
+// @ts-expect-error undeclared assembly result fields are rejected.
+typedAssemblyResult.result({ summary: "ok", sha: "abc", extra: true });
+
+type UndefinedValueResult = { requiredValue: string | undefined; optionalValue?: string };
+const resultWithUndefined = Assembly().resultSchema<UndefinedValueResult>();
+resultWithUndefined.result({ requiredValue: "present" });
+
+// @ts-expect-error a required property remains required even if its value includes undefined.
+resultWithUndefined.result({ optionalValue: "optional" });
+
+// @ts-expect-error undefined is not a valid mapped result value.
+resultWithUndefined.result({ requiredValue: undefined });
+
+const paramsWithUndefined = Capability("params-with-undefined").paramsSchema<{
+    requiredValue: string | undefined;
+}>();
+
+// @ts-expect-error a required capability parameter cannot be omitted.
+paramsWithUndefined.withParams({});
+paramsWithUndefined.withParams({ requiredValue: "present" });
+
+// @ts-expect-error undefined is not a valid capability parameter binding.
+paramsWithUndefined.withParams({ requiredValue: undefined });
+
+const runtimeAssemblyResult = Assembly().resultSchema({
+    name: string().required(),
+    count: number().required(),
+});
+runtimeAssemblyResult.result({ name: "sample", count: 1 });
+
+// @ts-expect-error runtime schema field values are type checked.
+runtimeAssemblyResult.result({ name: "sample", count: "one" });
+
+// @ts-expect-error an Assembly must declare resultSchema before result.
+Assembly().result({ summary: "ok" });
 
 // The type-only resultSchema form and the schema form both accept `.result()`.
 Assembly().resultSchema({ summary: string(), sha: string() });

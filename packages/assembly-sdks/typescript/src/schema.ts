@@ -243,6 +243,26 @@ export function record<T extends object = Record<string, unknown>>(): RecordFiel
   return field;
 }
 
+/**
+ * Deep-copies schema rules at the manifest boundary. Schema fields are mutable
+ * builders; a manifest must be a snapshot and must not change when a builder is
+ * reused or modified after schema declaration.
+ */
+export function cloneFieldRules<T extends FieldRules>(rules: T): T {
+  const cloneValue = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(cloneValue);
+    if (value !== null && typeof value === "object") {
+      const clone: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        clone[key] = cloneValue(entry);
+      }
+      return clone;
+    }
+    return value;
+  };
+  return cloneValue(rules) as T;
+}
+
 export function schemaToManifest(schema: SchemaObject): {
   ports: Array<{
     name: string;
@@ -261,7 +281,7 @@ export function schemaToManifest(schema: SchemaObject): {
   const rules: Record<string, FieldRules> = {};
 
   for (const [name, field] of Object.entries(schema)) {
-    const fieldRules = field.__rules;
+    const fieldRules = cloneFieldRules(field.__rules);
     const type = normalizeType(fieldRules.type);
     ports.push({
       name,

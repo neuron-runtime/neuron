@@ -13,7 +13,7 @@ import {
   type Expressionify,
   type SourceContext,
 } from "./expression.js";
-import { schemaToManifest, type FieldRules, type InferSchema, type SchemaObject } from "./schema.js";
+import { cloneFieldRules, schemaToManifest, type FieldRules, type InferSchema, type SchemaObject } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,13 +121,13 @@ export type Condition = {
 export type ParamValue<T> = T | Expression<T> | Expressionify<Exclude<T, undefined>>;
 
 type RequiredKeys<T extends object> = {
-  [K in keyof T]-?: undefined extends T[K] ? never : K;
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
 }[keyof T];
 
 type OptionalKeys<T extends object> = Exclude<keyof T, RequiredKeys<T>>;
 
 export type ParamBindings<T extends object> = {
-  [K in RequiredKeys<T>]: ParamValue<T[K]>;
+  [K in RequiredKeys<T>]: ParamValue<Exclude<T[K], undefined>>;
 } & {
   [K in OptionalKeys<T>]?: ParamValue<Exclude<T[K], undefined>>;
 };
@@ -384,8 +384,8 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
     return {
       name: this.ref,
       capabilityRuntime: this.manifestRuntime(),
-      params: this._state.paramPorts,
-      results: this._state.resultPorts,
+      params: this._state.paramPorts.map(clonePortManifest),
+      results: this._state.resultPorts.map(clonePortManifest),
     };
   }
 
@@ -411,6 +411,13 @@ export class CapabilityDefinition<TParams extends object = object, TResult exten
       ...patch,
     });
   }
+}
+
+function clonePortManifest(port: PortManifest): PortManifest {
+  return {
+    ...port,
+    rules: port.rules ? cloneFieldRules(port.rules as FieldRules) : undefined,
+  };
 }
 
 /**
