@@ -145,15 +145,14 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
           );
         }
       }
-    } else {
-      // A type-only schema has no runtime reflection. Its field names come
-      // from this mapping and use the any type because TypeScript types are erased.
-      this._resultPorts = entries.map(([name]) => ({
-        name,
-        type: "any",
-        required: true,
-      }));
     }
+
+    // Build all mappings off to the side. If one reference is invalid, leave
+    // the Assembly untouched so the author can correct and retry the call.
+    const typeOnlyPorts = this._resultSchemaMode === "typed"
+      ? entries.map(([name]) => ({ name, type: "any" as const, required: true }))
+      : undefined;
+    const mappedFields: AssemblyResultFieldManifest[] = [];
 
     for (const [name, value] of entries) {
       if (value === undefined) {
@@ -168,8 +167,11 @@ export class AssemblyDefinition<TParams extends object = object, TResult extends
         const detail = error instanceof Error ? error.message : String(error);
         throw new Error(`Assembly result field "${name}" could not be mapped: ${detail}`);
       }
-      this._resultFields.push({ name, source });
+      mappedFields.push({ name, source });
     }
+
+    if (typeOnlyPorts) this._resultPorts = typeOnlyPorts;
+    this._resultFields.push(...mappedFields);
     return this;
   }
 
