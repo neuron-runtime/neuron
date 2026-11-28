@@ -49,6 +49,22 @@ describe("schema → manifest conversion", () => {
   });
 });
 
+  it("snapshots mutable schema builder rules", () => {
+    const field = string().min(3);
+    const manifest = schemaToManifest({ name: field });
+
+    field.max(12);
+
+    expect(manifest.ports[0]?.rules).toEqual({
+      type: "string",
+      minLength: 3,
+    });
+    expect(manifest.rules.name).toEqual({
+      type: "string",
+      minLength: 3,
+    });
+  });
+
 describe("Infer type utility", () => {
   it("extracts field types from a schema object", () => {
     const User = {
